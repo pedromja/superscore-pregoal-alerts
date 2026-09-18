@@ -1,8 +1,35 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AlertSettings, Fixture, MomentumPayload } from '../src/lib/types.ts'
+import { parseMarket } from '../src/lib/market.ts'
+import type { AlertSettings, Fixture, Market, MomentumPayload } from '../src/lib/types.ts'
 import { DATA_DIR, MATCHES_DIR } from './config.ts'
 import type { GoalRecord, LoggedAlert, ParamVersion, PushSub, StoredMatch } from './types.ts'
+
+const FILES: Record<
+  Market,
+  {
+    alerts: string
+    events: string
+    params: string
+    history: string
+    proposal: string
+  }
+> = {
+  goals: {
+    alerts: 'alerts.json',
+    events: 'goals.json',
+    params: 'params.json',
+    history: 'params_history.json',
+    proposal: 'proposal.json',
+  },
+  corners: {
+    alerts: 'alerts_corners.json',
+    events: 'corners.json',
+    params: 'params_corners.json',
+    history: 'params_history_corners.json',
+    proposal: 'proposal_corners.json',
+  },
+}
 
 function readJson<T>(file: string, fallback: T): T {
   const path = join(DATA_DIR, file)
@@ -18,6 +45,14 @@ function writeJson(file: string, value: unknown): void {
   writeFileSync(join(DATA_DIR, file), JSON.stringify(value, null, 2))
 }
 
+export function loadActiveMarket(): Market {
+  return parseMarket(readJson<{ market?: string }>('market.json', {}).market)
+}
+
+export function saveActiveMarket(market: Market): void {
+  writeJson('market.json', { market: parseMarket(market) })
+}
+
 export function loadSubscriptions(): PushSub[] {
   return readJson('subscriptions.json', [])
 }
@@ -26,20 +61,20 @@ export function saveSubscriptions(items: PushSub[]): void {
   writeJson('subscriptions.json', items)
 }
 
-export function loadAlerts(): LoggedAlert[] {
-  return readJson('alerts.json', [])
+export function loadAlerts(market: Market = 'goals'): LoggedAlert[] {
+  return readJson(FILES[market].alerts, [])
 }
 
-export function saveAlerts(items: LoggedAlert[]): void {
-  writeJson('alerts.json', items)
+export function saveAlerts(items: LoggedAlert[], market: Market = 'goals'): void {
+  writeJson(FILES[market].alerts, items)
 }
 
-export function loadGoals(): GoalRecord[] {
-  return readJson('goals.json', [])
+export function loadGoals(market: Market = 'goals'): GoalRecord[] {
+  return readJson(FILES[market].events, [])
 }
 
-export function saveGoals(items: GoalRecord[]): void {
-  writeJson('goals.json', items)
+export function saveGoals(items: GoalRecord[], market: Market = 'goals'): void {
+  writeJson(FILES[market].events, items)
 }
 
 export function loadSent(): string[] {
@@ -58,28 +93,28 @@ export function savePrimed(items: string[]): void {
   writeJson('primed.json', items)
 }
 
-export function loadParams(): AlertSettings | null {
-  return readJson<AlertSettings | null>('params.json', null)
+export function loadParams(market: Market = 'goals'): AlertSettings | null {
+  return readJson<AlertSettings | null>(FILES[market].params, null)
 }
 
-export function saveParams(settings: AlertSettings): void {
-  writeJson('params.json', settings)
+export function saveParams(settings: AlertSettings, market: Market = 'goals'): void {
+  writeJson(FILES[market].params, { ...settings, market })
 }
 
-export function loadHistory(): ParamVersion[] {
-  return readJson('params_history.json', [])
+export function loadHistory(market: Market = 'goals'): ParamVersion[] {
+  return readJson(FILES[market].history, [])
 }
 
-export function saveHistory(items: ParamVersion[]): void {
-  writeJson('params_history.json', items)
+export function saveHistory(items: ParamVersion[], market: Market = 'goals'): void {
+  writeJson(FILES[market].history, items)
 }
 
-export function loadProposal(): ParamVersion | null {
-  return readJson<ParamVersion | null>('proposal.json', null)
+export function loadProposal(market: Market = 'goals'): ParamVersion | null {
+  return readJson<ParamVersion | null>(FILES[market].proposal, null)
 }
 
-export function saveProposal(item: ParamVersion | null): void {
-  writeJson('proposal.json', item)
+export function saveProposal(item: ParamVersion | null, market: Market = 'goals'): void {
+  writeJson(FILES[market].proposal, item)
 }
 
 export function saveMatch(match: StoredMatch): void {
@@ -90,13 +125,17 @@ export function saveMatch(match: StoredMatch): void {
 }
 
 export function loadMatch(fixtureId: string): StoredMatch | null {
-  const path = join(MATCHES_DIR, `${fixtureId}.json`)
+  const path = join(MATCHES_DIR, `${matchPath(fixtureId)}`)
   if (!existsSync(path)) return null
   try {
     return JSON.parse(readFileSync(path, 'utf8')) as StoredMatch
   } catch {
     return null
   }
+}
+
+function matchPath(fixtureId: string): string {
+  return `${fixtureId}.json`
 }
 
 export function listMatches(): StoredMatch[] {
@@ -107,24 +146,47 @@ export function listMatches(): StoredMatch[] {
     .filter((m): m is StoredMatch => m !== null)
 }
 
-export function upsertAlerts(incoming: LoggedAlert[]): LoggedAlert[] {
-  const alerts = loadAlerts()
+export function upsertAlerts(
+  incoming: LoggedAlert[],
+  market: Market = 'goals',
+): LoggedAlert[] {
+  const alerts = loadAlerts(market)
   const byId = new Map(alerts.map((a) => [a.id, a]))
   for (const item of incoming) {
     const prev = byId.get(item.id)
-    byId.set(item.id, prev ? { ...item, ...prev, ...item, feedback: prev.feedback ?? item.feedback } : item)
+    byId.set(
+      item.id,
+      prev
+        ? { ...item, ...prev, ...item, feedback: prev.feedback ?? item.feedback, market }
+        : { ...item, market },
+    )
   }
   const next = [...byId.values()]
-  saveAlerts(next)
+  saveAlerts(next, market)
   return next
 }
 
-export function upsertGoals(incoming: GoalRecord[]): void {
-  const goals = loadGoals()
+export function upsertGoals(
+  incoming: GoalRecord[],
+  market: Market = 'goals',
+): void {
+  const goals = loadGoals(market)
   const key = (g: GoalRecord) => `${g.fixtureId}:${g.period}:${g.min}:${g.side}`
   const byId = new Map(goals.map((g) => [key(g), g]))
-  for (const item of incoming) byId.set(key(item), { ...byId.get(key(item)), ...item })
-  saveGoals([...byId.values()])
+  for (const item of incoming) {
+    byId.set(key(item), { ...byId.get(key(item)), ...item, market })
+  }
+  saveGoals([...byId.values()], market)
+}
+
+export function sentKey(market: Market, fixtureId: string, alertId: string): string {
+  return market === 'goals'
+    ? `${fixtureId}:${alertId}`
+    : `${market}:${fixtureId}:${alertId}`
+}
+
+export function primedKey(market: Market, fixtureId: string): string {
+  return market === 'goals' ? fixtureId : `${market}:${fixtureId}`
 }
 
 export function markSent(key: string): boolean {

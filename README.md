@@ -1,8 +1,11 @@
-# SuperScore · Alertas pré-golo
+# SuperScore · Alertas pré-golo / pré-canto
 
-Painel web (PT-PT) que lê o **attacking momentum** SuperScore e dispara alertas que devem **preceder** o golo. Um pico no mesmo minuto do golo é coincidente e **não** conta como acerto.
+Painel web (PT-PT) que lê o **attacking momentum** SuperScore e dispara alertas que devem **preceder** o golo ou o canto. Um pico no mesmo minuto do evento é coincidente e **não** conta como acerto.
 
-Treino de referência: 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/Lisbon).
+O mercado activo escolhe-se no cabeçalho: **Golos | Cantos**. Golos é o default; cantos usam limiares treinados à parte e ficheiros de aprendizagem separados.
+
+Treino de referência (golos): 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/Lisbon).
+Treino de cantos: 95 jogos, 873 cantos (`type=14`), mesmas datas.
 
 ## Como correr
 
@@ -38,7 +41,7 @@ npm start         # produção: um processo Node (UI + API + poller) em 0.0.0.0:
 
 ## Web Push (app fechada)
 
-O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras e faz `webpush.sendNotification` para as subscriptions guardadas em `data/subscriptions.json`. Deduplica por `fixtureId:alertId`. O primeiro snapshot de um jogo **não** envia push.
+O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras do **mercado activo** e faz `webpush.sendNotification` para as subscriptions guardadas em `data/subscriptions.json`. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. Título, corpo e `tag` da notificação identificam o mercado (`pregoal:` vs `precantos:`).
 
 ### Gerar VAPID
 
@@ -93,9 +96,9 @@ Golos sem pré-alerta no horizonte = misses (recall).
 
 **Recalcular** faz uma grelha leve em torno dos defaults (spike 70–90, swing 40–70, sustained 2–5 / 25–40). O score é **0,4×precisão(≤5 min) + 0,6×precisão(longo)**, com penalização se alertas/jogo > 12. A guarda automática (≥1pp precisão sem cair >3pp no recall) usa o **horizonte longo**.
 
-O histórico fica em `data/params_history.json`. Os defaults de treino nunca são substituídos em silêncio.
+O histórico fica em `data/params_history.json` (golos) e `data/params_history_corners.json` (cantos). Os defaults de treino nunca são substituídos em silêncio. Alertas, eventos e parâmetros nunca se misturam entre mercados.
 
-Na Aprendizagem: **Importar amostras Celtic/Drava** para ter métricas imediatamente.
+Na Aprendizagem: **Importar amostras Celtic/Drava** para ter métricas imediatamente (no mercado activo).
 
 ## Deploy permanente
 
@@ -159,6 +162,8 @@ Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 
 ## Regras (defaults do treino)
 
+### Golos (default)
+
 | Regra | Condição |
 |---|---|
 | **Primária** | `\|v\| ≥ 80` **e** (`\|Δ1\| ≥ 50` **ou** `\|v\| ≥ 30` × 3 min, mesmo lado) |
@@ -167,7 +172,17 @@ Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 
 Avaliação estrita `alert_minute < goal_minute`. Spike70 sozinho não é regra.
 
+### Cantos (`type=14`)
+
+| Regra | Condição |
+|---|---|
+| **Primária** | `\|v\| ≥ 60` **e** (`\|Δ1\| ≥ 40` **ou** `\|v\| ≥ 25` × 3 min, mesmo lado) |
+| **Secundária** | `\|v\| ≥ 20` × 5 min, mesmo lado |
+| **Reserva** | `\|v\| ≥ 70` **e** (`\|Δ1\| ≥ 40` **ou** `\|v\| ≥ 25` × 3 min, mesmo lado) |
+
+Não se reutiliza Spike80∧(Swing50∨Sustained3@30) para cantos. Avaliação estrita `alert_minute < corner_minute`.
+
 ## APIs SuperScore
 
 - Jogos: proxy `/api/ss-fixtures/by-date/{region}` · `status` 100 ≈ FT · `state` 1 = ao vivo.
-- Momentum: `/api/ss-momentum?fixture-id=` · golos `type === 4` (1=casa, 2=fora).
+- Momentum: `/api/ss-momentum?fixture-id=` · golos `type === 4` · cantos `type === 14` (1=casa, 2=fora).

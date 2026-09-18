@@ -6,29 +6,30 @@ import {
   HORIZON_SHORT,
   outcomeForAlert,
 } from '../src/lib/horizons.ts'
+import { defaultsFor, parseMarket } from '../src/lib/market.ts'
 import {
-  DEFAULT_SETTINGS,
   evaluateAlerts,
   evaluateReplay,
-  extractGoals,
+  extractMarketEvents,
   RULE_SHORT,
 } from '../src/lib/rules.ts'
 import type {
   AlertSettings,
   FeedAlert,
+  Market,
   MomentumPayload,
   RuleId,
 } from '../src/lib/types.ts'
 import { LEARN_AUTO_MIN_OUTCOMES, LEARN_WINDOW, ROOT } from './config.ts'
 import {
   listMatches,
+  loadActiveMarket,
   loadAlerts,
   loadGoals,
   loadHistory,
   loadParams,
   loadProposal,
   saveAlerts,
-  saveGoals,
   saveHistory,
   saveMatch,
   saveParams,
@@ -48,18 +49,32 @@ import type {
 
 const RULES: RuleId[] = ['primary', 'secondary', 'fallback']
 
-export function currentSettings(): AlertSettings {
-  return { ...DEFAULT_SETTINGS, ...loadParams(), evaluationWindow: LEARN_WINDOW }
+export function resolveMarket(value?: unknown): Market {
+  return parseMarket(value, loadActiveMarket())
+}
+
+export function currentSettings(market?: Market): AlertSettings {
+  const m = market ?? loadActiveMarket()
+  return {
+    ...defaultsFor(m),
+    ...loadParams(m),
+    market: m,
+    evaluationWindow: LEARN_WINDOW,
+  }
 }
 
 export function snapshotOf(settings: AlertSettings): Partial<AlertSettings> {
   return {
+    market: settings.market,
     spikeThreshold: settings.spikeThreshold,
     swingComboThreshold: settings.swingComboThreshold,
     swingSecondaryThreshold: settings.swingSecondaryThreshold,
     sustainedThreshold: settings.sustainedThreshold,
     sustainedComboMinutes: settings.sustainedComboMinutes,
     sustainedFallbackMinutes: settings.sustainedFallbackMinutes,
+    fallbackSpikeThreshold: settings.fallbackSpikeThreshold,
+    sustainedSecondaryThreshold: settings.sustainedSecondaryThreshold,
+    sustainedSecondaryMinutes: settings.sustainedSecondaryMinutes,
     evaluationWindow: settings.evaluationWindow,
   }
 }
@@ -69,6 +84,7 @@ export function toLoggedAlert(
   settings: AlertSettings,
   sentPush = false,
 ): LoggedAlert {
+  const market = parseMarket(alert.market ?? settings.market)
   return {
     id: `${alert.fixtureId}:${alert.id}`,
     fixtureId: alert.fixtureId,
@@ -78,6 +94,7 @@ export function toLoggedAlert(
     index: alert.index,
     side: alert.side,
     ruleId: alert.rule,
+    market,
     features: {
       v: alert.momentum,
       delta1: alert.delta1,
@@ -99,13 +116,18 @@ export function toLoggedAlert(
   }
 }
 
-export function labelMatch(match: StoredMatch, window = LEARN_WINDOW): void {
-  const settings = currentSettings()
+export function labelMatch(
+  match: StoredMatch,
+  window = LEARN_WINDOW,
+  market?: Market,
+): void {
+  const m = market ?? loadActiveMarket()
+  const settings = currentSettings(m)
   const { points, alerts: fired } = evaluateAlerts(match.payload, {
     ...settings,
     evaluationWindow: window,
   })
-  const goals = extractGoals(match.payload, points)
+  const goals = extractMarketEvents(match.payload, points, m)
   const firedLite = fired.map((a) => ({
     min: a.min,
     period: a.period,
@@ -115,7 +137,7 @@ export function labelMatch(match: StoredMatch, window = LEARN_WINDOW): void {
     ),
   }))
 
-  const alerts = loadAlerts().map((alert) => {
+  const alerts = loadAlerts(m).map((alert) => {
     if (alert.fixtureId !== match.fixture.id) return alert
     const out = outcomeForAlert(
       {
@@ -129,6 +151,7 @@ export function labelMatch(match: StoredMatch, window = LEARN_WINDOW): void {
     )
     return {
       ...alert,
+      market: m,
       hit: out.hit5,
       leadMin: out.leadTime5,
       hit5: out.hit5,
@@ -139,7 +162,7 @@ export function labelMatch(match: StoredMatch, window = LEARN_WINDOW): void {
       labeledAt: new Date().toISOString(),
     }
   })
-  saveAlerts(alerts)
+  saveAlerts(alerts, m)
 
   const records: GoalRecord[] = goals.map((goal) => {
     const short = goalHadPrealert(goal, firedLite, points, 'short')
@@ -151,6 +174,7 @@ export function labelMatch(match: StoredMatch, window = LEARN_WINDOW): void {
       min: goal.min,
       index: goal.index,
       side: goal.side,
+      market: m,
       hadPrealert: short.hit,
       leadMin: short.lead,
       hadPrealert5: short.hit,
@@ -159,7 +183,7 @@ export function labelMatch(match: StoredMatch, window = LEARN_WINDOW): void {
       leadMinLong: long.lead,
     }
   })
-  upsertGoals(records)
+  upsertGoals(records, m)
 }
 
 function emptyMetrics(): RuleMetrics {
@@ -183,14 +207,15 @@ function weightedHit(alert: LoggedAlert, field: 'hit5' | 'hitLong'): boolean | n
 }
 
 const SCORE_NOTE =
-  'Score = 0,4×precisão(≤5 min) + 0,6×precisão(≤15 min ou fim da parte), menos penalização se alertas/jogo > 12. A guarda automática olha para o horizonte longo.'
+  'Score = 0,4×precisão(≤5 min) + 0,6×precisão(≤15 min ou fim da parte), menos penalização se alertas/jogo > 12 (cantos > 16). A guarda automática olha para o horizonte longo.'
 
 export function computeMetrics(
   settings: AlertSettings = currentSettings(),
 ): LearnSummary {
+  const market = parseMarket(settings.market)
   const matches = listMatches()
-  const alerts = loadAlerts().filter((a) => !a.coincident)
-  const goals = loadGoals()
+  const alerts = loadAlerts(market).filter((a) => !a.coincident)
+  const goals = loadGoals(market)
   const nMatches = Math.max(1, new Set(matches.map((m) => m.fixture.id)).size)
 
   function slice(rule: RuleId | undefined, field: 'hit5' | 'hitLong'): RuleMetrics {
@@ -233,7 +258,7 @@ export function computeMetrics(
     byRule[rule] = replayed
   }
 
-  const history = loadHistory()
+  const history = loadHistory(market)
   return {
     horizonShort: HORIZON_SHORT,
     horizonLongCap: HORIZON_LONG_CAP,
@@ -248,8 +273,12 @@ export function computeMetrics(
   }
 }
 
-function scoreOf(m: DualMetrics): number {
-  const over = Math.max(0, m.wLong.alertsPerMatch - 12)
+function overCap(market: Market): number {
+  return market === 'corners' ? 16 : 12
+}
+
+function scoreOf(m: DualMetrics, market: Market): number {
+  const over = Math.max(0, m.wLong.alertsPerMatch - overCap(market))
   return 0.4 * (m.w5.precision ?? 0) + 0.6 * (m.wLong.precision ?? 0) - 0.02 * over
 }
 
@@ -266,6 +295,7 @@ function replayRule(settings: AlertSettings, rule?: RuleId): DualMetrics {
 function replayAll(settings: AlertSettings): DualMetrics {
   const matches = listMatches()
   if (!matches.length) return { w5: emptyMetrics(), wLong: emptyMetrics() }
+  const market = parseMarket(settings.market)
 
   let alerts = 0
   let tp5 = 0
@@ -278,7 +308,7 @@ function replayAll(settings: AlertSettings): DualMetrics {
 
   for (const match of matches) {
     const { points, alerts: fired } = evaluateAlerts(match.payload, settings)
-    const goalsEv = extractGoals(match.payload, points)
+    const goalsEv = extractMarketEvents(match.payload, points, market)
     const usable = fired.filter(
       (a) => !goalsEv.some((g) => g.period === a.period && g.min === a.min),
     )
@@ -338,10 +368,38 @@ function around(center: number, step: number, min: number, max: number): number[
   return [...new Set(raw.map((n) => Math.min(max, Math.max(min, n))))]
 }
 
-export function recalculate(reason = 'manual'): ParamVersion {
-  const base = currentSettings()
-  const before = replayAll(base)
-  let best = { settings: base, metrics: before, score: scoreOf(before) }
+function candidateSettings(base: AlertSettings): AlertSettings[] {
+  const out: AlertSettings[] = []
+  if (base.market === 'corners') {
+    const spikes = around(base.spikeThreshold, 5, 50, 75)
+    const swings = around(base.swingComboThreshold, 10, 30, 60)
+    const fbSpike = around(base.fallbackSpikeThreshold, 5, 60, 80)
+    const sustT = around(base.sustainedThreshold, 5, 15, 35)
+    const sustN = around(base.sustainedComboMinutes, 1, 2, 5)
+    const sustSecN = around(base.sustainedSecondaryMinutes, 1, 3, 6)
+    for (const spikeThreshold of spikes) {
+      for (const swingComboThreshold of swings) {
+        for (const fallbackSpikeThreshold of fbSpike) {
+          for (const sustainedThreshold of sustT) {
+            for (const sustainedComboMinutes of sustN) {
+              for (const sustainedSecondaryMinutes of sustSecN) {
+                out.push({
+                  ...base,
+                  spikeThreshold,
+                  swingComboThreshold,
+                  fallbackSpikeThreshold,
+                  sustainedThreshold,
+                  sustainedComboMinutes,
+                  sustainedSecondaryMinutes,
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+    return out
+  }
 
   const spikes = around(base.spikeThreshold, 5, 70, 90)
   const swings = around(base.swingComboThreshold, 10, 40, 70)
@@ -349,14 +407,13 @@ export function recalculate(reason = 'manual'): ParamVersion {
   const sustT = around(base.sustainedThreshold, 5, 25, 40)
   const sustN = around(base.sustainedComboMinutes, 1, 2, 5)
   const sustF = around(base.sustainedFallbackMinutes, 1, 3, 5)
-
   for (const spikeThreshold of spikes) {
     for (const swingComboThreshold of swings) {
       for (const swingSecondaryThreshold of swing2) {
         for (const sustainedThreshold of sustT) {
           for (const sustainedComboMinutes of sustN) {
             for (const sustainedFallbackMinutes of sustF) {
-              const settings: AlertSettings = {
+              out.push({
                 ...base,
                 spikeThreshold,
                 swingComboThreshold,
@@ -364,15 +421,26 @@ export function recalculate(reason = 'manual'): ParamVersion {
                 sustainedThreshold,
                 sustainedComboMinutes,
                 sustainedFallbackMinutes,
-              }
-              const metrics = replayAll(settings)
-              const score = scoreOf(metrics)
-              if (score > best.score) best = { settings, metrics, score }
+              })
             }
           }
         }
       }
     }
+  }
+  return out
+}
+
+export function recalculate(reason = 'manual', market?: Market): ParamVersion {
+  const m = market ?? loadActiveMarket()
+  const base = currentSettings(m)
+  const before = replayAll(base)
+  let best = { settings: base, metrics: before, score: scoreOf(before, m) }
+
+  for (const settings of candidateSettings(base)) {
+    const metrics = replayAll(settings)
+    const score = scoreOf(metrics, m)
+    if (score > best.score) best = { settings, metrics, score }
   }
 
   const precisionGain =
@@ -398,22 +466,27 @@ export function recalculate(reason = 'manual'): ParamVersion {
         ? 'Precisão sobe ≥1pp sem recall cair >3pp — pode aplicar-se automaticamente.'
         : 'Proposta fora da guarda conservadora: confirme na UI antes de aplicar.',
   }
-  saveProposal(proposal)
+  saveProposal(proposal, m)
 
-  const labeled = loadAlerts().filter((a) => a.hit !== null || a.feedback).length
+  const labeled = loadAlerts(m).filter((a) => a.hit !== null || a.feedback).length
   if (proposal.autoEligible && labeled >= LEARN_AUTO_MIN_OUTCOMES && reason !== 'manual') {
-    return applyProposal(proposal.id, 'auto')
+    return applyProposal(proposal.id, 'auto', m)
   }
   return proposal
 }
 
-export function applyProposal(id: string, reason = 'manual'): ParamVersion {
-  const proposal = loadProposal()
+export function applyProposal(
+  id: string,
+  reason = 'manual',
+  market?: Market,
+): ParamVersion {
+  const m = market ?? loadActiveMarket()
+  const proposal = loadProposal(m)
   if (!proposal || (id !== proposal.id && id !== 'latest')) {
     throw new Error('Proposta inexistente')
   }
-  const prev = currentSettings()
-  saveParams(proposal.settings)
+  const prev = currentSettings(m)
+  saveParams({ ...proposal.settings, market: m }, m)
   const applied: ParamVersion = {
     ...proposal,
     applied: true,
@@ -421,20 +494,22 @@ export function applyProposal(id: string, reason = 'manual'): ParamVersion {
     ts: new Date().toISOString(),
     note: `Aplicado (${reason}). Antes spike ${prev.spikeThreshold} → ${proposal.settings.spikeThreshold}.`,
   }
-  saveHistory([...loadHistory(), applied])
-  saveProposal(applied)
+  saveHistory([...loadHistory(m), applied], m)
+  saveProposal(applied, m)
   return applied
 }
 
 export function setFeedback(
   alertId: string,
   feedback: 'up' | 'down' | null,
+  market?: Market,
 ): LoggedAlert {
-  const alerts = loadAlerts()
+  const m = market ?? loadActiveMarket()
+  const alerts = loadAlerts(m)
   const idx = alerts.findIndex((a) => a.id === alertId)
   if (idx < 0) throw new Error('Alerta não encontrado')
   alerts[idx] = { ...alerts[idx], feedback }
-  saveAlerts(alerts)
+  saveAlerts(alerts, m)
   return alerts[idx]
 }
 
@@ -442,15 +517,18 @@ export function ingestFeedAlerts(
   alerts: FeedAlert[],
   settings: AlertSettings,
   sentPush = false,
+  market?: Market,
 ): LoggedAlert[] {
+  const m = parseMarket(market ?? settings.market ?? alerts[0]?.market)
   const logged = alerts
     .filter((a) => !a.coincident)
-    .map((a) => toLoggedAlert(a, settings, sentPush))
-  return upsertAlerts(logged)
+    .map((a) => toLoggedAlert({ ...a, market: m }, settings, sentPush))
+  return upsertAlerts(logged, m)
 }
 
-export function seedDemos(): { matches: number; alerts: number } {
-  const settings = currentSettings()
+export function seedDemos(market?: Market): { matches: number; alerts: number } {
+  const m = market ?? loadActiveMarket()
+  const settings = currentSettings(m)
   const demos = [
     {
       id: 'demo-celtic-ferenc',
@@ -502,9 +580,10 @@ export function seedDemos(): { matches: number; alerts: number } {
       matchLabel: `${demo.team1} vs ${demo.team2}`,
       firedAt: new Date().toISOString(),
       coincident: replay.coincidentAlerts.some((c) => c.id === a.id),
+      market: m,
     }))
-    ingestFeedAlerts(feed, settings, false)
-    labelMatch(match)
+    ingestFeedAlerts(feed, settings, false, m)
+    labelMatch(match, LEARN_WINDOW, m)
     alerts += feed.filter((a) => !a.coincident).length
   }
   return { matches: demos.length, alerts }

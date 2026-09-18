@@ -62,3 +62,39 @@ export const TRAINING = {
     pct1to5: 25.92,
   },
 }
+
+export const TRAINING_CORNERS = {
+  nMatches: 95,
+  nEvents: 873,
+  dates: '2026-09-08 → 2026-09-17',
+  coincidence: {
+    spike70AtEvent: 19.47,
+    spike70Pre5: 38.14,
+    spike70OnlyAtEvent: 9.39,
+  },
+  primary: {
+    precision: 0.3007,
+    recall: 0.3288,
+    alertsPerMatch: 14.105,
+    fpPerMatch: 9.9,
+    medianLead: 3,
+    pct1to5: 32.88,
+    pct1to3: 23.48,
+  },
+  secondary: {
+    precision: 0.3504,
+    recall: 0.2955,
+    alertsPerMatch: 17.274,
+    fpPerMatch: 11.2,
+    medianLead: 2,
+    pct1to5: 29.55,
+  },
+  fallback: {
+    precision: 0.268,
+    recall: 0.2612,
+    alertsPerMatch: 9.821,
+    fpPerMatch: 7.2,
+    medianLead: 3,
+    pct1to5: 26.12,
+  },
+}

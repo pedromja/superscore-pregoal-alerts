@@ -1,3 +1,9 @@
+import {
+  defaultsFor,
+  eventTypeFor,
+  parseMarket,
+  ruleLabels,
+} from './market'
 import type {
   AlertSettings,
   AlertSignals,
@@ -12,28 +18,10 @@ import type {
   TimelinePoint,
 } from './types'
 
-export const DEFAULT_SETTINGS: AlertSettings = {
-  spikeThreshold: 80,
-  swingComboThreshold: 50,
-  swingSecondaryThreshold: 60,
-  sustainedThreshold: 30,
-  sustainedComboMinutes: 3,
-  sustainedFallbackMinutes: 4,
-  enablePrimary: true,
-  enableSecondary: true,
-  enableFallback: true,
-  evaluationWindow: 5,
-  notificationsEnabled: true,
-  notifyPrimary: true,
-  notifySecondary: false,
-  notifyFallback: false,
-}
+export const DEFAULT_SETTINGS: AlertSettings = defaultsFor('goals')
+export const DEFAULT_CORNER_SETTINGS: AlertSettings = defaultsFor('corners')
 
-export const RULE_LABELS: Record<RuleId, string> = {
-  primary: 'Primária · Spike80 ∧ (Swing50 ∨ Sustained3)',
-  secondary: 'Secundária · Swing |Δ1|≥60',
-  fallback: 'Reserva · Sustained |v|≥30 ×4',
-}
+export const RULE_LABELS: Record<RuleId, string> = ruleLabels(DEFAULT_SETTINGS)
 
 export const RULE_SHORT: Record<RuleId, string> = {
   primary: 'Primária',
@@ -91,7 +79,32 @@ export function normalizeTimeline(
   return points
 }
 
-function signalsAt(point: TimelinePoint, settings: AlertSettings): AlertSignals {
+function sustainedLengthAt(
+  points: TimelinePoint[],
+  index: number,
+  threshold: number,
+): number {
+  const start = points[index]
+  if (!start?.side) return 0
+  let length = 0
+  for (let k = index; k >= 0; k -= 1) {
+    const p = points[k]
+    if (p.side !== start.side || p.absValue < threshold) break
+    length += 1
+  }
+  return length
+}
+
+function signalsAt(
+  point: TimelinePoint,
+  settings: AlertSettings,
+  points: TimelinePoint[],
+): AlertSignals {
+  const secondarySustained = sustainedLengthAt(
+    points,
+    point.index,
+    settings.sustainedSecondaryThreshold,
+  )
   return {
     spike: point.absValue >= settings.spikeThreshold,
     swingCombo:
@@ -103,22 +116,28 @@ function signalsAt(point: TimelinePoint, settings: AlertSettings): AlertSignals 
     sustainedCombo: point.sustainedLength >= settings.sustainedComboMinutes,
     sustainedFallback:
       point.sustainedLength >= settings.sustainedFallbackMinutes,
+    fallbackSpike: point.absValue >= settings.fallbackSpikeThreshold,
+    sustainedSecondary:
+      secondarySustained >= settings.sustainedSecondaryMinutes,
   }
 }
 
 export function evaluatePoint(
   point: TimelinePoint,
   settings: AlertSettings,
+  points: TimelinePoint[] = [],
 ): FiredAlert[] {
   if (!point.side) return []
-  const signals = signalsAt(point, settings)
+  const signals = signalsAt(point, settings, points)
   const alerts: FiredAlert[] = []
+  const labels = ruleLabels(settings)
+  const market = parseMarket(settings.market)
 
   const push = (rule: RuleId) => {
     alerts.push({
       id: `${rule}-${point.period}-${point.min}-${point.index}`,
       rule,
-      ruleName: RULE_LABELS[rule],
+      ruleName: labels[rule],
       min: point.min,
       period: point.period,
       index: point.index,
@@ -137,11 +156,25 @@ export function evaluatePoint(
   ) {
     push('primary')
   }
-  if (settings.enableSecondary && signals.swingSecondary) {
-    push('secondary')
-  }
-  if (settings.enableFallback && signals.sustainedFallback) {
-    push('fallback')
+
+  if (market === 'corners') {
+    if (settings.enableSecondary && signals.sustainedSecondary) {
+      push('secondary')
+    }
+    if (
+      settings.enableFallback &&
+      signals.fallbackSpike &&
+      (signals.swingCombo || signals.sustainedCombo)
+    ) {
+      push('fallback')
+    }
+  } else {
+    if (settings.enableSecondary && signals.swingSecondary) {
+      push('secondary')
+    }
+    if (settings.enableFallback && signals.sustainedFallback) {
+      push('fallback')
+    }
   }
 
   return alerts
@@ -157,17 +190,18 @@ export function evaluateAlerts(
   const alerts: FiredAlert[] = []
   for (const point of points) {
     if (point.index > limit) break
-    alerts.push(...evaluatePoint(point, settings))
+    alerts.push(...evaluatePoint(point, settings, points))
   }
   return { points, alerts }
 }
 
-export function extractGoals(
+export function extractEvents(
   payload: MomentumPayload,
   points: TimelinePoint[],
+  eventType: number,
 ): GoalEvent[] {
   return payload.events
-    .filter((event) => event.type === 4)
+    .filter((event) => event.type === eventType)
     .map((event) => {
       const side: Side = event.side === 2 ? 'away' : 'home'
       const exact = points.find(
@@ -185,6 +219,28 @@ export function extractGoals(
     .sort((a, b) => a.index - b.index || a.period - b.period || a.min - b.min)
 }
 
+export function extractGoals(
+  payload: MomentumPayload,
+  points: TimelinePoint[],
+): GoalEvent[] {
+  return extractEvents(payload, points, eventTypeFor('goals'))
+}
+
+export function extractCorners(
+  payload: MomentumPayload,
+  points: TimelinePoint[],
+): GoalEvent[] {
+  return extractEvents(payload, points, eventTypeFor('corners'))
+}
+
+export function extractMarketEvents(
+  payload: MomentumPayload,
+  points: TimelinePoint[],
+  market = parseMarket(undefined),
+): GoalEvent[] {
+  return extractEvents(payload, points, eventTypeFor(parseMarket(market)))
+}
+
 function linkAlert(alert: FiredAlert, goal: GoalEvent): LinkedAlert {
   const leadMin = goal.index - alert.index
   return {
@@ -200,7 +256,7 @@ export function evaluateReplay(
   settings: AlertSettings,
 ): ReplayResult {
   const { points, alerts } = evaluateAlerts(payload, settings)
-  const goals = extractGoals(payload, points)
+  const goals = extractMarketEvents(payload, points, settings.market)
   const window = settings.evaluationWindow
 
   const coincidentAlerts = alerts.filter((alert) =>

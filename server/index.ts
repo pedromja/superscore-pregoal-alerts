@@ -1,6 +1,8 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import express from 'express'
+import { marketCopy } from '../src/lib/market.ts'
+import type { Market } from '../src/lib/types.ts'
 import {
   LEARN_AUTO_MIN_OUTCOMES,
   ROOT,
@@ -13,6 +15,7 @@ import {
   currentSettings,
   ingestFeedAlerts,
   recalculate,
+  resolveMarket,
   seedDemos,
   setFeedback,
 } from './learn.ts'
@@ -23,11 +26,27 @@ import {
   removeSubscription,
   sendPushToAll,
 } from './push.ts'
-import { loadAlerts, loadHistory, loadProposal, loadSubscriptions } from './store.ts'
+import {
+  loadActiveMarket,
+  loadAlerts,
+  loadHistory,
+  loadProposal,
+  loadSubscriptions,
+  saveActiveMarket,
+} from './store.ts'
 import type { PushSub } from './types.ts'
 
 const app = express()
 app.use(express.json({ limit: '2mb' }))
+
+function marketFromReq(req: express.Request): Market {
+  const q = req.query.market
+  const bodyMarket =
+    req.body && typeof req.body === 'object' && 'market' in req.body
+      ? (req.body as { market?: unknown }).market
+      : undefined
+  return resolveMarket(typeof q === 'string' ? q : bodyMarket)
+}
 
 app.get('/api/push/vapidPublicKey', (_req, res) => {
   res.json({ publicKey: publicVapidKey() })
@@ -67,13 +86,22 @@ app.get('/api/push/status', (_req, res) => {
   })
 })
 
-app.post('/api/push/test', async (_req, res) => {
+app.post('/api/push/test', async (req, res) => {
+  const market = marketFromReq(req)
+  const copy = marketCopy(market)
+  const rule = 'Primária'
+  const title =
+    market === 'goals'
+      ? `${rule} · Celtic vs Ferencváros`
+      : `${copy.pushPrefix} · ${rule} · Celtic vs Ferencváros`
+  const body =
+    market === 'goals' ? "38' · Fora · v −61" : `${copy.noun} · 38' · Fora · v −61`
   const result = await sendPushToAll({
-    title: 'Primária · Celtic vs Ferencváros',
-    body: "38' · Fora · v −61",
+    title,
+    body,
     url: '/#/monitor?alert=demo-teste%3Aprimary-1-38-0',
     alertKey: 'demo-teste:primary-1-38-0',
-    tag: 'pregoal:test',
+    tag: market === 'goals' ? 'pregoal:test' : 'precantos:test',
   })
   res.json(result)
 })
@@ -82,29 +110,54 @@ app.get('/api/poller/status', (_req, res) => {
   res.json(getPollerStatus())
 })
 
-app.get('/api/learn/summary', (_req, res) => {
+app.get('/api/learn/market', (_req, res) => {
+  res.json({ market: loadActiveMarket(), settings: currentSettings() })
+})
+
+app.put('/api/learn/market', (req, res) => {
+  const market = resolveMarket(
+    (req.body as { market?: unknown } | undefined)?.market,
+  )
+  saveActiveMarket(market)
+  res.json({ market, settings: currentSettings(market) })
+})
+
+app.post('/api/learn/market', (req, res) => {
+  const market = resolveMarket(
+    (req.body as { market?: unknown } | undefined)?.market,
+  )
+  saveActiveMarket(market)
+  res.json({ market, settings: currentSettings(market) })
+})
+
+app.get('/api/learn/summary', (req, res) => {
+  const market = marketFromReq(req)
+  const settings = currentSettings(market)
   res.json({
-    summary: computeMetrics(),
-    settings: currentSettings(),
-    proposal: loadProposal(),
-    history: loadHistory().slice(-12).reverse(),
-    recentAlerts: loadAlerts().slice(-40).reverse(),
+    market,
+    summary: computeMetrics(settings),
+    settings,
+    proposal: loadProposal(market),
+    history: loadHistory(market).slice(-12).reverse(),
+    recentAlerts: loadAlerts(market).slice(-40).reverse(),
     autoAfter: LEARN_AUTO_MIN_OUTCOMES,
   })
 })
 
 app.post('/api/learn/alerts', (req, res) => {
+  const market = marketFromReq(req)
   const alerts = Array.isArray(req.body) ? req.body : req.body?.alerts
   if (!Array.isArray(alerts)) {
     res.status(400).json({ error: 'alerts[] em falta' })
     return
   }
-  const stored = ingestFeedAlerts(alerts, currentSettings(), false)
-  res.json({ ok: true, n: stored.length })
+  const stored = ingestFeedAlerts(alerts, currentSettings(market), false, market)
+  res.json({ ok: true, n: stored.length, market })
 })
 
 app.post('/api/learn/feedback', (req, res) => {
   try {
+    const market = marketFromReq(req)
     const { id, feedback } = req.body as {
       id?: string
       feedback?: 'up' | 'down' | null
@@ -113,34 +166,43 @@ app.post('/api/learn/feedback', (req, res) => {
       res.status(400).json({ error: 'id em falta' })
       return
     }
-    res.json(setFeedback(id, feedback ?? null))
+    res.json(setFeedback(id, feedback ?? null, market))
   } catch (err) {
     res.status(404).json({ error: err instanceof Error ? err.message : 'erro' })
   }
 })
 
 app.post('/api/learn/recalculate', (req, res) => {
+  const market = marketFromReq(req)
   const reason = String((req.body as { reason?: string })?.reason || 'manual')
-  res.json(recalculate(reason))
+  res.json(recalculate(reason, market))
 })
 
 app.post('/api/learn/apply', (req, res) => {
   try {
+    const market = marketFromReq(req)
     const id = String((req.body as { id?: string })?.id || 'latest')
-    res.json(applyProposal(id, 'manual'))
+    res.json(applyProposal(id, 'manual', market))
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
   }
 })
 
-app.post('/api/learn/seed-demos', (_req, res) => {
-  const seeded = seedDemos()
-  const proposal = recalculate('seed-demos')
-  res.json({ ...seeded, proposal, summary: computeMetrics() })
+app.post('/api/learn/seed-demos', (req, res) => {
+  const market = marketFromReq(req)
+  const seeded = seedDemos(market)
+  const proposal = recalculate('seed-demos', market)
+  res.json({
+    ...seeded,
+    market,
+    proposal,
+    summary: computeMetrics(currentSettings(market)),
+  })
 })
 
-app.get('/api/learn/params', (_req, res) => {
-  res.json(currentSettings())
+app.get('/api/learn/params', (req, res) => {
+  const market = marketFromReq(req)
+  res.json(currentSettings(market))
 })
 
 app.use('/api/ss-fixtures', async (req, res) => {

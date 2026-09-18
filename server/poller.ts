@@ -1,5 +1,6 @@
-import { evaluateAlerts, extractGoals } from '../src/lib/rules.ts'
-import type { FeedAlert, Fixture } from '../src/lib/types.ts'
+import { marketCopy, pushTagFor } from '../src/lib/market.ts'
+import { evaluateAlerts, extractMarketEvents, RULE_SHORT } from '../src/lib/rules.ts'
+import type { FeedAlert, Fixture, Market } from '../src/lib/types.ts'
 import {
   POLLER_ENABLED,
   POLLER_INTERVAL_MS,
@@ -10,10 +11,13 @@ import { sendPushToAll } from './push.ts'
 import { fetchFixturesServer, fetchMomentumServer, lisbonDate } from './ss.ts'
 import {
   isPrimed,
+  loadActiveMarket,
   loadSent,
   markSent,
+  primedKey,
   primeFixture,
   saveMatch,
+  sentKey,
 } from './store.ts'
 import type { PollerStatus } from './types.ts'
 
@@ -31,18 +35,19 @@ export function getPollerStatus(): PollerStatus {
   return { ...status }
 }
 
-function copyFor(alert: FeedAlert): { title: string; body: string } {
+function copyFor(
+  alert: FeedAlert,
+  market: Market,
+): { title: string; body: string } {
+  const copy = marketCopy(market)
   const side = alert.side === 'home' ? 'Casa' : 'Fora'
   const sign = alert.momentum > 0 ? `+${alert.momentum}` : String(alert.momentum)
-  const rule =
-    alert.rule === 'primary'
-      ? 'Primária'
-      : alert.rule === 'secondary'
-        ? 'Secundária'
-        : 'Reserva'
+  const rule = RULE_SHORT[alert.rule]
+  const prefix = market === 'goals' ? rule : `${copy.pushPrefix} · ${rule}`
+  const bodyPrefix = market === 'goals' ? '' : `${copy.noun} · `
   return {
-    title: `${rule} · ${alert.matchLabel}`,
-    body: `${alert.min}' · ${side} · v ${sign}`,
+    title: `${prefix} · ${alert.matchLabel}`,
+    body: `${bodyPrefix}${alert.min}' · ${side} · v ${sign}`,
   }
 }
 
@@ -56,43 +61,56 @@ async function processFixture(fixture: Fixture): Promise<number> {
     updatedAt: new Date().toISOString(),
   })
 
-  const settings = currentSettings()
+  const market = loadActiveMarket()
+  const settings = currentSettings(market)
   const { points, alerts } = evaluateAlerts(payload, settings)
-  const goals = extractGoals(payload, points)
-  const goalKeys = new Set(goals.map((g) => `${g.period}-${g.min}-${g.index}`))
-  const first = !isPrimed(fixture.id)
-  if (first) primeFixture(fixture.id)
+  const events = extractMarketEvents(payload, points, market)
+  const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
+  const primedId = primedKey(market, fixture.id)
+  const first = !isPrimed(primedId)
+  if (first) primeFixture(primedId)
 
   const fresh: FeedAlert[] = alerts.map((alert) => ({
     ...alert,
     fixtureId: fixture.id,
     matchLabel: `${fixture.team1} vs ${fixture.team2}`,
     firedAt: new Date().toISOString(),
-    coincident: goalKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+    coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+    market,
   }))
 
   if (first) {
-    for (const alert of fresh) markSent(`${fixture.id}:${alert.id}`)
+    for (const alert of fresh) {
+      markSent(sentKey(market, fixture.id, alert.id))
+    }
     if (finished) {
-      ingestFeedAlerts(fresh, settings, false)
-      labelMatch({
-        fixture,
-        payload,
-        finished,
-        updatedAt: new Date().toISOString(),
-      })
+      ingestFeedAlerts(fresh, settings, false, market)
+      labelMatch(
+        {
+          fixture,
+          payload,
+          finished,
+          updatedAt: new Date().toISOString(),
+        },
+        undefined,
+        market,
+      )
     }
     return 0
   }
 
-  ingestFeedAlerts(fresh, settings, false)
+  ingestFeedAlerts(fresh, settings, false, market)
   if (finished) {
-    labelMatch({
-      fixture,
-      payload,
-      finished,
-      updatedAt: new Date().toISOString(),
-    })
+    labelMatch(
+      {
+        fixture,
+        payload,
+        finished,
+        updatedAt: new Date().toISOString(),
+      },
+      undefined,
+      market,
+    )
   }
 
   let sent = 0
@@ -101,16 +119,17 @@ async function processFixture(fixture: Fixture): Promise<number> {
     if (alert.rule === 'secondary' && !settings.notifySecondary) continue
     if (alert.rule === 'fallback' && !settings.notifyFallback) continue
     if (alert.rule === 'primary' && !settings.notifyPrimary) continue
-    const key = `${fixture.id}:${alert.id}`
+    const key = sentKey(market, fixture.id, alert.id)
     if (loadSent().includes(key)) continue
     if (!markSent(key)) continue
-    const copy = copyFor(alert)
+    const copy = copyFor(alert, market)
+    const alertKey = `${fixture.id}:${alert.id}`
     await sendPushToAll({
       title: copy.title,
       body: copy.body,
-      url: `/#/monitor?alert=${encodeURIComponent(key)}`,
-      alertKey: key,
-      tag: `pregoal:${key}`,
+      url: `/#/monitor?alert=${encodeURIComponent(alertKey)}`,
+      alertKey,
+      tag: pushTagFor(market, key),
     })
     sent += 1
   }

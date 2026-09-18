@@ -1,6 +1,7 @@
+import { marketCopy, parseMarket, pushTagFor } from './market'
 import { formatSigned, minuteLabel, sideLabel } from './format'
 import { RULE_SHORT } from './rules'
-import type { AlertSettings, FeedAlert, RuleId } from './types'
+import type { AlertSettings, FeedAlert, Market, RuleId } from './types'
 
 export type NotifyPermission = NotificationPermission | 'unsupported'
 
@@ -48,9 +49,17 @@ export function alertUrl(alertKey: string): string {
 }
 
 function notificationCopy(alert: FeedAlert): { title: string; body: string } {
+  const market = parseMarket(alert.market)
+  const copy = marketCopy(market)
+  const rule = RULE_SHORT[alert.rule]
+  const title =
+    market === 'goals'
+      ? `${rule} · ${alert.matchLabel}`
+      : `${copy.pushPrefix} · ${rule} · ${alert.matchLabel}`
+  const bodyPrefix = market === 'goals' ? '' : `${copy.noun} · `
   return {
-    title: `${RULE_SHORT[alert.rule]} · ${alert.matchLabel}`,
-    body: `${minuteLabel(alert.min, alert.period)} · ${sideLabel(alert.side)} · v ${formatSigned(alert.momentum)}`,
+    title,
+    body: `${bodyPrefix}${minuteLabel(alert.min, alert.period)} · ${sideLabel(alert.side)} · v ${formatSigned(alert.momentum)}`,
   }
 }
 
@@ -59,12 +68,13 @@ export async function showAlertNotification(alert: FeedAlert): Promise<void> {
   if (Notification.permission !== 'granted') return
 
   const key = feedAlertKey(alert)
+  const market = parseMarket(alert.market)
   const { title, body } = notificationCopy(alert)
   const payload = {
     type: 'SHOW_NOTIFICATION' as const,
     title,
     body,
-    tag: `pregoal:${key}`,
+    tag: pushTagFor(market, key),
     url: alertUrl(key),
     alertKey: key,
   }
@@ -88,15 +98,19 @@ export async function showAlertNotification(alert: FeedAlert): Promise<void> {
   })
 }
 
-export function buildTestAlert(): FeedAlert {
+export function buildTestAlert(market: Market = 'goals'): FeedAlert {
   return {
     id: 'primary-1-38-0',
     fixtureId: 'demo-teste',
     matchLabel: 'Celtic vs Ferencváros',
     firedAt: new Date().toISOString(),
     coincident: false,
+    market,
     rule: 'primary',
-    ruleName: 'Primária · Spike80 ∧ (Swing50 ∨ Sustained3)',
+    ruleName:
+      market === 'corners'
+        ? 'Primária · Spike60 ∧ (Swing40 ∨ Sustained3@25)'
+        : 'Primária · Spike80 ∧ (Swing50 ∨ Sustained3)',
     min: 38,
     period: 1,
     index: 0,
@@ -110,12 +124,14 @@ export function buildTestAlert(): FeedAlert {
       swingSecondary: true,
       sustainedCombo: false,
       sustainedFallback: false,
+      fallbackSpike: false,
+      sustainedSecondary: false,
     },
   }
 }
 
-export function showTestNotification(): Promise<void> {
-  return showAlertNotification(buildTestAlert())
+export function showTestNotification(market: Market = 'goals'): Promise<void> {
+  return showAlertNotification(buildTestAlert(market))
 }
 
 export function parseAppHash(hash = window.location.hash): {

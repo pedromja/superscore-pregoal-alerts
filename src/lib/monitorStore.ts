@@ -1,8 +1,17 @@
-import type { FeedAlert } from './types'
+import type { FeedAlert, Market } from './types'
 
-const FEED_KEY = 'superscore.pregoal.feed.v1'
-const SEEN_KEY = 'superscore.pregoal.seen.v1'
-const PRIMED_KEY = 'superscore.pregoal.primed.v1'
+const KEYS: Record<Market, { feed: string; seen: string; primed: string }> = {
+  goals: {
+    feed: 'superscore.pregoal.feed.v1',
+    seen: 'superscore.pregoal.seen.v1',
+    primed: 'superscore.pregoal.primed.v1',
+  },
+  corners: {
+    feed: 'superscore.pregoal.feed.corners.v1',
+    seen: 'superscore.pregoal.seen.corners.v1',
+    primed: 'superscore.pregoal.primed.corners.v1',
+  },
+}
 
 function readList(key: string): string[] {
   try {
@@ -15,25 +24,25 @@ function readList(key: string): string[] {
   }
 }
 
-export function loadSeen(): Set<string> {
-  return new Set(readList(SEEN_KEY))
+export function loadSeen(market: Market = 'goals'): Set<string> {
+  return new Set(readList(KEYS[market].seen))
 }
 
-export function saveSeen(seen: Set<string>): void {
-  sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seen]))
+export function saveSeen(seen: Set<string>, market: Market = 'goals'): void {
+  sessionStorage.setItem(KEYS[market].seen, JSON.stringify([...seen]))
 }
 
-export function loadPrimed(): Set<string> {
-  return new Set(readList(PRIMED_KEY))
+export function loadPrimed(market: Market = 'goals'): Set<string> {
+  return new Set(readList(KEYS[market].primed))
 }
 
-export function savePrimed(primed: Set<string>): void {
-  sessionStorage.setItem(PRIMED_KEY, JSON.stringify([...primed]))
+export function savePrimed(primed: Set<string>, market: Market = 'goals'): void {
+  sessionStorage.setItem(KEYS[market].primed, JSON.stringify([...primed]))
 }
 
-export function loadFeed(): FeedAlert[] {
+export function loadFeed(market: Market = 'goals'): FeedAlert[] {
   try {
-    const raw = sessionStorage.getItem(FEED_KEY)
+    const raw = sessionStorage.getItem(KEYS[market].feed)
     if (!raw) return []
     const parsed = JSON.parse(raw) as FeedAlert[]
     return Array.isArray(parsed) ? parsed : []
@@ -42,6 +51,6 @@ export function loadFeed(): FeedAlert[] {
   }
 }
 
-export function saveFeed(feed: FeedAlert[]): void {
-  sessionStorage.setItem(FEED_KEY, JSON.stringify(feed.slice(0, 80)))
+export function saveFeed(feed: FeedAlert[], market: Market = 'goals'): void {
+  sessionStorage.setItem(KEYS[market].feed, JSON.stringify(feed.slice(0, 80)))
 }
