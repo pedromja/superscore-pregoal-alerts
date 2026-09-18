@@ -317,6 +317,7 @@ export function upsertAlerts(
             ...prev,
             ...item,
             feedback: prev.feedback ?? item.feedback,
+            sentPush: Boolean(prev.sentPush || item.sentPush),
             market,
             cornerHalf: h ?? item.cornerHalf,
           }
@@ -368,6 +369,27 @@ export function markSent(key: string): boolean {
   if (sent.includes(key)) return false
   sent.push(key)
   saveSent(sent)
+  return true
+}
+
+export function markAlertPushed(
+  alertId: string,
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): boolean {
+  const m = parseMarket(market)
+  if (m === 'corners' && !parseCornerHalfOpt(half)) {
+    const ht = markAlertPushed(alertId, m, 'ht')
+    const ft = markAlertPushed(alertId, m, 'ft')
+    return ht || ft
+  }
+  const h = m === 'corners' ? parseCornerHalf(half) : undefined
+  const alerts = loadAlerts(m, h)
+  const idx = alerts.findIndex((a) => a.id === alertId)
+  if (idx < 0) return false
+  if (alerts[idx].sentPush) return true
+  alerts[idx] = { ...alerts[idx], sentPush: true }
+  saveAlerts(alerts, m, h)
   return true
 }
 
