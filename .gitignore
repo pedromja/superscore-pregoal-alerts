@@ -19,6 +19,10 @@ data/matches/
 !data/.gitkeep
 !data/tip_overlay.json
 
+# Backtest dumps (report is in docs/ + backtest-data/BACKTEST.md)
+backtest-data/matches/
+backtest-data/manifest.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

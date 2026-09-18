@@ -212,10 +212,10 @@ export function lastErrorAfterFixtureFailures(
   return `${serious.length}/${targetCount} jogos: ${shown.message}`
 }
 
-function cornersBundle(): CornersByHalf {
+function halvesBundle(market: ReturnType<typeof loadActiveMarket>) {
   return {
-    ht: currentSettings('corners', 'ht'),
-    ft: currentSettings('corners', 'ft'),
+    ht: currentSettings(market, 'ht'),
+    ft: currentSettings(market, 'ft'),
   }
 }
 
@@ -444,7 +444,7 @@ async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<n
 
     const market = loadActiveMarket()
     const settings = currentSettings(market)
-    const byHalf = market === 'corners' ? cornersBundle() : undefined
+    const byHalf = halvesBundle(market)
     const { points, alerts: rawAlerts } = evaluateAlerts(
       payload,
       settings,
@@ -454,12 +454,7 @@ async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<n
     const alerts = rawAlerts.filter((alert) =>
       inMarketClockWindow(market, alert.min, alert.period),
     )
-    const events = extractMarketEvents(
-      payload,
-      points,
-      market,
-      market === 'corners' ? undefined : settings.cornerHalf,
-    )
+    const events = extractMarketEvents(payload, points, market)
     const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
     const primedId = primedKey(market, fixture.id)
     const first = !isPrimed(primedId)

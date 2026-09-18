@@ -44,6 +44,9 @@ export type CornersByHalf = {
   ft: AlertSettings
 }
 
+export type GoalsByHalf = CornersByHalf
+export type HalvesSettings = CornersByHalf
+
 export type RawTimelineRow = {
   min: number
   period: number

@@ -156,7 +156,7 @@ export function MonitorPage({
     return () => window.clearTimeout(timer)
   }, [focusAlertKey, feed, onFocusConsumed])
 
-  const byHalf = market === 'corners' ? cornersByHalf : undefined
+  const byHalf = cornersByHalf
 
   function ingest(
     fixture: Fixture,

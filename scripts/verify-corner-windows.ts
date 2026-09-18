@@ -20,7 +20,10 @@ const drava = JSON.parse(
   readFileSync('public/demo/drava-bistrica-momentum.json', 'utf8'),
 ) as MomentumPayload
 
-const goals = defaultsFor('goals')
+const goalsHt = defaultsFor('goals', 'ht')
+const goalsFt = defaultsFor('goals', 'ft')
+const goals = goalsHt
+const goalsBundle = { ht: goalsHt, ft: goalsFt }
 const ht = defaultsFor('corners', 'ht')
 const ft = defaultsFor('corners', 'ft')
 const bundle = { ht, ft }
@@ -43,7 +46,7 @@ function spikeAt(min: number, period: number): MomentumPayload {
 }
 
 function checkDemo(name: string, payload: MomentumPayload) {
-  const goalEval = evaluateAlerts(payload, goals)
+  const goalEval = evaluateAlerts(payload, goals, undefined, goalsBundle)
   const cornerEval = evaluateAlerts(payload, ht, undefined, bundle)
   const outsideCorners = cornerEval.alerts.filter(
     (a) => cornerHalfOf(a.min, a.period) === null,
@@ -177,19 +180,23 @@ expect(inCornerWindow(86, 2), '86\' corners ok')
 expect(!inCornerWindow(96, 2), '96\' corners out')
 
 expect(
-  evaluateAlerts(spikeAt(96, 2), goals).alerts.length === 0,
+  evaluateAlerts(spikeAt(96, 2), goalsFt).alerts.length === 0,
   'evaluate 96\' goals rejected',
 )
 expect(
-  evaluateAlerts(spikeAt(88, 2), goals).alerts.length > 0,
+  evaluateAlerts(spikeAt(96, 2), goals, undefined, goalsBundle).alerts.length === 0,
+  'evaluate 96\' goals bundle rejected',
+)
+expect(
+  evaluateAlerts(spikeAt(88, 2), goalsFt).alerts.length > 0,
   'evaluate 88\' goals ok (70–90)',
 )
 expect(
-  evaluateAlerts(spikeAt(42, 1), goals).alerts.length > 0,
+  evaluateAlerts(spikeAt(42, 1), goalsHt).alerts.length > 0,
   'evaluate 42\' HT goals ok',
 )
 expect(
-  evaluateAlerts(spikeAt(43, 1), goals).alerts.length === 0,
+  evaluateAlerts(spikeAt(43, 1), goalsHt).alerts.length === 0,
   'evaluate 43\' HT goals out',
 )
 expect(
@@ -223,7 +230,7 @@ if (
   ht.spikeThreshold !== 60 ||
   ht.swingComboThreshold !== 40 ||
   ht.sustainedThreshold !== 25 ||
-  ht.sustainedSecondaryThreshold !== 30 ||
+  ht.sustainedSecondaryThreshold !== 20 ||
   ht.sustainedSecondaryMinutes !== 2 ||
   ht.fallbackSustainedThreshold !== 30 ||
   ht.sustainedFallbackMinutes !== 4
@@ -237,13 +244,18 @@ if (
   ft.spikeThreshold !== 80 ||
   ft.swingComboThreshold !== 50 ||
   ft.sustainedThreshold !== 30 ||
-  ft.sustainedSecondaryThreshold !== 25 ||
+  ft.sustainedSecondaryThreshold !== 20 ||
   ft.sustainedSecondaryMinutes !== 2 ||
   ft.fallbackSpikeThreshold !== 85
 ) {
   fails.push('FT thresholds changed')
 }
-if (goals.spikeThreshold !== 80 || goals.primaryKind !== 'combo') {
+if (
+  goals.spikeThreshold !== 80 ||
+  goals.primaryKind !== 'combo' ||
+  goals.sustainedFallbackMinutes !== 5 ||
+  defaultsFor('goals', 'ft').sustainedFallbackMinutes !== 5
+) {
   fails.push('goal defaults changed')
 }
 

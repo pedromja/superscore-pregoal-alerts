@@ -31,7 +31,7 @@ type Props = {
 export function ReplayPage({ settings, cornersByHalf, date, onDate }: Props) {
   const market = parseMarket(settings.market)
   const copy = marketCopy(market)
-  const byHalf = market === 'corners' ? cornersByHalf : undefined
+  const byHalf = cornersByHalf
   const [fixtureId, setFixtureId] = useState('')
   const [fixtures, setFixtures] = useState<Fixture[]>([])
   const [listError, setListError] = useState<string | null>(null)

@@ -23,6 +23,7 @@ import type {
 } from './types'
 import {
   cornerHalfOf,
+  goalHalfOf,
   inCornerWindow,
   inGoalsWindow,
   isStoppageClock,
@@ -185,16 +186,14 @@ export function evaluatePoint(
   points: TimelinePoint[] = [],
 ): FiredAlert[] {
   if (!point.side) return []
-  // Hard-ban injury time for both markets (P1>45 / P2>90), e.g. 96' FT.
   if (isStoppageClock(point.min, point.period)) return []
   const market = parseMarket(settings.market)
-  const half = cornerHalfOf(point.min, point.period)
-  if (market === 'corners') {
-    if (!half) return []
-    if (settings.cornerHalf && settings.cornerHalf !== half) return []
-  } else if (!inGoalsWindow(point.min, point.period)) {
-    return []
-  }
+  const half =
+    market === 'corners'
+      ? cornerHalfOf(point.min, point.period)
+      : goalHalfOf(point.min, point.period)
+  if (!half) return []
+  if (settings.cornerHalf && settings.cornerHalf !== half) return []
 
   const signals = signalsAt(point, settings, points)
   const alerts: FiredAlert[] = []
@@ -220,7 +219,7 @@ export function evaluatePoint(
       delta1: point.delta1,
       sustainedLength: lengthForKind(kind, point, settings, points),
       signals,
-      cornerHalf: market === 'corners' ? (half ?? undefined) : undefined,
+      cornerHalf: half,
     })
   }
 
@@ -272,18 +271,18 @@ export function evaluateAlerts(
   payload: MomentumPayload,
   settings: AlertSettings,
   upToIndex?: number,
-  cornersByHalf?: CornersByHalf,
+  halves?: CornersByHalf,
 ): { points: TimelinePoint[]; alerts: FiredAlert[] } {
   const market = parseMarket(settings.market)
-  if (market === 'corners' && cornersByHalf) {
+  if (halves) {
     const ht = evaluateWindowed(
       payload,
-      { ...cornersByHalf.ht, market: 'corners', cornerHalf: 'ht' },
+      { ...halves.ht, market, cornerHalf: 'ht' },
       upToIndex,
     )
     const ft = evaluateWindowed(
       payload,
-      { ...cornersByHalf.ft, market: 'corners', cornerHalf: 'ft' },
+      { ...halves.ft, market, cornerHalf: 'ft' },
       upToIndex,
     )
     return {
@@ -322,9 +321,10 @@ export function extractEvents(
 export function extractGoals(
   payload: MomentumPayload,
   points: TimelinePoint[],
+  half?: CornerHalf | null,
 ): GoalEvent[] {
   return extractEvents(payload, points, eventTypeFor('goals')).filter((event) =>
-    inGoalsWindow(event.min, event.period),
+    inGoalsWindow(event.min, event.period, half),
   )
 }
 
@@ -346,7 +346,7 @@ export function extractMarketEvents(
 ): GoalEvent[] {
   const m = parseMarket(market)
   if (m === 'corners') return extractCorners(payload, points, half)
-  return extractEvents(payload, points, eventTypeFor(m))
+  return extractGoals(payload, points, half)
 }
 
 function linkAlert(alert: FiredAlert, goal: GoalEvent): LinkedAlert {
@@ -376,18 +376,13 @@ function windowForAlert(
 export function evaluateReplay(
   payload: MomentumPayload,
   settings: AlertSettings,
-  cornersByHalf?: CornersByHalf,
+  halves?: CornersByHalf,
 ): ReplayResult {
   const market = parseMarket(settings.market)
-  const { points, alerts } = evaluateAlerts(
-    payload,
-    settings,
-    undefined,
-    market === 'corners' ? cornersByHalf : undefined,
-  )
-  const half =
-    market === 'corners' && !cornersByHalf ? settings.cornerHalf : undefined
+  const { points, alerts } = evaluateAlerts(payload, settings, undefined, halves)
+  const half = !halves ? settings.cornerHalf : undefined
   const goals = extractMarketEvents(payload, points, market, half)
+  const clockHalf = market === 'corners' ? cornerHalfOf : goalHalfOf
 
   const coincidentAlerts = alerts.filter((alert) =>
     goals.some(
@@ -403,20 +398,19 @@ export function evaluateReplay(
   const perGoal: GoalReplay[] = goals.map((goal, goalNumber) => {
     if (goal.side === 'home') home += 1
     else away += 1
-    const goalHalf = cornerHalfOf(goal.min, goal.period)
+    const goalHalf = clockHalf(goal.min, goal.period)
 
     const linked = alerts
       .filter((alert) => {
         if (alert.side !== goal.side) return false
-        if (market !== 'corners') return true
-        const alertHalf = alert.cornerHalf ?? cornerHalfOf(alert.min, alert.period)
+        const alertHalf = alert.cornerHalf ?? clockHalf(alert.min, alert.period)
         return alertHalf === goalHalf
       })
       .map((alert) => linkAlert(alert, goal))
 
     const coincident = linked.filter((a) => a.coincident)
     const preAlerts = linked.filter((a) => {
-      const w = windowForAlert(a, settings, cornersByHalf)
+      const w = windowForAlert(a, settings, halves)
       return a.leadMin >= 1 && a.leadMin <= w
     })
     const uniqueLead = [...new Set(preAlerts.map((a) => a.leadMin))]
@@ -464,10 +458,10 @@ export function isSameAlertKey(a: FiredAlert, b: FiredAlert): boolean {
 export function settingsForAlert(
   alert: Pick<FiredAlert, 'cornerHalf'>,
   settings: AlertSettings,
-  cornersByHalf?: CornersByHalf,
+  halves?: CornersByHalf,
 ): AlertSettings {
-  if (alert.cornerHalf && cornersByHalf) {
-    return cornersByHalf[alert.cornerHalf]
+  if (alert.cornerHalf && halves) {
+    return halves[alert.cornerHalf]
   }
   return settings
 }

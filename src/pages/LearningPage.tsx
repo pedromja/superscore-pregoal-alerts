@@ -11,6 +11,12 @@ import {
   type RuleMetrics,
 } from '../lib/learnApi'
 import { pct } from '../lib/format'
+import {
+  DEFINITIONS_LOCKED,
+  LOCK_SESSION_NOTE_PT,
+  LOCK_UNLOCK_LABEL_PT,
+  LOCK_WARNING_PT,
+} from '../lib/lock'
 import { defaultsFor, marketCopy } from '../lib/market'
 import type { AlertSettings, CornerHalf, CornersByHalf } from '../lib/types'
 import { CORNER_WINDOWS, GOAL_WINDOWS } from '../lib/windows'
@@ -25,7 +31,6 @@ type Props = {
 export function LearningPage({
   settings,
   cornersByHalf,
-  onChange,
   onChangeCorners,
 }: Props) {
   const [goalsData, setGoalsData] = useState<LearnPayload | null>(null)
@@ -76,12 +81,17 @@ export function LearningPage({
         <h2 className="text-lg font-semibold">Aprendizagem · {copy.toggle}</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
           {market === 'corners'
-            ? `Cantos: HT (${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to}, W=${CORNER_WINDOWS.ht.shortHorizon}) e FT (${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to}, W=${CORNER_WINDOWS.ft.shortHorizon}) nunca misturam limiares nem amostras. Prolongamento (P1>45 / P2>90) está banido. Fora destas janelas não há aprendizagem. HIT exige alert_min < canto_min no mesmo mercado/janela.`
-            : `Golos: ${GOAL_WINDOWS.ht.shortLabel} e ${GOAL_WINDOWS.ft.shortLabel} no relógio absoluto; prolongamento (P1>45 / P2>90) está banido. Dois horizontes por alerta (${copy.noun} do mesmo lado, nunca no minuto do ${copy.noun}): ≤5 min e ≤15 min ou fim da parte/jogo.`}{' '}
+            ? `Cantos: HT (${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to}, W=${CORNER_WINDOWS.ht.shortHorizon}) e FT (${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to}, W=${CORNER_WINDOWS.ft.shortHorizon}) nunca misturam limiares nem amostras. Prolongamento (P1>45 / P2>90) está banido. HIT exige lead ≥1 min no mesmo mercado/janela.`
+            : `Golos: ${GOAL_WINDOWS.ht.shortLabel} e ${GOAL_WINDOWS.ft.shortLabel} no relógio absoluto; prolongamento (P1>45 / P2>90) está banido. HIT exige lead ≥1 min (ideal 1–2). HT e FT não misturam amostras.`}{' '}
           {goalsData?.summary.scoreNote ??
             htData?.summary.scoreNote ??
-            'O score de otimização é 0,4×precisão(curto) + 0,6×precisão(longo).'}
+            'O score de otimização é 0,4×precisão(curto) + 0,6×precisão(longo). Definições locked: aplicar exige desbloquear + confirmar.'}
         </p>
+        {DEFINITIONS_LOCKED ? (
+          <p className="mt-3 rounded-xl border border-amber-400/40 bg-amber-950/20 px-3 py-2 text-sm text-amber-100/85">
+            {LOCK_WARNING_PT}
+          </p>
+        ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
@@ -91,8 +101,7 @@ export function LearningPage({
           >
             Importar amostras Celtic/Drava
           </button>
-          {market === 'corners' ? (
-            <>
+          <>
               <button
                 type="button"
                 disabled={Boolean(busy)}
@@ -118,20 +127,6 @@ export function LearningPage({
                 Recalcular FT
               </button>
             </>
-          ) : (
-            <button
-              type="button"
-              disabled={Boolean(busy)}
-              onClick={() =>
-                void run('recalc', async () => {
-                  await recalculateLearn(market)
-                })
-              }
-              className="rounded-xl bg-lime px-3 py-2 text-sm font-semibold text-pitch"
-            >
-              Recalcular
-            </button>
-          )}
           <button
             type="button"
             onClick={() => void reload()}
@@ -148,8 +143,7 @@ export function LearningPage({
         ) : null}
       </section>
 
-      {market === 'corners' ? (
-        <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2">
           <HalfLearn
             half="ht"
             data={htData}
@@ -163,7 +157,7 @@ export function LearningPage({
                 ht: {
                   ...cornersByHalf.ht,
                   ...applied,
-                  market: 'corners',
+                  market,
                   cornerHalf: 'ht',
                 },
               })
@@ -182,37 +176,13 @@ export function LearningPage({
                 ft: {
                   ...cornersByHalf.ft,
                   ...applied,
-                  market: 'corners',
+                  market,
                   cornerHalf: 'ft',
                 },
               })
             }
           />
         </div>
-      ) : goalsData ? (
-        <LearnBody
-          data={goalsData}
-          settings={settings}
-          run={run}
-          onApply={(applied) =>
-            onChange({
-              ...defaultsFor('goals'),
-              ...applied,
-              market: 'goals',
-              notificationsEnabled: settings.notificationsEnabled,
-              notifyPrimary: settings.notifyPrimary,
-              notifySecondary: settings.notifySecondary,
-              notifyFallback: settings.notifyFallback,
-            })
-          }
-        />
-      ) : (
-        <p className="rounded-2xl border border-dashed border-line px-4 py-10 text-center text-sm text-emerald-100/50">
-          {error
-            ? 'Arranque o servidor (`npm run dev`) para ver métricas.'
-            : 'A carregar métricas…'}
-        </p>
-      )}
     </div>
   )
 }
@@ -234,11 +204,16 @@ function HalfLearn({
   run: (label: string, fn: () => Promise<void>) => Promise<void>
   onApply: (settings: AlertSettings) => void
 }) {
-  const window = CORNER_WINDOWS[half]
+  const window =
+    settings.market === 'corners' ? CORNER_WINDOWS[half] : GOAL_WINDOWS[half]
+  const horizon =
+    settings.market === 'corners'
+      ? CORNER_WINDOWS[half].shortHorizon
+      : settings.evaluationWindow
   return (
     <div className="space-y-3">
       <p className="text-sm font-semibold tracking-wide text-lime uppercase">
-        {window.label} · W={window.shortHorizon}
+        {window.label} · W={horizon}
       </p>
       {!data ? (
         <p className="rounded-2xl border border-dashed border-line px-4 py-8 text-center text-sm text-emerald-100/50">
@@ -278,6 +253,7 @@ function LearnBody({
   const market = settings.market
   const shortLabel = `≤${data.summary.horizonShort} min`
   const [confirmApply, setConfirmApply] = useState(false)
+  const [unlockApply, setUnlockApply] = useState(false)
 
   return (
     <>
@@ -317,13 +293,40 @@ function LearnBody({
               />
               Confirmo aplicar às regras activas (não é automático)
             </label>
+            {DEFINITIONS_LOCKED ? (
+              <label className="flex items-start gap-2 text-sm text-amber-100/90">
+                <input
+                  type="checkbox"
+                  checked={unlockApply}
+                  disabled={proposal.applied}
+                  onChange={(e) => setUnlockApply(e.target.checked)}
+                  className="mt-0.5 accent-lime"
+                />
+                <span>
+                  {LOCK_UNLOCK_LABEL_PT}
+                  <span className="mt-1 block text-xs text-amber-100/70">
+                    {LOCK_SESSION_NOTE_PT}
+                  </span>
+                </span>
+              </label>
+            ) : null}
             <button
               type="button"
-              disabled={proposal.applied || !confirmApply}
+              disabled={
+                proposal.applied ||
+                !confirmApply ||
+                (DEFINITIONS_LOCKED && !unlockApply)
+              }
               onClick={() =>
                 void run('apply', async () => {
-                  const applied = await applyLearnProposal(proposal.id, market, half)
+                  const applied = await applyLearnProposal(
+                    proposal.id,
+                    market,
+                    half,
+                    DEFINITIONS_LOCKED ? unlockApply : false,
+                  )
                   setConfirmApply(false)
+                  setUnlockApply(false)
                   onApply(applied.settings)
                 })
               }

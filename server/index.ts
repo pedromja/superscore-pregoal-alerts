@@ -4,6 +4,7 @@ import express from 'express'
 import { alertNotificationCopy, sampleFeedAlert } from '../src/lib/tally.ts'
 import type { CornerHalf, Market } from '../src/lib/types.ts'
 import { parseCornerHalfOpt } from '../src/lib/windows.ts'
+import { DEFINITIONS_LOCKED } from '../src/lib/lock.ts'
 import {
   LEARN_AUTO_APPLY,
   LEARN_AUTO_MIN_OUTCOMES,
@@ -16,6 +17,7 @@ import {
   computeMetrics,
   currentSettings,
   ingestFeedAlerts,
+  putParams,
   recalculate,
   resetLearnStats,
   resolveMarket,
@@ -81,6 +83,7 @@ function learnPayload(market: Market, half?: CornerHalf) {
     autoAfter: LEARN_AUTO_MIN_OUTCOMES,
     autoApply: false,
     confirmRequired: true,
+    locked: DEFINITIONS_LOCKED,
     learnAutoApplyEnv: LEARN_AUTO_APPLY,
   }
 }
@@ -218,6 +221,11 @@ app.get('/api/learn/market', (_req, res) => {
   res.json({
     market,
     settings: currentSettings(market),
+    locked: DEFINITIONS_LOCKED,
+    halves: {
+      ht: currentSettings(market, 'ht'),
+      ft: currentSettings(market, 'ft'),
+    },
     corners: market === 'corners'
       ? {
           ht: currentSettings('corners', 'ht'),
@@ -246,11 +254,11 @@ app.post('/api/learn/market', (req, res) => {
 app.get('/api/learn/summary', (req, res) => {
   const market = marketFromReq(req)
   const half = halfFromReq(req)
-  if (market === 'corners' && !half) {
+  if (!half) {
     res.json({
       market,
-      ht: learnPayload('corners', 'ht'),
-      ft: learnPayload('corners', 'ft'),
+      ht: learnPayload(market, 'ht'),
+      ft: learnPayload(market, 'ft'),
     })
     return
   }
@@ -315,7 +323,8 @@ app.post('/api/learn/apply', (req, res) => {
     }
     const id = String(body.id || 'latest')
     const confirm = body.confirm === true || body.confirmed === true
-    res.json(applyProposal(id, 'manual', market, half, { confirm }))
+    const unlock = (body as { unlock?: unknown }).unlock === true
+    res.json(applyProposal(id, 'manual', market, half, { confirm, unlock }))
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
   }
@@ -325,25 +334,23 @@ app.post('/api/learn/seed-demos', (req, res) => {
   const market = marketFromReq(req)
   const half = halfFromReq(req)
   const seeded = seedDemos(market, half)
-  const proposals =
-    market === 'corners' && !half
-      ? {
-          ht: recalculate('seed-demos', market, 'ht'),
-          ft: recalculate('seed-demos', market, 'ft'),
-        }
-      : { latest: recalculate('seed-demos', market, half) }
+  const proposals = !half
+    ? {
+        ht: recalculate('seed-demos', market, 'ht'),
+        ft: recalculate('seed-demos', market, 'ft'),
+      }
+    : { latest: recalculate('seed-demos', market, half) }
   res.json({
     ...seeded,
     market,
     half,
     proposals,
-    summary:
-      market === 'corners' && !half
-        ? {
-            ht: computeMetrics(currentSettings(market, 'ht')),
-            ft: computeMetrics(currentSettings(market, 'ft')),
-          }
-        : computeMetrics(currentSettings(market, half)),
+    summary: !half
+      ? {
+          ht: computeMetrics(currentSettings(market, 'ht')),
+          ft: computeMetrics(currentSettings(market, 'ft')),
+        }
+      : computeMetrics(currentSettings(market, half)),
   })
 })
 
@@ -368,14 +375,47 @@ app.post('/api/learn/reset', (req, res) => {
 app.get('/api/learn/params', (req, res) => {
   const market = marketFromReq(req)
   const half = halfFromReq(req)
-  if (market === 'corners' && !half) {
+  if (!half) {
     res.json({
-      ht: currentSettings('corners', 'ht'),
-      ft: currentSettings('corners', 'ft'),
+      locked: DEFINITIONS_LOCKED,
+      ht: currentSettings(market, 'ht'),
+      ft: currentSettings(market, 'ft'),
     })
     return
   }
-  res.json(currentSettings(market, half))
+  res.json({
+    locked: DEFINITIONS_LOCKED,
+    settings: currentSettings(market, half),
+  })
+})
+
+app.put('/api/learn/params', (req, res) => {
+  try {
+    const market = marketFromReq(req)
+    const half = halfFromReq(req)
+    const body = (req.body ?? {}) as {
+      confirm?: unknown
+      confirmed?: unknown
+      unlock?: unknown
+      settings?: Partial<import('../src/lib/types.ts').AlertSettings>
+    }
+    const confirm = body.confirm === true || body.confirmed === true
+    const unlock = body.unlock === true
+    const incoming = body.settings ?? (req.body as Record<string, unknown>)
+    res.json(
+      putParams(
+        {
+          ...currentSettings(market, half),
+          ...(incoming as object),
+          market,
+          cornerHalf: half ?? currentSettings(market, half).cornerHalf,
+        },
+        { confirm, unlock },
+      ),
+    )
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
+  }
 })
 
 app.use('/api/ss-fixtures', async (req, res) => {

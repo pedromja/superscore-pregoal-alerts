@@ -8,11 +8,11 @@ import { marketCopy, parseMarket, syncNotifyFlags } from './lib/market'
 import { parseAppHash, registerServiceWorker } from './lib/notifications'
 import {
   loadCornersByHalf,
+  loadGoalsByHalf,
   loadMarket,
-  loadSettings,
   saveCornersByHalf,
+  saveGoalsByHalf,
   saveMarket,
-  saveSettings,
 } from './lib/settings'
 import { LearningPage } from './pages/LearningPage'
 import { MonitorPage } from './pages/MonitorPage'
@@ -34,14 +34,15 @@ export default function App() {
   const [tab, setTab] = useState<TabId>(initial.tab)
   const [focusAlertKey, setFocusAlertKey] = useState<string | null>(initial.alertKey)
   const [market, setMarket] = useState<Market>(() => loadMarket())
-  const [goalsSettings, setGoalsSettings] = useState<AlertSettings>(() =>
-    loadSettings('goals'),
+  const [goalsByHalf, setGoalsByHalf] = useState<CornersByHalf>(() =>
+    loadGoalsByHalf(),
   )
   const [cornersByHalf, setCornersByHalf] = useState<CornersByHalf>(() =>
     loadCornersByHalf(),
   )
   const [date, setDate] = useState(lisbonToday)
-  const settings = market === 'goals' ? goalsSettings : cornersByHalf.ht
+  const halves = market === 'corners' ? cornersByHalf : goalsByHalf
+  const settings = halves.ht
   const copy = marketCopy(market)
 
   useEffect(() => {
@@ -76,8 +77,8 @@ export default function App() {
   }, [market])
 
   useEffect(() => {
-    saveSettings(goalsSettings)
-  }, [goalsSettings])
+    saveGoalsByHalf(goalsByHalf)
+  }, [goalsByHalf])
 
   useEffect(() => {
     saveCornersByHalf(cornersByHalf)
@@ -99,12 +100,16 @@ export default function App() {
   }
 
   function onChangeSettings(next: AlertSettings) {
-    if (parseMarket(next.market) === 'corners') {
-      const half = next.cornerHalf === 'ft' ? 'ft' : 'ht'
+    const m = parseMarket(next.market)
+    const half = next.cornerHalf === 'ft' ? 'ft' : 'ht'
+    if (m === 'corners') {
       setCornersByHalf((prev) => ({ ...prev, [half]: { ...next, cornerHalf: half } }))
       return
     }
-    setGoalsSettings({ ...next, market: 'goals' })
+    setGoalsByHalf((prev) => ({
+      ...prev,
+      [half]: { ...next, market: 'goals', cornerHalf: half },
+    }))
   }
 
   function onChangeNotify(next: AlertSettings) {
@@ -115,13 +120,27 @@ export default function App() {
       }))
       return
     }
-    setGoalsSettings({ ...next, market: 'goals' })
+    setGoalsByHalf((prev) => ({
+      ht: syncNotifyFlags(next, { ...prev.ht, cornerHalf: 'ht', market: 'goals' }),
+      ft: syncNotifyFlags(next, { ...prev.ft, cornerHalf: 'ft', market: 'goals' }),
+    }))
   }
 
   function onChangeCorners(next: CornersByHalf) {
     setCornersByHalf({
       ht: { ...next.ht, market: 'corners', cornerHalf: 'ht' },
       ft: { ...next.ft, market: 'corners', cornerHalf: 'ft' },
+    })
+  }
+
+  function onChangeHalves(next: CornersByHalf) {
+    if (market === 'corners') {
+      onChangeCorners(next)
+      return
+    }
+    setGoalsByHalf({
+      ht: { ...next.ht, market: 'goals', cornerHalf: 'ht' },
+      ft: { ...next.ft, market: 'goals', cornerHalf: 'ft' },
     })
   }
 
@@ -171,7 +190,7 @@ export default function App() {
       {tab === 'monitor' ? (
         <MonitorPage
           settings={settings}
-          cornersByHalf={cornersByHalf}
+          cornersByHalf={halves}
           date={date}
           onDate={setDate}
           focusAlertKey={focusAlertKey}
@@ -182,7 +201,7 @@ export default function App() {
       {tab === 'replay' ? (
         <ReplayPage
           settings={settings}
-          cornersByHalf={cornersByHalf}
+          cornersByHalf={halves}
           date={date}
           onDate={setDate}
         />
@@ -190,17 +209,17 @@ export default function App() {
       {tab === 'aprendizagem' ? (
         <LearningPage
           settings={settings}
-          cornersByHalf={cornersByHalf}
+          cornersByHalf={halves}
           onChange={onChangeSettings}
-          onChangeCorners={onChangeCorners}
+          onChangeCorners={onChangeHalves}
         />
       ) : null}
       {tab === 'definicoes' ? (
         <SettingsPage
           settings={settings}
-          cornersByHalf={cornersByHalf}
+          cornersByHalf={halves}
           onChange={onChangeNotify}
-          onChangeCorners={onChangeCorners}
+          onChangeCorners={onChangeHalves}
         />
       ) : null}
     </div>
