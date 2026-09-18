@@ -3,7 +3,7 @@
 export const DEFINITIONS_LOCKED = true
 
 export const LOCK_WARNING_PT =
-  'Janelas e limiares (Spike / Swing / Sustained) estão bloqueados após o backtest de 18/set. Pedro, não os altere: um alerta com menos de 1 minuto de avanço não dá tempo de entrar no mercado, e o prolongamento (ex. 96\') chega tarde demais. A aprendizagem pode propor, mas não aplica nada em cima destes params sem desbloquear e confirmar. Notificações (ligar/desligar regras) continuam livres.'
+  'Janelas e limiares (Spike / Swing / Sustained) estão bloqueados após o backtest de 18/set. Pedro, não os altere: um alerta com menos de 1 minuto de avanço não dá tempo de entrar no mercado. Prolongamento (P1>45 / P2>90, ex. Yeovil 96\') é inútil para tips — quando o push chega o golo já entrou e as casas já fecharam os mercados. A aprendizagem pode propor, mas não aplica nada em cima destes params sem desbloquear e confirmar. Notificações (ligar/desligar regras) continuam livres.'
 
 export const LOCK_UNLOCK_LABEL_PT =
   'Desbloquear definições (só para experimentar — Pedro, não mexer em produção)'

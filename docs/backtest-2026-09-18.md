@@ -13,7 +13,8 @@
 
 - Lead útil: **≥ 1 min**. Lead 0 e pós-evento **não** contam.
 - Banda preferida para o score: **1–2 min**.
-- Prolongamento banido: `P1 min>45` / `P2 min>90`.
+- Prolongamento banido: `P1 min>45` / `P2 min>90` (golos **e** cantos). A janela FT de golos é **70–90** e **não passa de 90**.
+- Falha Yeovil 96': o push chegou depois do golo, mercados das casas já fechados — stoppage é inútil para tips.
 - Janelas propostas (absolutas): Golos HT 20–42 / FT 70–90; Cantos HT 32–42 / FT 82–87.
 
 ## Resultados por balde

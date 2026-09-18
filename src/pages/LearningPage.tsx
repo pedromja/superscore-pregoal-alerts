@@ -81,8 +81,8 @@ export function LearningPage({
         <h2 className="text-lg font-semibold">Aprendizagem · {copy.toggle}</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
           {market === 'corners'
-            ? `Cantos: HT (${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to}, W=${CORNER_WINDOWS.ht.shortHorizon}) e FT (${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to}, W=${CORNER_WINDOWS.ft.shortHorizon}) nunca misturam limiares nem amostras. Prolongamento (P1>45 / P2>90) está banido. HIT exige lead ≥1 min no mesmo mercado/janela.`
-            : `Golos: ${GOAL_WINDOWS.ht.shortLabel} e ${GOAL_WINDOWS.ft.shortLabel} no relógio absoluto; prolongamento (P1>45 / P2>90) está banido. HIT exige lead ≥1 min (ideal 1–2). HT e FT não misturam amostras.`}{' '}
+            ? `Cantos: HT (${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to}, W=${CORNER_WINDOWS.ht.shortHorizon}) e FT (${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to}, W=${CORNER_WINDOWS.ft.shortHorizon}) nunca misturam limiares nem amostras. Prolongamento (P1>45 / P2>90) está banido — push de injury time chega depois do evento, sem mercados. HIT exige lead ≥1 min no mesmo mercado/janela.`
+            : `Golos: ${GOAL_WINDOWS.ht.shortLabel} e ${GOAL_WINDOWS.ft.shortLabel} no relógio absoluto (FT não passa de 90); prolongamento (P1>45 / P2>90) está banido — Yeovil 96' chegou depois do golo, mercados fechados. HIT exige lead ≥1 min (ideal 1–2). HT e FT não misturam amostras.`}{' '}
           {goalsData?.summary.scoreNote ??
             htData?.summary.scoreNote ??
             'O score de otimização é 0,4×precisão(curto) + 0,6×precisão(longo). Definições locked: aplicar exige desbloquear + confirmar.'}

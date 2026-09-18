@@ -244,6 +244,8 @@ async function notifyFreshAlerts(
   const notified: FeedAlert[] = []
   for (const alert of fresh) {
     if (alert.coincident) continue
+    // Stoppage (P1>45 / P2>90) and out-of-window: no push. Yeovil 96' arrived
+    // after the goal; bookie markets were already gone.
     if (!inMarketClockWindow(market, alert.min, alert.period)) continue
     const notify = settingsForAlert(alert, settings, byHalf)
     if (!ruleNotifyEnabled(notify, alert.rule)) continue

@@ -21,6 +21,7 @@ import { loadSettings, saveSettings } from '../src/lib/settings.ts'
 import type { GoalEvent, MomentumPayload, TimelinePoint } from '../src/lib/types.ts'
 import {
   GOAL_WINDOWS,
+  REGULATION_END,
   goalHalfOf,
   inGoalsWindow,
   inMarketClockWindow,
@@ -137,21 +138,34 @@ expect(postEvent.hit5 === false, 'post-event alert is not a hit')
 expect(postEvent.leadTime5 === null, 'post-event has no lead')
 
 expect(isStoppageClock(96, 2), "96' P2 is stoppage")
+expect(isStoppageClock(91, 2), "91' P2 is stoppage")
+expect(isStoppageClock(46, 1), "46' P1 is stoppage")
 expect(!inGoalsWindow(96, 2), "96' outside goals window")
 expect(!inMarketClockWindow('goals', 96, 2), "96' goals clock rejected")
+expect(!inMarketClockWindow('corners', 96, 2), "96' corners clock rejected")
+expect(!inMarketClockWindow('goals', 91, 2), "91' goals clock rejected")
+expect(!inMarketClockWindow('corners', 91, 2), "91' corners clock rejected")
 expect(goalHalfOf(96, 2) === null, "96' has no goal half")
 expect(
   evaluateAlerts(spikeAt(96, 2), defaultsFor('goals', 'ft')).alerts.length === 0,
-  "evaluateAlerts rejects 96'",
+  "evaluateAlerts rejects 96' (Yeovil failure: goal already in, markets gone)",
+)
+expect(
+  evaluateAlerts(spikeAt(91, 2), defaultsFor('goals', 'ft')).alerts.length === 0,
+  "evaluateAlerts rejects 91' — FT does not extend past 90",
 )
 expect(
   evaluateAlerts(spikeAt(90, 2), defaultsFor('goals', 'ft')).alerts.length > 0,
   "evaluateAlerts allows 90' FT goals",
 )
+expect(GOAL_WINDOWS.ft.to === REGULATION_END[2], 'FT goals to === 90')
+expect(GOAL_WINDOWS.ft.to <= 90, 'FT goals window never extends past 90')
 
 expect(DEFINITIONS_LOCKED, 'DEFINITIONS_LOCKED is on after adopt')
 expect(/Pedro/i.test(LOCK_WARNING_PT), 'lock warning addresses Pedro')
 expect(/1 minuto/i.test(LOCK_WARNING_PT), 'lock warning mentions 1 minute lead')
+expect(/mercados/i.test(LOCK_WARNING_PT), 'lock warning mentions markets gone')
+expect(/Yeovil/i.test(LOCK_WARNING_PT), 'lock warning cites Yeovil 96\'')
 
 let applyBlocked = false
 try {

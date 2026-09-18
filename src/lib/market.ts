@@ -23,7 +23,7 @@ export const MARKET_COPY = {
     nounCap: 'Golo',
     title: 'Alertas pré-golo',
     blurb:
-      `Momentum de ataque assinado (−100 fora / +100 casa). Golos só alertam na 1.ª parte aos ${GOAL_WINDOWS.ht.from}–${GOAL_WINDOWS.ht.to} e na 2.ª aos ${GOAL_WINDOWS.ft.from}–${GOAL_WINDOWS.ft.to} (relógio absoluto). Prolongamento (P1>45 / P2>90) está banido. Um spike no minuto do golo é coincidente, não um acerto.`,
+      `Momentum de ataque assinado (−100 fora / +100 casa). Golos só alertam na 1.ª parte aos ${GOAL_WINDOWS.ht.from}–${GOAL_WINDOWS.ht.to} e na 2.ª aos ${GOAL_WINDOWS.ft.from}–${GOAL_WINDOWS.ft.to} (relógio absoluto; FT não passa de 90). Prolongamento (P1>45 / P2>90) está banido: um 96' chega depois do golo, sem mercados nas casas. Um spike no minuto do golo é coincidente, não um acerto.`,
     pushPrefix: 'Golo',
     pushTag: 'pregoal',
   },
@@ -34,7 +34,7 @@ export const MARKET_COPY = {
     nounCap: 'Canto',
     title: 'Alertas pré-canto',
     blurb:
-      `Momentum de ataque assinado (−100 fora / +100 casa). Cantos só alertam na 1.ª parte aos ${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to} e na 2.ª aos ${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to} (relógio absoluto). Prolongamento (P1>45 / P2>90) está banido. Fora destas janelas não há avaliação, push nem aprendizagem. O minuto ao vivo escolhe os parâmetros HT ou FT.`,
+      `Momentum de ataque assinado (−100 fora / +100 casa). Cantos só alertam na 1.ª parte aos ${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to} e na 2.ª aos ${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to} (relógio absoluto). Prolongamento (P1>45 / P2>90) está banido nos dois mercados — push de injury time chega depois do evento, sem mercados. Fora destas janelas não há avaliação, push nem aprendizagem. O minuto ao vivo escolhe os parâmetros HT ou FT.`,
     pushPrefix: 'Canto',
     pushTag: 'precantos',
   },

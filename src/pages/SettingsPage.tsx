@@ -68,7 +68,8 @@ export function SettingsPage({
           <strong>
             {windows.ft.from}–{windows.ft.to}
           </strong>{' '}
-          (2.ª parte). Prolongamento (P1&gt;45 / P2&gt;90) está banido. Lead útil
+          (2.ª parte). Prolongamento (P1&gt;45 / P2&gt;90) está banido — um
+          96' chega depois do golo, sem mercados nas casas. Lead útil
           ≥ 1 min (ideal 1–2). Fora destas janelas não há avaliação, push nem
           amostras de aprendizagem.
         </p>

@@ -5,6 +5,7 @@ import type { MomentumPayload } from '../src/lib/types.ts'
 import {
   CORNER_WINDOWS,
   GOAL_WINDOWS,
+  REGULATION_END,
   cornerHalfOf,
   goalHalfOf,
   inCornerWindow,
@@ -211,6 +212,33 @@ expect(
   evaluateAlerts(spikeAt(96, 2), ht, undefined, bundle).alerts.length === 0,
   'evaluate 96\' corners bundle out',
 )
+expect(
+  evaluateAlerts(spikeAt(91, 2), goalsFt).alerts.length === 0,
+  'evaluate 91\' goals rejected (FT does not extend past 90)',
+)
+expect(
+  evaluateAlerts(spikeAt(91, 2), ft).alerts.length === 0,
+  'evaluate 91\' corners rejected (P2>90 hard-ban)',
+)
+expect(
+  evaluateAlerts(spikeAt(46, 1), goalsHt).alerts.length === 0,
+  'evaluate 46\' HT goals rejected (P1>45 hard-ban)',
+)
+expect(
+  evaluateAlerts(spikeAt(46, 1), ht).alerts.length === 0,
+  'evaluate 46\' HT corners rejected (P1>45 hard-ban)',
+)
+expect(
+  evaluateAlerts(spikeAt(90, 2), goalsFt).alerts.length > 0,
+  'evaluate 90\' goals ok (FT window includes 90, not past it)',
+)
+
+if (GOAL_WINDOWS.ft.to !== REGULATION_END[2] || GOAL_WINDOWS.ft.to > 90) {
+  fails.push('Goals FT window must be 70–90 and must not extend past 90')
+}
+if (GOAL_WINDOWS.ht.to > REGULATION_END[1]) {
+  fails.push('Goals HT window must not extend into P1 stoppage')
+}
 
 if (CORNER_WINDOWS.ht.from !== 32 || CORNER_WINDOWS.ht.to !== 42) {
   fails.push('HT corner window bounds changed')

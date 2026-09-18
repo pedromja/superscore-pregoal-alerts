@@ -233,7 +233,7 @@ Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 | **Secundária** | `\|Δ1\| ≥ 60` |
 | **Reserva** | `\|v\| ≥ 30` × 4 min, mesmo lado |
 
-Avaliação estrita `alert_minute < goal_minute`. Spike70 sozinho não é regra. Relógio absoluto SuperScore: 1.ª parte 20–42, 2.ª parte 70–90. **Não há alertas em prolongamento** (`period===1 && min>45` ou `period===2 && min>90`) — um 96' de injury time nunca dispara push.
+Avaliação estrita `alert_minute < goal_minute`. Spike70 sozinho não é regra. Relógio absoluto SuperScore: 1.ª parte 20–42, 2.ª parte **70–90 (não passa de 90)**. **Não há alertas em prolongamento** (`period===1 && min>45` ou `period===2 && min>90`) para golos **nem** cantos. Falha Yeovil 96': o push chegou depois do golo, e já não havia mercados nas casas — stoppage é inútil para tips.
 
 ### Cantos (`type=14`) — só janelas HT 32–42 / FT 82–87
 

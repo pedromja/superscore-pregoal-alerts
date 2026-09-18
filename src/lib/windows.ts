@@ -42,7 +42,15 @@ export const CORNER_WINDOWS: Record<CornerHalf, CornerWindow> = {
 }
 
 /**
+ * Last regulation minute on the absolute SuperScore clock.
+ * Anything later is injury / extra time — hard-banned for tips.
+ */
+export const REGULATION_END = { 1: 45, 2: 90 } as const
+
+/**
  * HT 20–42 and FT 70–90 on the absolute SuperScore match clock.
+ * FT `to` is 90 and must never extend past 90: stoppage pushes are useless
+ * (Yeovil 96' — push arrived after the goal, bookie markets already gone).
  * Stoppage (P1>45 / P2>90) is hard-banned even if a bound were widened.
  */
 export const GOAL_WINDOWS: Record<CornerHalf, GoalWindow> = {
@@ -58,7 +66,7 @@ export const GOAL_WINDOWS: Record<CornerHalf, GoalWindow> = {
     half: 'ft',
     period: 2,
     from: 70,
-    to: 90,
+    to: REGULATION_END[2],
     label: '2.ª parte · 70–90',
     shortLabel: 'FT 70–90',
   },
@@ -84,11 +92,15 @@ export function parseCornerHalfOpt(value: unknown): CornerHalf | undefined {
 
 /**
  * Injury / extra time on the absolute SuperScore clock.
- * Hard-bans alerts that would fire too late to act (e.g. 96').
+ * Hard-bans P1 min>45 and P2 min>90 for both goals and corners.
+ *
+ * Failure mode (Yeovil Town vs Solihull Moors, 96'): the push arrived after
+ * the goal had already gone in, and no bookie markets were left. Stoppage
+ * alerts are useless for tips — post-event and markets gone.
  */
 export function isStoppageClock(min: number, period: number): boolean {
-  if (period === 1 && min > 45) return true
-  if (period === 2 && min > 90) return true
+  if (period === 1 && min > REGULATION_END[1]) return true
+  if (period === 2 && min > REGULATION_END[2]) return true
   return false
 }
 
