@@ -469,7 +469,12 @@ export function recalculate(reason = 'manual', market?: Market): ParamVersion {
   saveProposal(proposal, m)
 
   const labeled = loadAlerts(m).filter((a) => a.hit !== null || a.feedback).length
-  if (proposal.autoEligible && labeled >= LEARN_AUTO_MIN_OUTCOMES && reason !== 'manual') {
+  if (
+    proposal.autoEligible &&
+    labeled >= LEARN_AUTO_MIN_OUTCOMES &&
+    reason !== 'manual' &&
+    reason !== 'seed-demos'
+  ) {
     return applyProposal(proposal.id, 'auto', m)
   }
   return proposal
