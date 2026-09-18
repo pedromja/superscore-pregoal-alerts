@@ -47,7 +47,7 @@ HTTPS ou `localhost` são obrigatórios. Se recusar, volte a permitir no ícone 
 ### Ativar no Android (Chrome)
 
 1. Abra o URL do painel.
-2. Menu ⋮ → **Adicionar à ecrã inicial** (recomendado; o `manifest.webmanifest` já está no projeto).
+2. Menu ⋮ → **Adicionar ao ecrã inicial** (recomendado; o `manifest.webmanifest` já está no projeto).
 3. Abra a PWA ou o separador e clique **Ativar notificações**.
 4. Mantenha a app/separador aberta para o polling continuar.
 
