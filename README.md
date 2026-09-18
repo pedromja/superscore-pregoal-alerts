@@ -26,7 +26,7 @@ Isto é um **overlay futuro** em `data/tip_overlay.json`, **separado** de `param
 Fontes SuperScore (não 1X2):
 
 1. **SuperScore (primário)** — o protobuf `OddsApiModel` em `GET /v2/public/stats/offer/market/item?match_id=&app_market=&app_variant=superscore` só traz 1X2 (`name` 1/X/2: `uuid`, `outcome_id`, `price`). Isso **não** é a odd da tip. O `event_id` desse modelo (o mesmo das `odds[]` no fixture) abre os mercados que a UI SuperScore mostra nos tabs de odds, via Superbet offer: `GET https://production-superbet-offer-{ro|pl|br}.freetls.fastly.net/v3/{locale}/events?events={event_id}&includeOnly=fixture,markets,superbets` (SSE em `/v3/subscription/...`). Daí extraímos **Over current+0,5** em Total goluri / Prima repriză - Total goluri, ou Total cornere / Prima repriză - Total cornere. Não se usa 1X2 (`Final`).
-2. **SokkerPro O/U (a seguir)** — API pública m2, **sem login**. Não é mercado next-goal / next-canto; é referência Over/Under. Golos: Over `total actual + 0,5` (`BET365_GOLS_OVER_2_5`, valor `1.90#0` → `1.90`). Cantos: Over `total actual + 0,5` ou a linha **CANTO** inteira mais próxima acima (`BET365_CANTO_OVER_9`). O `preodds` vem como lista de snapshots (`created_at`); usamos o mais recente. Prefere `*_LIVE` quando existir. Timeouts/404 falham em silêncio e o tick do poller continua. `source: sokkerpro` / rótulo `SokkerPro O/U`.
+2. **SokkerPro O/U (a seguir)** — API pública m2, **sem login**. Não é mercado next-goal / next-canto; é referência Over/Under. Golos: Over `total actual + 0,5` (`BET365_GOLS_OVER_2_5`, valor `1.90#0` → `1.90`). Cantos: Over `total actual + 0,5` ou a linha **CANTO** inteira mais próxima acima (`BET365_CANTO_OVER_9`). O `preodds` vem como lista de snapshots (`created_at`); usamos o mais recente. Prefere `*_LIVE` quando existir. O mini board (~1 MB) tem timeout 25s e cache ~90s, partilhado por todos os jogos do tick; ontem só se hoje carregou e o jogo não estiver lá. Timeouts/404 falham em silêncio (um warn por tick no mini) e o poller continua. `source: sokkerpro` / rótulo `SokkerPro O/U`.
 3. **RoboBet Telegram (último fallback de observação)** — linha `Odd Ao Vivo:` (vírgula ou ponto). **Nunca** `Pre-jogo:` nem `Ao Vivo:` (1X2).
 4. Sem odd nas três fontes → o alerta e o push **saem na mesma**; só não há linha de tip/ROI.
 
@@ -174,7 +174,9 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `LEARN_AUTO_MIN_OUTCOMES` | `50` | Limiar informativo de elegibilidade (não aplica sozinho) |
 | `DATA_DIR` | `data` | Subscriptions, alertas, histórico, `tip_overlay.json` |
 | `SOKKERPRO_ODDS` | `1` | `0` desliga o fallback SokkerPro. Timeouts/404 não partem o poller |
-| `SOKKERPRO_TIMEOUT_MS` | `6000` | Timeout por pedido m2 (board / preodds) |
+| `SOKKERPRO_BOARD_TIMEOUT_MS` | `25000` | Timeout do mini board (~1 MB). Não herda o antigo 6s |
+| `SOKKERPRO_PREODDS_TIMEOUT_MS` | `8000` | Timeout por fixture `/preodds`. Alias: `SOKKERPRO_TIMEOUT_MS` |
+| `SOKKERPRO_BOARD_CACHE_MS` | `90000` | Cache in-memory do mini de hoje, partilhado no tick |
 | `SOKKERPRO_M2_URL` | `https://m2.sokkerpro.com` | Base pública; sem credenciais |
 | `NODE_ENV` | `production` | No Docker já vai definido |
 
