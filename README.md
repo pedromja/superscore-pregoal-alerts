@@ -12,6 +12,7 @@ Em cada alerta o poller **observa e regista**:
 
 - **Limite** — mais-um / Over-Under em `current±0,5` (Total goluri / Total cornere, HT quando existir)
 - **Asiático** — handicap/total asiático da mesma família, se o SuperScore/Superbet o expuser
+- **SokkerPro O/U** — referência pública (não next-goal), a seguir ao SuperScore e antes do RoboBet
 - Fallback RoboBet só para a linha `Odd Ao Vivo` (nunca Pre-jogo nem 1X2)
 
 Fica no alerta (`odds`) e no log durável `data/odds_observations.json`, chave `market|half|league`, com timestamp, linha, preços e fonte.
@@ -25,8 +26,9 @@ Isto é um **overlay futuro** em `data/tip_overlay.json`, **separado** de `param
 Fontes SuperScore (não 1X2):
 
 1. **SuperScore (primário)** — o protobuf `OddsApiModel` em `GET /v2/public/stats/offer/market/item?match_id=&app_market=&app_variant=superscore` só traz 1X2 (`name` 1/X/2: `uuid`, `outcome_id`, `price`). Isso **não** é a odd da tip. O `event_id` desse modelo (o mesmo das `odds[]` no fixture) abre os mercados que a UI SuperScore mostra nos tabs de odds, via Superbet offer: `GET https://production-superbet-offer-{ro|pl|br}.freetls.fastly.net/v3/{locale}/events?events={event_id}&includeOnly=fixture,markets,superbets` (SSE em `/v3/subscription/...`). Daí extraímos **Over current+0,5** em Total goluri / Prima repriză - Total goluri, ou Total cornere / Prima repriză - Total cornere. Não se usa 1X2 (`Final`).
-2. **RoboBet Telegram (fallback de observação)** — linha `Odd Ao Vivo:` (vírgula ou ponto). **Nunca** `Pre-jogo:` nem `Ao Vivo:` (1X2).
-3. Sem odd nas duas fontes → o alerta e o push **saem na mesma**; só não há linha de tip/ROI.
+2. **SokkerPro O/U (a seguir)** — API pública m2, **sem login**. Não é mercado next-goal / next-canto; é referência Over/Under. Golos: Over `total actual + 0,5` (`BET365_GOLS_OVER_2_5`, valor `1.90#0` → `1.90`). Cantos: Over `total actual + 0,5` ou a linha **CANTO** inteira mais próxima acima (`BET365_CANTO_OVER_9`). Prefere `*_LIVE` quando existir; senão preodds. Timeouts/404 falham em silêncio e o tick do poller continua. `source: sokkerpro` / rótulo `SokkerPro O/U`.
+3. **RoboBet Telegram (último fallback de observação)** — linha `Odd Ao Vivo:` (vírgula ou ponto). **Nunca** `Pre-jogo:` nem `Ao Vivo:` (1X2).
+4. Sem odd nas três fontes → o alerta e o push **saem na mesma**; só não há linha de tip/ROI.
 
 Não há scrapers de casas. A API HTTP inplay do RoboBet também só tem 1X2 — ignora-se.
 
@@ -171,6 +173,9 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `LEARN_AUTO_APPLY` | `0` | `1` só anota a proposta; **nunca** auto-aplica params/overlay |
 | `LEARN_AUTO_MIN_OUTCOMES` | `50` | Limiar informativo de elegibilidade (não aplica sozinho) |
 | `DATA_DIR` | `data` | Subscriptions, alertas, histórico, `tip_overlay.json` |
+| `SOKKERPRO_ODDS` | `1` | `0` desliga o fallback SokkerPro. Timeouts/404 não partem o poller |
+| `SOKKERPRO_TIMEOUT_MS` | `6000` | Timeout por pedido m2 (board / preodds) |
+| `SOKKERPRO_M2_URL` | `https://m2.sokkerpro.com` | Base pública; sem credenciais |
 | `NODE_ENV` | `production` | No Docker já vai definido |
 
 Health check: `GET /api/push/status` (JSON `{ subscribers, hasVapid }`).
@@ -179,7 +184,7 @@ Health check: `GET /api/push/status` (JSON `{ subscribers, hasVapid }`).
 
 1. Criar projecto em [railway.app](https://railway.app) → New → GitHub/Origin repo.
 2. O `railway.toml` escolhe o `Dockerfile` e health check `/api/push/status`.
-3. Variables → colar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, e opcionalmente `POLLER_REGION=ro`.
+3. Variables → colar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, e opcionalmente `POLLER_REGION=ro`. `SOKKERPRO_ODDS` default ON (`0` desliga).
 4. Deploy. Railway define `PORT`. O URL público (`*.up.railway.app`) é HTTPS — no telemóvel: Definições → **Ativar notificações remotas**.
 5. Opcional: volume persistente montado em `/app/data` para subscriptions e histórico sobreviverem a redeploys.
 

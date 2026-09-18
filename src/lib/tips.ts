@@ -1,7 +1,7 @@
 import type { CornerHalf, Market, MatchTally, RuleId } from './types'
 import { cornerHalfOf } from './windows'
 
-export type TipSource = 'superscore' | 'robobet'
+export type TipSource = 'superscore' | 'sokkerpro' | 'robobet'
 export type TipStatus = 'open' | 'won' | 'lost'
 export type EntryType = 'goals_ht' | 'goals_ft' | 'corners_ht' | 'corners_ft'
 

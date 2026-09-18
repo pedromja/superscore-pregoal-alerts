@@ -26,10 +26,11 @@ import {
   type Tip,
 } from '../src/lib/tips.ts'
 import {
-  emptyObservation,
+  composeOddsObservation,
   maisUmPriceOf,
   type OddsObservation,
 } from '../src/lib/oddsObserve.ts'
+import { SOKKERPRO_SOURCE, SOKKERPRO_SOURCE_LABEL } from '../src/lib/sokkerpro.ts'
 import {
   ALERT_ODD_GATE_ENABLED,
   DEFAULT_TIP_OVERLAY,
@@ -50,6 +51,11 @@ import type {
 import { cornerHalfOf } from '../src/lib/windows.ts'
 import { loadSuperbetEvent, resolveSuperScoreMaisUm, snapshotsFromEvent } from './odds.ts'
 import {
+  loadSokkerProMatchOdds,
+  pickFromSokkerProMatch,
+  resolveSokkerProMaisUm,
+} from './sokkerpro.ts'
+import {
   appendOddsObservation,
   appendTipSkip,
   loadOddsObservations,
@@ -66,7 +72,7 @@ import {
 export type ResolvedOdd = {
   odd: number
   line: number | null
-  source: 'superscore' | 'robobet'
+  source: 'superscore' | 'sokkerpro' | 'robobet'
   sourceLabel: string
   league?: string | null
 }
@@ -127,6 +133,23 @@ export async function resolveTipOdd(args: {
       league: args.fixture.competition,
     }
   }
+  const spro = await resolveSokkerProMaisUm({
+    home: args.fixture.team1,
+    away: args.fixture.team2,
+    market: args.market,
+    half: args.half,
+    currentTotal: args.currentTotal,
+  })
+  if (spro) {
+    const line = String(spro.line).replace('.', ',')
+    return {
+      odd: spro.odd,
+      line: spro.line,
+      source: SOKKERPRO_SOURCE,
+      sourceLabel: `${SOKKERPRO_SOURCE_LABEL} · Over ${line}`,
+      league: args.fixture.competition,
+    }
+  }
   const rb = matchRobobetQuote(args.fixture, args.market)
   if (rb?.odd) {
     return {
@@ -146,7 +169,10 @@ export async function attachOddsToAlerts(args: {
   market: Market
 }): Promise<FeedAlert[]> {
   if (!args.alerts.length) return args.alerts
-  const event = await loadSuperbetEvent(args.fixture.id, args.fixture.oddsEventId)
+  const [event, sproBundle] = await Promise.all([
+    loadSuperbetEvent(args.fixture.id, args.fixture.oddsEventId),
+    loadSokkerProMatchOdds(args.fixture.team1, args.fixture.team2),
+  ])
   const rb = matchRobobetQuote(args.fixture, args.market)
   return args.alerts.map((alert) => {
     const market = parseMarket(alert.market ?? args.market)
@@ -158,8 +184,9 @@ export async function attachOddsToAlerts(args: {
     const snaps = snapshotsFromEvent(event, market, half, currentTotal)
     const robobet =
       rb?.odd && rb.odd > 1 ? { odd: rb.odd, line: rb.linha } : null
-    let obs: OddsObservation = {
-      ...emptyObservation({
+    const spro = pickFromSokkerProMatch(sproBundle, market, half, currentTotal)
+    const obs: OddsObservation = composeOddsObservation({
+      partial: {
         ts: alert.firedAt || new Date().toISOString(),
         fixtureId: args.fixture.id,
         matchLabel: alert.matchLabel,
@@ -170,43 +197,13 @@ export async function attachOddsToAlerts(args: {
         period: alert.period,
         alertId: alert.id,
         currentTotal,
-      }),
+      },
       limit: snaps.limit,
       asian: snaps.asian,
+      sokkerpro: spro,
       robobet,
-    }
-    if (snaps.limit || snaps.asian) {
-      obs = {
-        ...obs,
-        source: robobet ? 'mixed' : 'superscore',
-        sourceLabel: [
-          snaps.limit ? `SuperScore · ${snaps.limit.marketName}` : null,
-          snaps.asian ? `Asiático · ${snaps.asian.marketName}` : null,
-          robobet ? 'RoboBet · Odd Ao Vivo' : null,
-        ]
-          .filter(Boolean)
-          .join(' · '),
-      }
-    } else if (robobet) {
-      obs = {
-        ...obs,
-        source: 'robobet',
-        sourceLabel: 'RoboBet · Odd Ao Vivo',
-        limit: {
-          kind: 'limit',
-          marketName: rb?.marketRaw || 'Odd Ao Vivo',
-          line: robobet.line,
-          prices: [
-            {
-              name: 'Odd Ao Vivo',
-              price: robobet.odd,
-              line: robobet.line,
-              side: 'over',
-            },
-          ],
-        },
-      }
-    }
+      robobetMarketRaw: rb?.marketRaw,
+    })
     appendOddsObservation(obs)
     return { ...alert, odds: obs }
   })
@@ -218,7 +215,7 @@ export function resolvedOddFromAlert(alert: FeedAlert): ResolvedOdd | null {
   return {
     odd: picked.odd,
     line: picked.line,
-    source: alert.odds?.source === 'robobet' ? 'robobet' : 'superscore',
+    source: picked.source,
     sourceLabel: alert.odds?.sourceLabel || 'observação',
     league: alert.odds?.league,
   }

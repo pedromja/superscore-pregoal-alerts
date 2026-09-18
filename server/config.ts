@@ -19,6 +19,8 @@ export const POLLER_REGION =
   process.env.POLLER_REGION || process.env.POLL_REGION || 'ro'
 export const POLLER_INTERVAL_MS = Number(process.env.POLLER_INTERVAL_MS || 45000)
 export const POLLER_ENABLED = process.env.POLLER_ENABLED !== '0'
+/** Public SokkerPro O/U odds. Default ON; set `SOKKERPRO_ODDS=0` to disable. Soft-fail. */
+export const SOKKERPRO_ODDS = process.env.SOKKERPRO_ODDS !== '0'
 export const LEARN_WINDOW = Number(process.env.LEARN_WINDOW || 5)
 export const LEARN_AUTO_MIN_OUTCOMES = Number(
   process.env.LEARN_AUTO_MIN_OUTCOMES || 50,
