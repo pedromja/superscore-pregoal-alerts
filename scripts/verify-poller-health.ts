@@ -21,12 +21,19 @@ import {
 } from '../server/ss.ts'
 import {
   loadAlerts,
+  loadGoals,
+  loadHistory,
+  loadProposal,
   loadSubscriptions,
   markAlertPushed,
   saveAlerts,
+  saveGoals,
+  saveHistory,
+  saveProposal,
   saveSubscriptions,
   upsertAlerts,
 } from '../server/store.ts'
+import { resetLearnStats } from '../server/learn.ts'
 import type { LoggedAlert } from '../server/types.ts'
 import type { Fixture } from '../src/lib/types.ts'
 
@@ -555,6 +562,40 @@ try {
   )
 } finally {
   resetPollerRuntimeForTests()
+}
+
+const previousGoalsAlerts = loadAlerts('goals')
+const previousGoalsEvents = loadGoals('goals')
+const previousGoalsHistory = loadHistory('goals')
+const previousGoalsProposal = loadProposal('goals')
+try {
+  let denied = false
+  try {
+    resetLearnStats({ confirm: false, market: 'goals' })
+  } catch {
+    denied = true
+  }
+  check(denied, 'reset without confirm:true is rejected')
+  upsertAlerts([{ ...sample, id: 'reset-test:primary-1-38-0' }], 'goals')
+  check(
+    loadAlerts('goals').some((a) => a.id === 'reset-test:primary-1-38-0'),
+    'reset fixture alert stored',
+  )
+  const result = resetLearnStats({ confirm: true, market: 'goals' })
+  check(result.market === 'goals', 'reset market goals')
+  check(loadAlerts('goals').length === 0, 'reset clears goal alerts')
+  check(loadGoals('goals').length === 0, 'reset clears goal outcomes')
+  check(loadHistory('goals').length === 0, 'reset clears goal history')
+  check(loadProposal('goals') === null, 'reset clears goal proposal')
+  check(
+    result.kept.some((line) => line.includes('sent.json')),
+    'reset documents that sent-keys stay',
+  )
+} finally {
+  saveAlerts(previousGoalsAlerts, 'goals')
+  saveGoals(previousGoalsEvents, 'goals')
+  saveHistory(previousGoalsHistory, 'goals')
+  saveProposal(previousGoalsProposal, 'goals')
 }
 
 if (fail.length) {

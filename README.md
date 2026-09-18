@@ -21,7 +21,7 @@ Tip/ROI **anexa** a odd quando existe (stake 1u). Missing odd não cria tip, mas
 
 Isto é um **overlay futuro** em `data/tip_overlay.json`, **separado** de `params*.json`. **Não** se aplica o overlay de backtest (golos minOdd≥3 / cantos OFF). `requireOdd` / `minOdd` / `maxOdd` por bucket existem para a aprendizagem propor mais tarde — **nunca** entram em vigor sem confirmação explícita na UI/API.
 
-**As regras de odd vêm mais tarde via aprendizagem + confirmação do utilizador.** As regras base Spike/Swing/Sustained e as janelas Cantos HT 32–42 / FT 82–87 não mudam em silêncio.
+**As regras de odd vêm mais tarde via aprendizagem + confirmação do utilizador.** As regras base Spike/Swing/Sustained, as janelas Golos HT 20–42 / FT 70–90 e as janelas Cantos HT 32–42 / FT 82–87 não mudam em silêncio. Prolongamento (P1>45 / P2>90) está banido.
 
 Fontes SuperScore (não 1X2):
 
@@ -53,7 +53,7 @@ As cotações ingeridas ficam em `data/robobet_tips.json` (máx. ~500). As tips 
 ROI (stake 1u binário): **Golos HT, Golos FT, Cantos HT, Cantos FT**. Acerto = evento SuperScore depois do minuto do alerta, dentro do horizonte existente. Follow-up por liga na página Tips / ROI.
 
 
-Treino de referência (golos): 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/Lisbon).
+Treino de referência (golos): 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/Lisbon). Avaliação ao vivo só nas janelas HT 20–42 / FT 70–90; prolongamento (P1>45 / P2>90) não dispara.
 Treino de cantos (janelas): 95 jogos, HT 89 cantos e FT 52 cantos, mesmas datas. Avaliação ao vivo só nas janelas HT 32–42 / FT 82–87. Fora destas janelas a app de cantos não avalia, não envia push e não grava amostras.
 
 ## Como correr
@@ -223,9 +223,9 @@ Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 
 ## Regras (defaults do treino)
 
-**As regras base não mudam sem confirmação do utilizador.** O overlay de odd não reescreve Spike / Swing / Sustained. Cantos continuam só nas janelas HT 32–42 / FT 82–87, mercados Golos e Cantos em paralelo. Limiares Spike/Swing/Sustained dos cantos inalterados.
+**As regras base não mudam sem confirmação do utilizador.** O overlay de odd não reescreve Spike / Swing / Sustained. Golos só nas janelas HT 20–42 / FT 70–90; cantos só HT 32–42 / FT 82–87. Prolongamento (P1>45 / P2>90) está banido nos dois mercados. Limiares Spike/Swing/Sustained inalterados.
 
-### Golos (default)
+### Golos (default) — só janelas HT 20–42 / FT 70–90
 
 | Regra | Condição |
 |---|---|
@@ -233,11 +233,11 @@ Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 | **Secundária** | `\|Δ1\| ≥ 60` |
 | **Reserva** | `\|v\| ≥ 30` × 4 min, mesmo lado |
 
-Avaliação estrita `alert_minute < goal_minute`. Spike70 sozinho não é regra.
+Avaliação estrita `alert_minute < goal_minute`. Spike70 sozinho não é regra. Relógio absoluto SuperScore: 1.ª parte 20–42, 2.ª parte 70–90. **Não há alertas em prolongamento** (`period===1 && min>45` ou `period===2 && min>90`) — um 96' de injury time nunca dispara push.
 
 ### Cantos (`type=14`) — só janelas HT 32–42 / FT 82–87
 
-`min` é o relógio absoluto do jogo em ambas as partes (a 2.ª começa em 46). Prolongamento (P1>45 / P2>90) fica fora das janelas.
+`min` é o relógio absoluto do jogo em ambas as partes (a 2.ª começa em 46). Prolongamento (P1>45 / P2>90) fica fora das janelas (hard-ban, mesmo que o relógio venha corrompido).
 
 O minuto ao vivo escolhe o conjunto de parâmetros: 32–42 → HT; 82–87 → FT. Definições mostra as duas metades.
 
@@ -248,7 +248,7 @@ O minuto ao vivo escolhe o conjunto de parâmetros: 32–42 → HT; 82–87 → 
 
 Aprendizagem: `alerts_corners_ht.json` / `alerts_corners_ft.json` (e params/history/proposal equivalentes). HIT exige `alert_minute < corner_minute` **e** canto na mesma janela. O horizonte curto do FT é 3 min (`hit5` na API continua a ser o horizonte curto).
 
-Golos não mudam.
+Golos usam as mesmas regras de sinal, agora só dentro de HT 20–42 / FT 70–90. `POST /api/learn/reset` com `{ confirm: true, market?: "goals"|"corners"|"all" }` limpa alertas, outcomes e propostas; **não** apaga `sent.json`, VAPID/subs nem `tip_overlay.json`.
 
 ## APIs SuperScore
 

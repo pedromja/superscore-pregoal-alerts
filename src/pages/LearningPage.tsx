@@ -13,7 +13,7 @@ import {
 import { pct } from '../lib/format'
 import { defaultsFor, marketCopy } from '../lib/market'
 import type { AlertSettings, CornerHalf, CornersByHalf } from '../lib/types'
-import { CORNER_WINDOWS } from '../lib/windows'
+import { CORNER_WINDOWS, GOAL_WINDOWS } from '../lib/windows'
 
 type Props = {
   settings: AlertSettings
@@ -76,8 +76,8 @@ export function LearningPage({
         <h2 className="text-lg font-semibold">Aprendizagem · {copy.toggle}</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
           {market === 'corners'
-            ? `Cantos: HT (${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to}, W=${CORNER_WINDOWS.ht.shortHorizon}) e FT (${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to}, W=${CORNER_WINDOWS.ft.shortHorizon}) nunca misturam limiares nem amostras. Fora destas janelas não há aprendizagem. HIT exige alert_min < canto_min no mesmo mercado/janela.`
-            : `Dois horizontes por alerta (${copy.noun} do mesmo lado, nunca no minuto do ${copy.noun}): ≤5 min e ≤15 min ou fim da parte/jogo.`}{' '}
+            ? `Cantos: HT (${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to}, W=${CORNER_WINDOWS.ht.shortHorizon}) e FT (${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to}, W=${CORNER_WINDOWS.ft.shortHorizon}) nunca misturam limiares nem amostras. Prolongamento (P1>45 / P2>90) está banido. Fora destas janelas não há aprendizagem. HIT exige alert_min < canto_min no mesmo mercado/janela.`
+            : `Golos: ${GOAL_WINDOWS.ht.shortLabel} e ${GOAL_WINDOWS.ft.shortLabel} no relógio absoluto; prolongamento (P1>45 / P2>90) está banido. Dois horizontes por alerta (${copy.noun} do mesmo lado, nunca no minuto do ${copy.noun}): ≤5 min e ≤15 min ou fim da parte/jogo.`}{' '}
           {goalsData?.summary.scoreNote ??
             htData?.summary.scoreNote ??
             'O score de otimização é 0,4×precisão(curto) + 0,6×precisão(longo).'}

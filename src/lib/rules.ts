@@ -21,7 +21,12 @@ import type {
   Side,
   TimelinePoint,
 } from './types'
-import { cornerHalfOf, inCornerWindow } from './windows'
+import {
+  cornerHalfOf,
+  inCornerWindow,
+  inGoalsWindow,
+  isStoppageClock,
+} from './windows'
 
 export const DEFAULT_SETTINGS: AlertSettings = defaultsFor('goals')
 export const DEFAULT_CORNER_SETTINGS: AlertSettings = defaultsFor('corners', 'ht')
@@ -180,11 +185,15 @@ export function evaluatePoint(
   points: TimelinePoint[] = [],
 ): FiredAlert[] {
   if (!point.side) return []
+  // Hard-ban injury time for both markets (P1>45 / P2>90), e.g. 96' FT.
+  if (isStoppageClock(point.min, point.period)) return []
   const market = parseMarket(settings.market)
   const half = cornerHalfOf(point.min, point.period)
   if (market === 'corners') {
     if (!half) return []
     if (settings.cornerHalf && settings.cornerHalf !== half) return []
+  } else if (!inGoalsWindow(point.min, point.period)) {
+    return []
   }
 
   const signals = signalsAt(point, settings, points)
@@ -314,7 +323,9 @@ export function extractGoals(
   payload: MomentumPayload,
   points: TimelinePoint[],
 ): GoalEvent[] {
-  return extractEvents(payload, points, eventTypeFor('goals'))
+  return extractEvents(payload, points, eventTypeFor('goals')).filter((event) =>
+    inGoalsWindow(event.min, event.period),
+  )
 }
 
 export function extractCorners(

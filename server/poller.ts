@@ -1,6 +1,7 @@
 import { pushTagFor } from '../src/lib/market.ts'
 import { ruleNotifyEnabled } from '../src/lib/notifications.ts'
 import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../src/lib/rules.ts'
+import { inMarketClockWindow } from '../src/lib/windows.ts'
 import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
 import type {
   AlertSettings,
@@ -243,6 +244,7 @@ async function notifyFreshAlerts(
   const notified: FeedAlert[] = []
   for (const alert of fresh) {
     if (alert.coincident) continue
+    if (!inMarketClockWindow(market, alert.min, alert.period)) continue
     const notify = settingsForAlert(alert, settings, byHalf)
     if (!ruleNotifyEnabled(notify, alert.rule)) continue
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
@@ -324,13 +326,15 @@ export async function processEvaluatedAlerts(
     market,
     settings,
     byHalf,
-    fresh,
     first,
     finished,
     payload,
     events,
     points,
   } = args
+  const fresh = args.fresh.filter((alert) =>
+    inMarketClockWindow(market, alert.min, alert.period),
+  )
 
   if (first) {
     for (const alert of fresh) {
@@ -441,7 +445,15 @@ async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<n
     const market = loadActiveMarket()
     const settings = currentSettings(market)
     const byHalf = market === 'corners' ? cornersBundle() : undefined
-    const { points, alerts } = evaluateAlerts(payload, settings, undefined, byHalf)
+    const { points, alerts: rawAlerts } = evaluateAlerts(
+      payload,
+      settings,
+      undefined,
+      byHalf,
+    )
+    const alerts = rawAlerts.filter((alert) =>
+      inMarketClockWindow(market, alert.min, alert.period),
+    )
     const events = extractMarketEvents(
       payload,
       points,

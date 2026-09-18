@@ -270,6 +270,59 @@ export function saveProposal(
   writeJson(FILES[learnScope(market, half)].proposal, item)
 }
 
+export type ResetLearnMarket = 'goals' | 'corners' | 'all'
+
+const RESET_SCOPE: Record<
+  Exclude<ResetLearnMarket, 'all'>,
+  LearnScope[]
+> = {
+  goals: ['goals'],
+  corners: ['corners_ht', 'corners_ft'],
+}
+
+const SCOPE_REF: Record<LearnScope, { market: Market; half?: CornerHalf }> = {
+  goals: { market: 'goals' },
+  corners_ht: { market: 'corners', half: 'ht' },
+  corners_ft: { market: 'corners', half: 'ft' },
+}
+
+/** Files we deliberately do not wipe on learn reset (avoid push storms / lost overlay). */
+export const LEARN_RESET_KEPT = [
+  'params*.json (limiares actuais)',
+  'sent.json (anti re-spam de push)',
+  'primed.json',
+  'subscriptions.json / vapid.json',
+  'tip_overlay.json / tip_overlay_proposal.json',
+  'tips.json / robobet_tips.json / odds_observations.json',
+  'matches/*.json (arquivo de momentum)',
+] as const
+
+function scopesForReset(market: ResetLearnMarket): LearnScope[] {
+  return market === 'all'
+    ? ['goals', 'corners_ht', 'corners_ft']
+    : RESET_SCOPE[market]
+}
+
+export function resetLearnStore(market: ResetLearnMarket = 'all'): {
+  market: ResetLearnMarket
+  scopes: LearnScope[]
+  cleared: string[]
+  kept: readonly string[]
+} {
+  const scopes = scopesForReset(market)
+  const cleared: string[] = []
+  for (const scope of scopes) {
+    const { market: m, half } = SCOPE_REF[scope]
+    const files = FILES[scope]
+    saveAlerts([], m, half)
+    saveGoals([], m, half)
+    saveHistory([], m, half)
+    saveProposal(null, m, half)
+    cleared.push(files.alerts, files.events, files.history, files.proposal)
+  }
+  return { market, scopes, cleared, kept: LEARN_RESET_KEPT }
+}
+
 export function saveMatch(match: StoredMatch): void {
   writeFileSync(
     join(MATCHES_DIR, `${match.fixture.id}.json`),

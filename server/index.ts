@@ -17,6 +17,7 @@ import {
   currentSettings,
   ingestFeedAlerts,
   recalculate,
+  resetLearnStats,
   resolveMarket,
   seedDemos,
   setFeedback,
@@ -344,6 +345,24 @@ app.post('/api/learn/seed-demos', (req, res) => {
           }
         : computeMetrics(currentSettings(market, half)),
   })
+})
+
+app.post('/api/learn/reset', (req, res) => {
+  const body = (req.body ?? {}) as { confirm?: unknown; market?: unknown }
+  try {
+    const result = resetLearnStats({
+      confirm: body.confirm,
+      market: body.market,
+    })
+    res.json({
+      ok: true,
+      ...result,
+      note:
+        'Limpou alertas, outcomes e propostas. params, sent-keys, VAPID/subs e tip overlay ficaram. sent.json mantém-se para não reenviar push dos mesmos ids.',
+    })
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
+  }
 })
 
 app.get('/api/learn/params', (req, res) => {

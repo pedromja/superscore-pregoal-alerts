@@ -7,7 +7,7 @@ import {
 import { pct } from '../lib/format'
 import { defaultsFor, marketCopy, ruleDetails, syncNotifyFlags } from '../lib/market'
 import type { AlertSettings, CornerHalf, CornersByHalf, RuleKind } from '../lib/types'
-import { CORNER_WINDOWS } from '../lib/windows'
+import { CORNER_WINDOWS, GOAL_WINDOWS } from '../lib/windows'
 
 type Props = {
   settings: AlertSettings
@@ -40,8 +40,9 @@ export function SettingsPage({
             <strong>
               {CORNER_WINDOWS.ft.from}–{CORNER_WINDOWS.ft.to}
             </strong>{' '}
-            (2.ª parte, o relógio começa em 46). Fora destas janelas não há
-            avaliação, push nem amostras de aprendizagem.
+            (2.ª parte, o relógio começa em 46). Prolongamento (P1&gt;45 /
+            P2&gt;90) está banido. Fora destas janelas não há avaliação, push
+            nem amostras de aprendizagem.
           </p>
         </section>
         <div className="grid gap-4 xl:grid-cols-2">
@@ -78,7 +79,7 @@ export function SettingsPage({
           settings={settings}
           onChange={onChange}
           title="Definições das regras"
-          blurb={`Defaults treinados para ${copy.nounPlural}. Gravados neste browser (\`localStorage\`), separados de cantos. Um pico no minuto do ${copy.noun} nunca conta como pré-alerta.`}
+          blurb={`Defaults treinados para ${copy.nounPlural}. Relógio absoluto: só ${GOAL_WINDOWS.ht.shortLabel} e ${GOAL_WINDOWS.ft.shortLabel}. Prolongamento (P1>45 / P2>90) está banido — um alerta aos 96' nunca sai. Gravados neste browser (\`localStorage\`), separados de cantos. Um pico no minuto do ${copy.noun} nunca conta como pré-alerta.`}
         />
       </div>
       <TrainingAside settings={settings} />
@@ -313,7 +314,7 @@ function TrainingAside({
   const windowLabel =
     settings.market === 'corners'
       ? CORNER_WINDOWS[settings.cornerHalf === 'ft' ? 'ft' : 'ht'].shortLabel
-      : copy.toggle
+      : `${GOAL_WINDOWS.ht.shortLabel} / ${GOAL_WINDOWS.ft.shortLabel}`
 
   return (
     <aside className="space-y-3">

@@ -19,7 +19,7 @@ import type {
   Fixture,
   MomentumPayload,
 } from '../lib/types'
-import { CORNER_WINDOWS } from '../lib/windows'
+import { CORNER_WINDOWS, GOAL_WINDOWS } from '../lib/windows'
 
 type Props = {
   settings: AlertSettings
@@ -147,7 +147,7 @@ export function ReplayPage({ settings, cornersByHalf, date, onDate }: Props) {
           </span>
           {market === 'corners'
             ? ` nas janelas ${CORNER_WINDOWS.ht.shortLabel} (W=${CORNER_WINDOWS.ht.shortHorizon}) e ${CORNER_WINDOWS.ft.shortLabel} (W=${CORNER_WINDOWS.ft.shortHorizon}).`
-            : ` na janela de ${settings.evaluationWindow} min.`}
+            : ` nas janelas ${GOAL_WINDOWS.ht.shortLabel} / ${GOAL_WINDOWS.ft.shortLabel} (sem prolongamento), horizonte de ${settings.evaluationWindow} min.`}
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">

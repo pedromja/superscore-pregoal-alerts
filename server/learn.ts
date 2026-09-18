@@ -26,6 +26,7 @@ import type {
 import {
   CORNER_HALVES,
   cornerHalfOf,
+  inGoalsWindow,
   parseCornerHalf,
   parseCornerHalfOpt,
 } from '../src/lib/windows.ts'
@@ -38,6 +39,7 @@ import {
   loadHistory,
   loadParams,
   loadProposal,
+  resetLearnStore,
   saveAlerts,
   saveHistory,
   saveMatch,
@@ -45,6 +47,7 @@ import {
   saveProposal,
   upsertAlerts,
   upsertGoals,
+  type ResetLearnMarket,
 } from './store.ts'
 import type {
   DualMetrics,
@@ -633,6 +636,10 @@ function usableCornerAlert(alert: FeedAlert): boolean {
   return cornerHalfOf(alert.min, alert.period) !== null
 }
 
+function usableGoalAlert(alert: FeedAlert): boolean {
+  return inGoalsWindow(alert.min, alert.period)
+}
+
 export function ingestFeedAlerts(
   alerts: FeedAlert[],
   settings: AlertSettings,
@@ -643,7 +650,7 @@ export function ingestFeedAlerts(
   const m = parseMarket(market ?? settings.market ?? alerts[0]?.market)
   if (m !== 'corners') {
     const logged = alerts
-      .filter((a) => !a.coincident)
+      .filter((a) => !a.coincident && usableGoalAlert(a))
       .map((a) => toLoggedAlert({ ...a, market: m }, settings, sentPush))
     return upsertAlerts(logged, m)
   }
@@ -728,7 +735,9 @@ export function seedDemos(
     saveMatch(match)
     const replay = evaluateReplay(payload, settings)
     const feed: FeedAlert[] = replay.alerts
-      .filter((a) => m !== 'corners' || usableCornerAlert(a))
+      .filter((a) =>
+        m === 'corners' ? usableCornerAlert(a) : usableGoalAlert(a),
+      )
       .map((a) =>
         withMatchTallies(
           {
@@ -748,6 +757,24 @@ export function seedDemos(
     alerts += feed.filter((a) => !a.coincident).length
   }
   return { matches: demos.length, alerts }
+}
+
+export function parseResetMarket(value: unknown): ResetLearnMarket {
+  if (value === undefined || value === null || value === '') return 'all'
+  if (value === 'goals' || value === 'corners' || value === 'all') return value
+  throw new Error("market deve ser 'goals' | 'corners' | 'all'")
+}
+
+export function resetLearnStats(opts: {
+  confirm?: unknown
+  market?: unknown
+}): ReturnType<typeof resetLearnStore> {
+  if (opts.confirm !== true) {
+    throw new Error(
+      'Reset exige confirmação explícita (confirm:true). Não apaga VAPID, subscrições, overlay nem sent-keys.',
+    )
+  }
+  return resetLearnStore(parseResetMarket(opts.market))
 }
 
 export { RULE_SHORT }

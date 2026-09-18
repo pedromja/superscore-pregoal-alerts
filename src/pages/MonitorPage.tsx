@@ -36,7 +36,7 @@ import type {
   Fixture,
   MomentumPayload,
 } from '../lib/types'
-import { CORNER_WINDOWS, cornerHalfOf } from '../lib/windows'
+import { CORNER_WINDOWS, GOAL_WINDOWS, cornerHalfOf, goalHalfOf } from '../lib/windows'
 
 type Props = {
   settings: AlertSettings
@@ -263,16 +263,17 @@ export function MonitorPage({
     : { points: [], alerts: [] }
   const goals = payload ? extractMarketEvents(payload, chart.points, market) : []
   const clockPoint = chart.points.at(-1)
-  const liveHalf =
-    market === 'corners' && clockPoint
+  const liveHalf = clockPoint
+    ? market === 'corners'
       ? cornerHalfOf(clockPoint.min, clockPoint.period)
-      : null
-  const liveWindowLabel =
-    market !== 'corners'
-      ? null
-      : liveHalf
-        ? `Parâmetros ${CORNER_WINDOWS[liveHalf].shortLabel}`
-        : `Fora das janelas ${CORNER_WINDOWS.ht.shortLabel} / ${CORNER_WINDOWS.ft.shortLabel}`
+      : goalHalfOf(clockPoint.min, clockPoint.period)
+    : null
+  const clockWindows = market === 'corners' ? CORNER_WINDOWS : GOAL_WINDOWS
+  const liveWindowLabel = !clockPoint
+    ? null
+    : liveHalf
+      ? `Janela ${clockWindows[liveHalf].shortLabel}`
+      : `Fora das janelas ${clockWindows.ht.shortLabel} / ${clockWindows.ft.shortLabel}`
 
   return (
     <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
@@ -486,10 +487,8 @@ export function MonitorPage({
             <p className="rounded-2xl border border-dashed border-line px-4 py-10 text-center text-sm text-emerald-100/45">
               Ainda sem disparos. Os alertas aparecem quando Spike, Swing ou
               Sustained cruzam os limiares — sempre com o lado do sinal do
-              momentum. Mercado activo: {copy.toggle}
-              {market === 'corners'
-                ? ` · só nas janelas ${CORNER_WINDOWS.ht.shortLabel} e ${CORNER_WINDOWS.ft.shortLabel}.`
-                : '.'}
+              momentum.               Mercado activo: {copy.toggle}
+              {` · só nas janelas ${clockWindows.ht.shortLabel} e ${clockWindows.ft.shortLabel} (sem prolongamento).`}
             </p>
           ) : (
             <div className="grid gap-2">
