@@ -1,4 +1,4 @@
-import type { AlertSettings, FeedAlert, RuleId, Side } from './types'
+import type { AlertSettings, FeedAlert, Market, RuleId, Side } from './types'
 
 export type RuleMetrics = {
   precision: number | null
@@ -50,6 +50,7 @@ export type LoggedAlert = {
   period: number
   side: Side
   ruleId: RuleId
+  market?: Market
   features: { v: number; delta1: number | null; sustained: number }
   hit: boolean | null
   hit5: boolean | null
@@ -64,6 +65,7 @@ export type LoggedAlert = {
 }
 
 export type LearnPayload = {
+  market?: Market
   summary: LearnSummary
   settings: AlertSettings
   proposal: ParamVersion | null
@@ -72,15 +74,25 @@ export type LearnPayload = {
   autoAfter: number
 }
 
-export async function fetchLearn(): Promise<LearnPayload> {
-  const res = await fetch('/api/learn/summary')
+function withMarket(path: string, market?: Market): string {
+  if (!market) return path
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}market=${encodeURIComponent(market)}`
+}
+
+export async function fetchLearn(market?: Market): Promise<LearnPayload> {
+  const res = await fetch(withMarket('/api/learn/summary', market))
   if (!res.ok) throw new Error('API de aprendizagem indisponível')
   return (await res.json()) as LearnPayload
 }
 
-export async function postAlerts(alerts: FeedAlert[]): Promise<void> {
+export async function postAlerts(
+  alerts: FeedAlert[],
+  market?: Market,
+): Promise<void> {
   if (!alerts.length) return
-  await fetch('/api/learn/alerts', {
+  const m = market ?? alerts[0]?.market
+  await fetch(withMarket('/api/learn/alerts', m), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(alerts),
@@ -90,38 +102,54 @@ export async function postAlerts(alerts: FeedAlert[]): Promise<void> {
 export async function postFeedback(
   id: string,
   feedback: 'up' | 'down' | null,
+  market?: Market,
 ): Promise<void> {
-  const res = await fetch('/api/learn/feedback', {
+  const res = await fetch(withMarket('/api/learn/feedback', market), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, feedback }),
+    body: JSON.stringify({ id, feedback, market }),
   })
   if (!res.ok) throw new Error('Feedback não gravado')
 }
 
-export async function recalculateLearn(): Promise<ParamVersion> {
-  const res = await fetch('/api/learn/recalculate', {
+export async function recalculateLearn(market?: Market): Promise<ParamVersion> {
+  const res = await fetch(withMarket('/api/learn/recalculate', market), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason: 'manual' }),
+    body: JSON.stringify({ reason: 'manual', market }),
   })
   if (!res.ok) throw new Error('Recálculo falhou')
   return (await res.json()) as ParamVersion
 }
 
-export async function applyLearnProposal(id: string): Promise<ParamVersion> {
-  const res = await fetch('/api/learn/apply', {
+export async function applyLearnProposal(
+  id: string,
+  market?: Market,
+): Promise<ParamVersion> {
+  const res = await fetch(withMarket('/api/learn/apply', market), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, market }),
   })
   if (!res.ok) throw new Error('Não foi possível aplicar')
   return (await res.json()) as ParamVersion
 }
 
-export async function seedLearnDemos(): Promise<void> {
-  const res = await fetch('/api/learn/seed-demos', { method: 'POST' })
+export async function seedLearnDemos(market?: Market): Promise<void> {
+  const res = await fetch(withMarket('/api/learn/seed-demos', market), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ market }),
+  })
   if (!res.ok) throw new Error('Falha a importar amostras')
+}
+
+export async function putActiveMarket(market: Market): Promise<void> {
+  await fetch('/api/learn/market', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ market }),
+  })
 }
 
 export async function fetchPollerStatus(): Promise<{

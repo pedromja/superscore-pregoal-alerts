@@ -11,6 +11,7 @@ import {
   phaseLabel,
   scoreLabel,
 } from '../lib/format'
+import { marketCopy, parseMarket } from '../lib/market'
 import {
   loadFeed,
   loadPrimed,
@@ -26,7 +27,8 @@ import {
   showAlertNotification,
 } from '../lib/notifications'
 import { postAlerts, postFeedback, fetchPollerStatus } from '../lib/learnApi'
-import { evaluateAlerts, extractGoals } from '../lib/rules'
+import { evaluateAlerts, extractMarketEvents } from '../lib/rules'
+import { withMatchTallies } from '../lib/tally'
 import type { AlertSettings, FeedAlert, Fixture, MomentumPayload } from '../lib/types'
 
 type Props = {
@@ -46,6 +48,8 @@ export function MonitorPage({
   focusAlertKey,
   onFocusConsumed,
 }: Props) {
+  const market = parseMarket(settings.market)
+  const copy = marketCopy(market)
   const [region, setRegion] = useState('ro')
   const [fixtures, setFixtures] = useState<Fixture[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,7 +57,7 @@ export function MonitorPage({
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [watchLive, setWatchLive] = useState(true)
-  const [feed, setFeed] = useState<FeedAlert[]>(() => loadFeed())
+  const [feed, setFeed] = useState<FeedAlert[]>(() => loadFeed(parseMarket(settings.market)))
   const [payload, setPayload] = useState<MomentumPayload | null>(null)
   const [payloadError, setPayloadError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -61,8 +65,8 @@ export function MonitorPage({
     focusAlertKey ?? null,
   )
   const [pollerLine, setPollerLine] = useState<string | null>(null)
-  const seen = useRef(loadSeen())
-  const primed = useRef(loadPrimed())
+  const seen = useRef(loadSeen(parseMarket(settings.market)))
+  const primed = useRef(loadPrimed(parseMarket(settings.market)))
 
   const selected = fixtures.find((f) => f.id === selectedId) ?? null
 
@@ -121,7 +125,13 @@ export function MonitorPage({
   }, [])
 
   useEffect(() => {
-    saveFeed(feed)
+    seen.current = loadSeen(market)
+    primed.current = loadPrimed(market)
+    setFeed(loadFeed(market))
+  }, [market])
+
+  useEffect(() => {
+    saveFeed(feed, market)
   }, [feed])
 
   useEffect(() => {
@@ -143,30 +153,36 @@ export function MonitorPage({
     markSelected: boolean,
   ) {
     const { points, alerts } = evaluateAlerts(data, settings)
-    const goals = extractGoals(data, points)
-    const goalKeys = new Set(goals.map((g) => `${g.period}-${g.min}-${g.index}`))
+    const events = extractMarketEvents(data, points, market)
+    const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
     const firstSnapshot = !primed.current.has(fixture.id)
     const fresh: FeedAlert[] = []
     for (const alert of alerts) {
       const key = `${fixture.id}:${alert.id}`
       if (seen.current.has(key)) continue
       seen.current.add(key)
-      fresh.push({
-        ...alert,
-        fixtureId: fixture.id,
-        matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-        firedAt: new Date().toISOString(),
-        coincident: goalKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
-      })
+      fresh.push(
+        withMatchTallies(
+          {
+            ...alert,
+            fixtureId: fixture.id,
+            matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+            firedAt: new Date().toISOString(),
+            coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+            market,
+          },
+          data,
+        ),
+      )
     }
     if (firstSnapshot) {
       primed.current.add(fixture.id)
-      savePrimed(primed.current)
+      savePrimed(primed.current, market)
     }
-    saveSeen(seen.current)
+    saveSeen(seen.current, market)
     if (fresh.length) {
       setFeed((prev) => [...fresh.reverse(), ...prev].slice(0, 80))
-      void postAlerts(fresh)
+      void postAlerts(fresh, market)
       if (!firstSnapshot) {
         for (const alert of fresh) {
           if (alert.coincident) continue
@@ -234,7 +250,7 @@ export function MonitorPage({
   const chart = payload
     ? evaluateAlerts(payload, settings)
     : { points: [], alerts: [] }
-  const goals = payload ? extractGoals(payload, chart.points) : []
+  const goals = payload ? extractMarketEvents(payload, chart.points, market) : []
 
   return (
     <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
@@ -409,7 +425,7 @@ export function MonitorPage({
               </div>
               {goals.length > 0 ? (
                 <p className="mt-3 text-xs text-emerald-100/50">
-                  Golos na série:{' '}
+                  {copy.toggle} na série:{' '}
                   {goals
                     .map(
                       (g) =>
@@ -435,7 +451,7 @@ export function MonitorPage({
               type="button"
               onClick={() => {
                 setFeed([])
-                saveFeed([])
+                saveFeed([], market)
                 setHighlightKey(null)
               }}
               className="text-xs text-emerald-100/45 hover:text-emerald-50"
@@ -447,7 +463,7 @@ export function MonitorPage({
             <p className="rounded-2xl border border-dashed border-line px-4 py-10 text-center text-sm text-emerald-100/45">
               Ainda sem disparos. Os alertas aparecem quando Spike, Swing ou
               Sustained cruzam os limiares — sempre com o lado do sinal do
-              momentum.
+              momentum. Mercado activo: {copy.toggle}.
             </p>
           ) : (
             <div className="grid gap-2">
@@ -457,9 +473,10 @@ export function MonitorPage({
                   <AlertCard
                     key={`${key}-${alert.firedAt}`}
                     alert={alert}
+                    market={market}
                     now={now}
                     highlighted={highlightKey === key}
-                    onFeedback={(id, vote) => void postFeedback(id, vote)}
+                    onFeedback={(id, vote) => void postFeedback(id, vote, market)}
                   />
                 )
               })}

@@ -1,5 +1,6 @@
 import { Bell, BellOff, BellRing } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { parseMarket, ruleDetails } from '../lib/market'
 import { loadFeed, saveFeed } from '../lib/monitorStore'
 import {
   buildTestAlert,
@@ -62,6 +63,8 @@ export function useNotifyPermission(): {
 
 export function NotificationBar({ settings, onChange, compact = false }: Props) {
   const { permission, activate } = useNotifyPermission()
+  const details = ruleDetails(settings)
+  const market = parseMarket(settings.market)
   const [testNote, setTestNote] = useState<string | null>(null)
   const [remote, setRemote] = useState(false)
   const [remoteNote, setRemoteNote] = useState<string | null>(null)
@@ -94,11 +97,11 @@ export function NotificationBar({ settings, onChange, compact = false }: Props) 
         return
       }
     }
-    const sample = buildTestAlert()
-    const feed = loadFeed()
+    const sample = buildTestAlert(market)
+    const feed = loadFeed(market)
     const key = feedAlertKey(sample)
     if (!feed.some((item) => feedAlertKey(item) === key)) {
-      saveFeed([sample, ...feed])
+      saveFeed([sample, ...feed], market)
     }
     await showAlertNotification(sample)
     setTestNote('Notificação de teste enviada. Clique nela para abrir o alerta.')
@@ -200,13 +203,13 @@ export function NotificationBar({ settings, onChange, compact = false }: Props) 
         <RuleNotifyToggle
           checked={settings.notifySecondary}
           title="Secundária"
-          detail="Swing |Δ1| ≥ 60"
+          detail={details.secondary}
           onChange={(v) => onChange({ ...settings, notifySecondary: v })}
         />
         <RuleNotifyToggle
           checked={settings.notifyFallback}
           title="Reserva"
-          detail="Sustained ×4 — mais ruidosa"
+          detail={details.fallback}
           onChange={(v) => onChange({ ...settings, notifyFallback: v })}
         />
       </div>
@@ -275,7 +278,7 @@ export function NotificationBar({ settings, onChange, compact = false }: Props) 
           <button
             type="button"
             onClick={() =>
-              void sendRemoteTest()
+              void sendRemoteTest(market)
                 .then((r) =>
                   setRemoteNote(`Push de teste enviado a ${r.sent} dispositivo(s).`),
                 )

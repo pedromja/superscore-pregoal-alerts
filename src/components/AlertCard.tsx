@@ -1,7 +1,9 @@
+import { marketCopy, parseMarket } from '../lib/market'
 import { formatRelative, formatSigned, minuteLabel, sideLabel } from '../lib/format'
 import { alertDomId, feedAlertKey } from '../lib/notifications'
 import { RULE_SHORT } from '../lib/rules'
-import type { FeedAlert, FiredAlert, Side } from '../lib/types'
+import { talliesLineOf } from '../lib/tally'
+import type { FeedAlert, FiredAlert, Market, Side } from '../lib/types'
 
 function SideChip({ side }: { side: Side }) {
   const home = side === 'home'
@@ -56,13 +58,17 @@ export function AlertCard({
   alert,
   now,
   highlighted = false,
+  market,
   onFeedback,
 }: {
   alert: FeedAlert
   now?: number
   highlighted?: boolean
+  market?: Market
   onFeedback?: (id: string, vote: 'up' | 'down') => void
 }) {
+  const copy = marketCopy(parseMarket(market ?? alert.market))
+  const tallies = talliesLineOf(alert)
   return (
     <article
       id={alertDomId(feedAlertKey(alert))}
@@ -75,6 +81,11 @@ export function AlertCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-emerald-50">{alert.matchLabel}</p>
+          {tallies ? (
+            <p className="mt-0.5 font-mono text-xs font-semibold text-lime">
+              {tallies}
+            </p>
+          ) : null}
           <p className="mt-1 text-xs text-emerald-100/55">
             {minuteLabel(alert.min, alert.period)}
             {alert.firedAt ? ` · ${formatRelative(alert.firedAt, now)}` : null}
@@ -87,7 +98,7 @@ export function AlertCard({
       </div>
       {alert.coincident ? (
         <p className="mt-2 text-xs text-rose-300/90">
-          Pico no minuto do golo — coincidente, não conta como pré-alerta.
+          Pico no minuto do {copy.noun} — coincidente, não conta como pré-alerta.
         </p>
       ) : null}
       <AlertMetrics alert={alert} />

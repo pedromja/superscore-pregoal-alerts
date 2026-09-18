@@ -1,6 +1,7 @@
 import type {
   AlertSettings,
   Fixture,
+  Market,
   MomentumPayload,
   RuleId,
   Side,
@@ -21,6 +22,7 @@ export type LoggedAlert = {
   index: number
   side: Side
   ruleId: RuleId
+  market?: Market
   features: { v: number; delta1: number | null; sustained: number }
   thresholdsSnapshot: Partial<AlertSettings>
   ts: string
@@ -44,6 +46,7 @@ export type GoalRecord = {
   min: number
   index: number
   side: Side
+  market?: Market
   hadPrealert: boolean | null
   leadMin: number | null
   hadPrealert5: boolean | null

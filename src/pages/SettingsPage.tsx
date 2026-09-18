@@ -1,7 +1,7 @@
 import { NotificationBar } from '../components/NotificationBar'
-import { TRAINING } from '../lib/demos'
+import { TRAINING, TRAINING_CORNERS } from '../lib/demos'
 import { pct } from '../lib/format'
-import { DEFAULT_SETTINGS } from '../lib/rules'
+import { defaultsFor, marketCopy, ruleDetails } from '../lib/market'
 import type { AlertSettings } from '../lib/types'
 
 type Props = {
@@ -12,6 +12,17 @@ type Props = {
 export function SettingsPage({ settings, onChange }: Props) {
   const set = <K extends keyof AlertSettings>(key: K, value: AlertSettings[K]) =>
     onChange({ ...settings, [key]: value })
+  const copy = marketCopy(settings.market)
+  const details = ruleDetails(settings)
+  const training = settings.market === 'corners' ? TRAINING_CORNERS : TRAINING
+  const nEvents =
+    settings.market === 'corners'
+      ? TRAINING_CORNERS.nEvents
+      : TRAINING.nGoals
+  const coincidence =
+    settings.market === 'corners'
+      ? TRAINING_CORNERS.coincidence.spike70OnlyAtEvent
+      : TRAINING.coincidence.spike70OnlyAtGoal
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -21,9 +32,9 @@ export function SettingsPage({ settings, onChange }: Props) {
         <div>
           <h2 className="text-lg font-semibold">Definições das regras</h2>
           <p className="mt-1 text-sm text-emerald-100/60">
-            Defaults treinados em 100 jogos / 737 golos. Gravados neste
-            browser (`localStorage`). Um pico no minuto do golo nunca conta
-            como pré-alerta.
+            Defaults treinados para {copy.nounPlural}. Gravados neste browser
+            (`localStorage`), separados de {settings.market === 'corners' ? 'golos' : 'cantos'}.
+            Um pico no minuto do {copy.noun} nunca conta como pré-alerta.
           </p>
         </div>
 
@@ -32,19 +43,19 @@ export function SettingsPage({ settings, onChange }: Props) {
             checked={settings.enablePrimary}
             onChange={(v) => set('enablePrimary', v)}
             title="Primária (recomendada)"
-            detail="Spike80 AND (Swing50 OR Sustained3)"
+            detail={details.primary}
           />
           <Toggle
             checked={settings.enableSecondary}
             onChange={(v) => set('enableSecondary', v)}
             title="Secundária"
-            detail="Swing |Δ1| ≥ limiar secundário — antecipação mais pura"
+            detail={details.secondary}
           />
           <Toggle
             checked={settings.enableFallback}
             onChange={(v) => set('enableFallback', v)}
             title="Reserva"
-            detail="Pressão sustentada no mesmo lado durante N minutos"
+            detail={details.fallback}
           />
         </div>
 
@@ -63,13 +74,23 @@ export function SettingsPage({ settings, onChange }: Props) {
             max={90}
             onChange={(v) => set('swingComboThreshold', v)}
           />
-          <NumberField
-            label="Swing secundário |Δ1|"
-            value={settings.swingSecondaryThreshold}
-            min={30}
-            max={100}
-            onChange={(v) => set('swingSecondaryThreshold', v)}
-          />
+          {settings.market === 'corners' ? (
+            <NumberField
+              label="Spike reserva |v|"
+              value={settings.fallbackSpikeThreshold}
+              min={50}
+              max={90}
+              onChange={(v) => set('fallbackSpikeThreshold', v)}
+            />
+          ) : (
+            <NumberField
+              label="Swing secundário |Δ1|"
+              value={settings.swingSecondaryThreshold}
+              min={30}
+              max={100}
+              onChange={(v) => set('swingSecondaryThreshold', v)}
+            />
+          )}
           <NumberField
             label="Sustained |v|"
             value={settings.sustainedThreshold}
@@ -84,13 +105,32 @@ export function SettingsPage({ settings, onChange }: Props) {
             max={8}
             onChange={(v) => set('sustainedComboMinutes', v)}
           />
-          <NumberField
-            label="Sustained reserva (min)"
-            value={settings.sustainedFallbackMinutes}
-            min={3}
-            max={10}
-            onChange={(v) => set('sustainedFallbackMinutes', v)}
-          />
+          {settings.market === 'corners' ? (
+            <>
+              <NumberField
+                label="Sustained secundário |v|"
+                value={settings.sustainedSecondaryThreshold}
+                min={10}
+                max={40}
+                onChange={(v) => set('sustainedSecondaryThreshold', v)}
+              />
+              <NumberField
+                label="Sustained secundário (min)"
+                value={settings.sustainedSecondaryMinutes}
+                min={3}
+                max={8}
+                onChange={(v) => set('sustainedSecondaryMinutes', v)}
+              />
+            </>
+          ) : (
+            <NumberField
+              label="Sustained reserva (min)"
+              value={settings.sustainedFallbackMinutes}
+              min={3}
+              max={10}
+              onChange={(v) => set('sustainedFallbackMinutes', v)}
+            />
+          )}
           <NumberField
             label="Janela de avaliação W"
             value={settings.evaluationWindow}
@@ -104,7 +144,7 @@ export function SettingsPage({ settings, onChange }: Props) {
           type="button"
           onClick={() =>
             onChange({
-              ...DEFAULT_SETTINGS,
+              ...defaultsFor(settings.market),
               notificationsEnabled: settings.notificationsEnabled,
               notifyPrimary: settings.notifyPrimary,
               notifySecondary: settings.notifySecondary,
@@ -121,43 +161,46 @@ export function SettingsPage({ settings, onChange }: Props) {
       <aside className="space-y-3">
         <article className="rounded-2xl border border-line bg-panel p-4">
           <p className="text-xs tracking-wider text-lime uppercase">
-            Treino
+            Treino · {copy.toggle}
           </p>
           <p className="mt-1 text-sm text-emerald-100/70">
-            {TRAINING.nMatches} jogos · {TRAINING.nGoals} golos · {TRAINING.dates}
+            {training.nMatches} jogos · {nEvents} {copy.nounPlural} · {training.dates}
           </p>
           <p className="mt-3 text-xs leading-relaxed text-rose-200/90">
-            {TRAINING.coincidence.spike70OnlyAtGoal.toString().replace('.', ',')}%
-            dos golos têm Spike70 só no minuto do golo (sem pré-5). Não use
-            Spike70 sozinho.
+            {coincidence.toString().replace('.', ',')}% dos {copy.nounPlural} têm
+            Spike70 só no minuto do {copy.noun} (sem pré-5). Não use Spike70
+            sozinho.
           </p>
         </article>
         <MetricCard
           title="Primária"
-          precision={TRAINING.primary.precision}
-          recall={TRAINING.primary.recall}
-          alerts={TRAINING.primary.alertsPerMatch}
-          fp={TRAINING.primary.fpPerMatch}
-          lead={TRAINING.primary.medianLead}
-          hit={TRAINING.primary.pct1to5}
+          nounPlural={copy.nounPlural}
+          precision={training.primary.precision}
+          recall={training.primary.recall}
+          alerts={training.primary.alertsPerMatch}
+          fp={training.primary.fpPerMatch}
+          lead={training.primary.medianLead}
+          hit={training.primary.pct1to5}
         />
         <MetricCard
           title="Secundária"
-          precision={TRAINING.secondary.precision}
-          recall={TRAINING.secondary.recall}
-          alerts={TRAINING.secondary.alertsPerMatch}
-          fp={TRAINING.secondary.fpPerMatch}
-          lead={TRAINING.secondary.medianLead}
-          hit={TRAINING.secondary.pct1to5}
+          nounPlural={copy.nounPlural}
+          precision={training.secondary.precision}
+          recall={training.secondary.recall}
+          alerts={training.secondary.alertsPerMatch}
+          fp={training.secondary.fpPerMatch}
+          lead={training.secondary.medianLead}
+          hit={training.secondary.pct1to5}
         />
         <MetricCard
           title="Reserva"
-          precision={TRAINING.fallback.precision}
-          recall={TRAINING.fallback.recall}
-          alerts={TRAINING.fallback.alertsPerMatch}
-          fp={TRAINING.fallback.fpPerMatch}
-          lead={TRAINING.fallback.medianLead}
-          hit={TRAINING.fallback.pct1to5}
+          nounPlural={copy.nounPlural}
+          precision={training.fallback.precision}
+          recall={training.fallback.recall}
+          alerts={training.fallback.alertsPerMatch}
+          fp={training.fallback.fpPerMatch}
+          lead={training.fallback.medianLead}
+          hit={training.fallback.pct1to5}
         />
       </aside>
     </div>
@@ -224,6 +267,7 @@ function NumberField({
 
 function MetricCard({
   title,
+  nounPlural,
   precision,
   recall,
   alerts,
@@ -232,6 +276,7 @@ function MetricCard({
   hit,
 }: {
   title: string
+  nounPlural: string
   precision: number
   recall: number
   alerts: number
@@ -248,7 +293,9 @@ function MetricCard({
         <div>{alerts} alt/jogo</div>
         <div>{fp} FP/jogo</div>
         <div>Lead {lead} min</div>
-        <div>{String(hit).replace('.', ',')}% golos 1–5</div>
+        <div>
+          {String(hit).replace('.', ',')}% {nounPlural} 1–5
+        </div>
       </dl>
     </article>
   )

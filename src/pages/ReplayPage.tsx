@@ -10,6 +10,7 @@ import {
   scoreLabel,
   sideLabel,
 } from '../lib/format'
+import { marketCopy, parseMarket } from '../lib/market'
 import { evaluateAlerts, evaluateReplay, RULE_SHORT } from '../lib/rules'
 import type {
   AlertSettings,
@@ -25,6 +26,7 @@ type Props = {
 }
 
 export function ReplayPage({ settings, date, onDate }: Props) {
+  const copy = marketCopy(parseMarket(settings.market))
   const [fixtureId, setFixtureId] = useState('')
   const [fixtures, setFixtures] = useState<Fixture[]>([])
   const [listError, setListError] = useState<string | null>(null)
@@ -64,7 +66,7 @@ export function ReplayPage({ settings, date, onDate }: Props) {
       if (!data.timeline?.length) throw new Error('Série de momentum vazia')
       setPayload(data)
       setLabel(matchLabel ?? `Jogo ${id}`)
-      setNote('Carregado da API SuperScore. Pré-alerta exige minuto estritamente anterior ao golo.')
+      setNote('Carregado da API SuperScore. Pré-alerta exige minuto estritamente anterior ao evento.')
       setCursor(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha a obter momentum')
@@ -133,9 +135,11 @@ export function ReplayPage({ settings, date, onDate }: Props) {
       <section className="rounded-2xl border border-line bg-panel p-4">
         <h2 className="text-lg font-semibold">Replay / treino</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
-          Corre as regras no timeline completo. Um disparo no mesmo minuto do
-          golo é coincidente — não entra como sucesso. Só conta{' '}
-          <span className="text-emerald-50">alert_minute &lt; goal_minute</span>{' '}
+          Corre as regras no timeline completo. Um disparo no mesmo minuto do{' '}
+          {copy.noun} é coincidente — não entra como sucesso. Só conta{' '}
+          <span className="text-emerald-50">
+            alert_minute &lt; {copy.noun}_minute
+          </span>{' '}
           na janela de {settings.evaluationWindow} min.
         </p>
 
@@ -264,7 +268,7 @@ export function ReplayPage({ settings, date, onDate }: Props) {
 
             <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
               <Stat
-                label="Golos"
+                label={copy.toggle}
                 value={`${result.goals.length}`}
               />
               <Stat
@@ -299,15 +303,15 @@ export function ReplayPage({ settings, date, onDate }: Props) {
               </p>
             ) : null}
             <p className="mt-2 text-xs text-emerald-100/40">
-              Verde = alerta · Rosa = mesmo minuto de um golo · Traço ciano/âmbar
-              = golo casa/fora.
+              Verde = alerta · Rosa = mesmo minuto de um {copy.noun} · Traço ciano/âmbar
+              = {copy.noun} casa/fora.
             </p>
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
             <div className="space-y-2">
               <h3 className="text-sm font-semibold tracking-wide uppercase">
-                Golos e antecedência
+                {copy.toggle} e antecedência
               </h3>
               {full?.perGoal.map((row) => (
                 <article
@@ -317,11 +321,11 @@ export function ReplayPage({ settings, date, onDate }: Props) {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-semibold">
-                        Golo {row.goalNumber} · {sideLabel(row.goal.side)} ·{' '}
+                        {copy.nounCap} {row.goalNumber} · {sideLabel(row.goal.side)} ·{' '}
                         {minuteLabel(row.goal.min, row.goal.period)}
                       </p>
                       <p className="font-mono text-xs text-emerald-100/45">
-                        Resultado {row.scoreAfter.home}–{row.scoreAfter.away}
+                        {copy.toggle} {row.scoreAfter.home}–{row.scoreAfter.away}
                       </p>
                     </div>
                     <span
@@ -353,7 +357,7 @@ export function ReplayPage({ settings, date, onDate }: Props) {
                   )}
                   {row.coincidentAlerts.length ? (
                     <p className="mt-2 text-xs text-rose-300">
-                      Coincidente no minuto do golo:{' '}
+                      Coincidente no minuto do {copy.noun}:{' '}
                       {row.coincidentAlerts
                         .map((a) => RULE_SHORT[a.rule])
                         .join(', ')}{' '}

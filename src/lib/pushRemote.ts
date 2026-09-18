@@ -55,8 +55,13 @@ export async function unsubscribeRemotePush(): Promise<void> {
   await sub.unsubscribe()
 }
 
-export async function sendRemoteTest(): Promise<{ sent: number }> {
-  const res = await fetch('/api/push/test', { method: 'POST' })
+export async function sendRemoteTest(
+  market?: import('./types').Market,
+): Promise<{ sent: number }> {
+  const url = market
+    ? `/api/push/test?market=${encodeURIComponent(market)}`
+    : '/api/push/test'
+  const res = await fetch(url, { method: 'POST' })
   if (!res.ok) throw new Error('Falha no teste remoto')
   return (await res.json()) as { sent: number }
 }

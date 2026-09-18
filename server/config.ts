@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config as loadEnv } from 'dotenv'
 import webpush from 'web-push'
-import { DEFAULT_SETTINGS } from '../src/lib/rules.ts'
+import { defaultsFor } from '../src/lib/market.ts'
 import type { AlertSettings } from '../src/lib/types.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -66,5 +66,6 @@ function ensureVapid(): VapidFile {
 export const vapid = ensureVapid()
 
 export function pollerSettings(overrides?: Partial<AlertSettings>): AlertSettings {
-  return { ...DEFAULT_SETTINGS, ...overrides, evaluationWindow: LEARN_WINDOW }
+  const market = overrides?.market ?? 'goals'
+  return { ...defaultsFor(market), ...overrides, evaluationWindow: LEARN_WINDOW }
 }

@@ -10,7 +10,7 @@ import {
   type RuleMetrics,
 } from '../lib/learnApi'
 import { pct } from '../lib/format'
-import { DEFAULT_SETTINGS } from '../lib/rules'
+import { defaultsFor, marketCopy } from '../lib/market'
 import type { AlertSettings } from '../lib/types'
 
 type Props = {
@@ -22,11 +22,13 @@ export function LearningPage({ settings, onChange }: Props) {
   const [data, setData] = useState<LearnPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const market = settings.market
+  const copy = marketCopy(market)
 
   async function reload() {
     setError(null)
     try {
-      setData(await fetchLearn())
+      setData(await fetchLearn(market))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Servidor indisponível')
     }
@@ -34,7 +36,7 @@ export function LearningPage({ settings, onChange }: Props) {
 
   useEffect(() => {
     void reload()
-  }, [])
+  }, [market])
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label)
@@ -53,10 +55,10 @@ export function LearningPage({ settings, onChange }: Props) {
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border border-line bg-panel p-4">
-        <h2 className="text-lg font-semibold">Aprendizagem</h2>
+        <h2 className="text-lg font-semibold">Aprendizagem · {copy.toggle}</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
-          Dois horizontes por alerta (golo do mesmo lado, nunca no minuto do
-          golo): <strong className="text-emerald-50">≤5 min</strong> e{' '}
+          Dois horizontes por alerta ({copy.noun} do mesmo lado, nunca no minuto
+          do {copy.noun}): <strong className="text-emerald-50">≤5 min</strong> e{' '}
           <strong className="text-emerald-50">≤15 min ou fim da parte/jogo</strong>
           {' '}(1.ª parte até ao intervalo; 2.ª parte até ao FT).{' '}
           {data?.summary.scoreNote ??
@@ -66,7 +68,7 @@ export function LearningPage({ settings, onChange }: Props) {
           <button
             type="button"
             disabled={Boolean(busy)}
-            onClick={() => void run('seed', () => seedLearnDemos())}
+            onClick={() => void run('seed', () => seedLearnDemos(market))}
             className="rounded-xl border border-line px-3 py-2 text-sm hover:border-lime/50"
           >
             Importar amostras Celtic/Drava
@@ -74,7 +76,7 @@ export function LearningPage({ settings, onChange }: Props) {
           <button
             type="button"
             disabled={Boolean(busy)}
-            onClick={() => void run('recalc', async () => { await recalculateLearn() })}
+            onClick={() => void run('recalc', async () => { await recalculateLearn(market) })}
             className="rounded-xl bg-lime px-3 py-2 text-sm font-semibold text-pitch"
           >
             Recalcular
@@ -140,10 +142,11 @@ export function LearningPage({ settings, onChange }: Props) {
                   disabled={proposal.applied}
                   onClick={() =>
                     void run('apply', async () => {
-                      const applied = await applyLearnProposal(proposal.id)
+                      const applied = await applyLearnProposal(proposal.id, market)
                       onChange({
-                        ...settings,
+                        ...defaultsFor(market),
                         ...applied.settings,
+                        market,
                         notificationsEnabled: settings.notificationsEnabled,
                         notifyPrimary: settings.notifyPrimary,
                         notifySecondary: settings.notifySecondary,
@@ -157,7 +160,7 @@ export function LearningPage({ settings, onChange }: Props) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => onChange({ ...settings, ...DEFAULT_SETTINGS })}
+                  onClick={() => onChange({ ...defaultsFor(market) })}
                   className="rounded-xl border border-line px-3 py-2 text-sm"
                 >
                   Voltar aos defaults de treino (UI)
@@ -204,6 +207,7 @@ export function LearningPage({ settings, onChange }: Props) {
                           postFeedback(
                             alert.id,
                             alert.feedback === 'up' ? null : 'up',
+                            market,
                           ),
                         )
                       }
@@ -218,6 +222,7 @@ export function LearningPage({ settings, onChange }: Props) {
                           postFeedback(
                             alert.id,
                             alert.feedback === 'down' ? null : 'down',
+                            market,
                           ),
                         )
                       }
@@ -320,8 +325,10 @@ function Diff({
     <div className="rounded-xl border border-line bg-pitch px-3 py-2 text-xs">
       <p className="font-semibold">{label}</p>
       <p className="mt-1 font-mono text-emerald-100/70">
-        spike {s.spikeThreshold} · swing {s.swingComboThreshold}/{s.swingSecondaryThreshold} ·
-        sust {s.sustainedThreshold}×{s.sustainedComboMinutes}/{s.sustainedFallbackMinutes}
+        spike {s.spikeThreshold} · swing {s.swingComboThreshold}
+        {s.market === 'corners'
+          ? ` · fb ${s.fallbackSpikeThreshold} · sust ${s.sustainedThreshold}×${s.sustainedComboMinutes}/${s.sustainedSecondaryMinutes}`
+          : `/${s.swingSecondaryThreshold} · sust ${s.sustainedThreshold}×${s.sustainedComboMinutes}/${s.sustainedFallbackMinutes}`}
       </p>
       <p className="mt-1">
         ≤5 min P {fmt(m.w5.precision)} · R {fmt(m.w5.recall)}
