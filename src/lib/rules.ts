@@ -23,6 +23,10 @@ export const DEFAULT_SETTINGS: AlertSettings = {
   enableSecondary: true,
   enableFallback: true,
   evaluationWindow: 5,
+  notificationsEnabled: true,
+  notifyPrimary: true,
+  notifySecondary: false,
+  notifyFallback: false,
 }
 
 export const RULE_LABELS: Record<RuleId, string> = {

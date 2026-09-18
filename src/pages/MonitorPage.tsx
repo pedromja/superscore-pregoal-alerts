@@ -11,6 +11,20 @@ import {
   phaseLabel,
   scoreLabel,
 } from '../lib/format'
+import {
+  loadFeed,
+  loadPrimed,
+  loadSeen,
+  saveFeed,
+  savePrimed,
+  saveSeen,
+} from '../lib/monitorStore'
+import {
+  alertDomId,
+  feedAlertKey,
+  ruleNotifyEnabled,
+  showAlertNotification,
+} from '../lib/notifications'
 import { evaluateAlerts, extractGoals } from '../lib/rules'
 import type { AlertSettings, FeedAlert, Fixture, MomentumPayload } from '../lib/types'
 
@@ -18,11 +32,19 @@ type Props = {
   settings: AlertSettings
   date: string
   onDate: (value: string) => void
+  focusAlertKey?: string | null
+  onFocusConsumed?: () => void
 }
 
 const POLL_MS = 12000
 
-export function MonitorPage({ settings, date, onDate }: Props) {
+export function MonitorPage({
+  settings,
+  date,
+  onDate,
+  focusAlertKey,
+  onFocusConsumed,
+}: Props) {
   const [region, setRegion] = useState('ro')
   const [fixtures, setFixtures] = useState<Fixture[]>([])
   const [loading, setLoading] = useState(true)
@@ -30,11 +52,15 @@ export function MonitorPage({ settings, date, onDate }: Props) {
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [watchLive, setWatchLive] = useState(true)
-  const [feed, setFeed] = useState<FeedAlert[]>([])
+  const [feed, setFeed] = useState<FeedAlert[]>(() => loadFeed())
   const [payload, setPayload] = useState<MomentumPayload | null>(null)
   const [payloadError, setPayloadError] = useState<string | null>(null)
-  const [now, setNow] = useState(Date.now())
-  const seen = useRef(new Set<string>())
+  const [now, setNow] = useState(() => Date.now())
+  const [highlightKey, setHighlightKey] = useState<string | null>(
+    focusAlertKey ?? null,
+  )
+  const seen = useRef(loadSeen())
+  const primed = useRef(loadPrimed())
 
   const selected = fixtures.find((f) => f.id === selectedId) ?? null
 
@@ -70,6 +96,23 @@ export function MonitorPage({ settings, date, onDate }: Props) {
     return () => window.clearInterval(tick)
   }, [])
 
+  useEffect(() => {
+    saveFeed(feed)
+  }, [feed])
+
+  useEffect(() => {
+    if (!focusAlertKey) return
+    setHighlightKey(focusAlertKey)
+    const fixtureId = focusAlertKey.split(':')[0]
+    if (fixtureId) setSelectedId(fixtureId)
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(alertDomId(focusAlertKey))
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      onFocusConsumed?.()
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [focusAlertKey, feed, onFocusConsumed])
+
   function ingest(
     fixture: Fixture,
     data: MomentumPayload,
@@ -78,6 +121,7 @@ export function MonitorPage({ settings, date, onDate }: Props) {
     const { points, alerts } = evaluateAlerts(data, settings)
     const goals = extractGoals(data, points)
     const goalKeys = new Set(goals.map((g) => `${g.period}-${g.min}-${g.index}`))
+    const firstSnapshot = !primed.current.has(fixture.id)
     const fresh: FeedAlert[] = []
     for (const alert of alerts) {
       const key = `${fixture.id}:${alert.id}`
@@ -91,8 +135,20 @@ export function MonitorPage({ settings, date, onDate }: Props) {
         coincident: goalKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
       })
     }
+    if (firstSnapshot) {
+      primed.current.add(fixture.id)
+      savePrimed(primed.current)
+    }
+    saveSeen(seen.current)
     if (fresh.length) {
       setFeed((prev) => [...fresh.reverse(), ...prev].slice(0, 80))
+      if (!firstSnapshot) {
+        for (const alert of fresh) {
+          if (alert.coincident) continue
+          if (!ruleNotifyEnabled(settings, alert.rule)) continue
+          void showAlertNotification(alert)
+        }
+      }
     }
     if (markSelected) {
       setPayload(data)
@@ -352,8 +408,9 @@ export function MonitorPage({ settings, date, onDate }: Props) {
             <button
               type="button"
               onClick={() => {
-                seen.current.clear()
                 setFeed([])
+                saveFeed([])
+                setHighlightKey(null)
               }}
               className="text-xs text-emerald-100/45 hover:text-emerald-50"
             >
@@ -368,13 +425,17 @@ export function MonitorPage({ settings, date, onDate }: Props) {
             </p>
           ) : (
             <div className="grid gap-2">
-              {feed.map((alert) => (
-                <AlertCard
-                  key={`${alert.fixtureId}-${alert.id}-${alert.firedAt}`}
-                  alert={alert}
-                  now={now}
-                />
-              ))}
+              {feed.map((alert) => {
+                const key = feedAlertKey(alert)
+                return (
+                  <AlertCard
+                    key={`${key}-${alert.firedAt}`}
+                    alert={alert}
+                    now={now}
+                    highlighted={highlightKey === key}
+                  />
+                )
+              })}
             </div>
           )}
         </div>

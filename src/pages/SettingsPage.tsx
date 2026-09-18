@@ -1,3 +1,4 @@
+import { NotificationBar } from '../components/NotificationBar'
 import { TRAINING } from '../lib/demos'
 import { pct } from '../lib/format'
 import { DEFAULT_SETTINGS } from '../lib/rules'
@@ -14,6 +15,8 @@ export function SettingsPage({ settings, onChange }: Props) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="space-y-4">
+      <NotificationBar settings={settings} onChange={onChange} />
       <section className="space-y-4 rounded-2xl border border-line bg-panel p-4">
         <div>
           <h2 className="text-lg font-semibold">Definições das regras</h2>
@@ -99,12 +102,21 @@ export function SettingsPage({ settings, onChange }: Props) {
 
         <button
           type="button"
-          onClick={() => onChange({ ...DEFAULT_SETTINGS })}
+          onClick={() =>
+            onChange({
+              ...DEFAULT_SETTINGS,
+              notificationsEnabled: settings.notificationsEnabled,
+              notifyPrimary: settings.notifyPrimary,
+              notifySecondary: settings.notifySecondary,
+              notifyFallback: settings.notifyFallback,
+            })
+          }
           className="rounded-xl border border-line px-4 py-2 text-sm hover:border-lime/50"
         >
           Repor defaults do treino
         </button>
       </section>
+      </div>
 
       <aside className="space-y-3">
         <article className="rounded-2xl border border-line bg-panel p-4">

@@ -1,6 +1,8 @@
 import { Activity, Settings2, TimerReset } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { NotificationBar } from './components/NotificationBar'
 import { lisbonToday } from './lib/format'
+import { parseAppHash, registerServiceWorker } from './lib/notifications'
 import { loadSettings, saveSettings } from './lib/settings'
 import { MonitorPage } from './pages/MonitorPage'
 import { ReplayPage } from './pages/ReplayPage'
@@ -13,26 +15,44 @@ const TABS: { id: TabId; label: string; icon: typeof Activity }[] = [
   { id: 'definicoes', label: 'Definições', icon: Settings2 },
 ]
 
-function tabFromHash(): TabId {
-  const hash = window.location.hash.replace('#/', '')
-  if (hash === 'replay' || hash === 'definicoes' || hash === 'monitor') return hash
-  return 'monitor'
-}
-
 export default function App() {
-  const [tab, setTab] = useState<TabId>(tabFromHash)
+  const initial = parseAppHash()
+  const [tab, setTab] = useState<TabId>(initial.tab)
+  const [focusAlertKey, setFocusAlertKey] = useState<string | null>(initial.alertKey)
   const [settings, setSettings] = useState<AlertSettings>(() => loadSettings())
   const [date, setDate] = useState(lisbonToday)
 
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash())
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
+    void registerServiceWorker()
+  }, [])
+
+  useEffect(() => {
+    const applyHash = () => {
+      const parsed = parseAppHash()
+      setTab(parsed.tab)
+      if (parsed.alertKey) setFocusAlertKey(parsed.alertKey)
+    }
+    const onSwMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'OPEN_ALERT' || typeof event.data.url !== 'string') return
+      const url = new URL(event.data.url, window.location.origin)
+      if (url.hash) {
+        window.history.replaceState(null, '', url.hash)
+      }
+      applyHash()
+    }
+    window.addEventListener('hashchange', applyHash)
+    navigator.serviceWorker?.addEventListener('message', onSwMessage)
+    return () => {
+      window.removeEventListener('hashchange', applyHash)
+      navigator.serviceWorker?.removeEventListener('message', onSwMessage)
+    }
   }, [])
 
   useEffect(() => {
     saveSettings(settings)
   }, [settings])
+
+  const onFocusConsumed = useCallback(() => setFocusAlertKey(null), [])
 
   function go(next: TabId) {
     setTab(next)
@@ -57,31 +77,40 @@ export default function App() {
             coincidente, não um acerto.
           </p>
         </div>
-        <nav className="flex flex-wrap gap-2">
-          {TABS.map((item) => {
-            const Icon = item.icon
-            const active = tab === item.id
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => go(item.id)}
-                className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm ${
-                  active
-                    ? 'bg-lime text-pitch'
-                    : 'border border-line text-emerald-100/75 hover:border-lime/40'
-                }`}
-              >
-                <Icon size={14} />
-                {item.label}
-              </button>
-            )
-          })}
-        </nav>
+        <div className="flex flex-col items-start gap-3 md:items-end">
+          <NotificationBar settings={settings} onChange={setSettings} compact />
+          <nav className="flex flex-wrap gap-2">
+            {TABS.map((item) => {
+              const Icon = item.icon
+              const active = tab === item.id
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => go(item.id)}
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm ${
+                    active
+                      ? 'bg-lime text-pitch'
+                      : 'border border-line text-emerald-100/75 hover:border-lime/40'
+                  }`}
+                >
+                  <Icon size={14} />
+                  {item.label}
+                </button>
+              )
+            })}
+          </nav>
+        </div>
       </header>
 
       {tab === 'monitor' ? (
-        <MonitorPage settings={settings} date={date} onDate={setDate} />
+        <MonitorPage
+          settings={settings}
+          date={date}
+          onDate={setDate}
+          focusAlertKey={focusAlertKey}
+          onFocusConsumed={onFocusConsumed}
+        />
       ) : null}
       {tab === 'replay' ? (
         <ReplayPage settings={settings} date={date} onDate={setDate} />

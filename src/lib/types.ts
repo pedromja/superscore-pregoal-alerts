@@ -13,6 +13,10 @@ export type AlertSettings = {
   enableSecondary: boolean
   enableFallback: boolean
   evaluationWindow: number
+  notificationsEnabled: boolean
+  notifyPrimary: boolean
+  notifySecondary: boolean
+  notifyFallback: boolean
 }
 
 export type RawTimelineRow = {

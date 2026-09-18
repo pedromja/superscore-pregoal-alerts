@@ -1,5 +1,6 @@
-import { RULE_SHORT } from '../lib/rules'
 import { formatRelative, formatSigned, minuteLabel, sideLabel } from '../lib/format'
+import { alertDomId, feedAlertKey } from '../lib/notifications'
+import { RULE_SHORT } from '../lib/rules'
 import type { FeedAlert, FiredAlert, Side } from '../lib/types'
 
 function SideChip({ side }: { side: Side }) {
@@ -54,12 +55,21 @@ export function AlertMetrics({ alert }: { alert: FiredAlert }) {
 export function AlertCard({
   alert,
   now,
+  highlighted = false,
 }: {
   alert: FeedAlert
   now?: number
+  highlighted?: boolean
 }) {
   return (
-    <article className="rounded-2xl border border-line bg-panel/80 p-3 shadow-[inset_0_1px_0_rgba(182,243,76,0.04)]">
+    <article
+      id={alertDomId(feedAlertKey(alert))}
+      className={`rounded-2xl border p-3 shadow-[inset_0_1px_0_rgba(182,243,76,0.04)] ${
+        highlighted
+          ? 'border-lime bg-lime/10 ring-2 ring-lime/40'
+          : 'border-line bg-panel/80'
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-emerald-50">{alert.matchLabel}</p>
