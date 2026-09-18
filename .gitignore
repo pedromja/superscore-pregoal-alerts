@@ -17,6 +17,7 @@ agent-tools
 data/*.json
 data/matches/
 !data/.gitkeep
+!data/tip_overlay.json
 
 # Editor directories and files
 .vscode/*

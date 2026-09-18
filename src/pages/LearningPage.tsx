@@ -277,6 +277,7 @@ function LearnBody({
   const proposal = data.proposal
   const market = settings.market
   const shortLabel = `≤${data.summary.horizonShort} min`
+  const [confirmApply, setConfirmApply] = useState(false)
 
   return (
     <>
@@ -290,7 +291,9 @@ function LearnBody({
       </div>
       <p className="text-xs text-emerald-100/45">
         {data.summary.matches} jogos no arquivo · {data.summary.unlabeled}{' '}
-        alertas por etiquetar · auto após {data.autoAfter} outcomes
+        alertas por etiquetar · auto-aplicar desligado
+        {data.autoAfter ? ` (guarda ≥${data.autoAfter} outcomes só marca elegibilidade)` : ''}
+        . As regras base não mudam sem confirmação.
       </p>
 
       {proposal ? (
@@ -303,13 +306,24 @@ function LearnBody({
             <Diff label="Antes" m={asDual(proposal.before)} s={settings} />
             <Diff label="Depois" m={asDual(proposal.after)} s={proposal.settings} />
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-emerald-100/80">
+              <input
+                type="checkbox"
+                checked={confirmApply}
+                disabled={proposal.applied}
+                onChange={(e) => setConfirmApply(e.target.checked)}
+                className="accent-lime"
+              />
+              Confirmo aplicar às regras activas (não é automático)
+            </label>
             <button
               type="button"
-              disabled={proposal.applied}
+              disabled={proposal.applied || !confirmApply}
               onClick={() =>
                 void run('apply', async () => {
                   const applied = await applyLearnProposal(proposal.id, market, half)
+                  setConfirmApply(false)
                   onApply(applied.settings)
                 })
               }

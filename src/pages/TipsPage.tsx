@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { pct } from '../lib/format'
-import { formatOddPt, type LeagueRow, type RoiRow, type Tip } from '../lib/tips'
-import { fetchTips, type TipsPayload } from '../lib/tipsApi'
+import { ENTRY_LABELS, ENTRY_ORDER, formatOddPt, type EntryType, type LeagueRow, type RoiRow, type Tip } from '../lib/tips'
+import { DEFAULT_TIP_OVERLAY, type TipOverlay } from '../lib/tipOverlay'
+import { applyTipOverlay, fetchTips, type OverlayPayload, type TipsPayload } from '../lib/tipsApi'
 
 function statusLabel(status: Tip['status']): string {
   if (status === 'won') return 'Ganha'
@@ -127,9 +128,19 @@ export function TipsPage() {
   const [data, setData] = useState<TipsPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  async function load() {
+    const payload = await fetchTips()
+    if (!payload) {
+      setError('API de tips indisponível')
+      return
+    }
+    setError(null)
+    setData(payload)
+  }
+
   useEffect(() => {
     let cancelled = false
-    async function load() {
+    async function tick() {
       const payload = await fetchTips()
       if (cancelled) return
       if (!payload) {
@@ -139,11 +150,11 @@ export function TipsPage() {
       setError(null)
       setData(payload)
     }
-    void load()
-    const tick = window.setInterval(() => void load(), 15000)
+    void tick()
+    const id = window.setInterval(() => void tick(), 15000)
     return () => {
       cancelled = true
-      window.clearInterval(tick)
+      window.clearInterval(id)
     }
   }, [])
 
@@ -152,15 +163,17 @@ export function TipsPage() {
       <section className="rounded-2xl border border-line bg-panel p-4">
         <h2 className="text-lg font-semibold">Tips · ROI</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
-          Só há tip e Web Push quando existe odd de «mais um golo/canto». Fonte 1:
-          SuperScore (Over current+0,5 / mercados Superbet ligados ao{' '}
-          <span className="font-mono">event_id</span>). Fonte 2: Telegram RoboBet, só a
-          linha <span className="font-mono">Odd Ao Vivo</span> — nunca Pre-jogo nem Ao
-          Vivo 1X2. Stake 1u; ganho +(odd−1), perda −1. Liquidação pelo horizonte do
-          alerta (evento depois do minuto, dentro da janela).
+          Overlay em <span className="font-mono">data/tip_overlay.json</span>, separado
+          dos <span className="font-mono">params*.json</span>. Só há tip e Web Push com
+          odd de «mais um» (requireOdd=true). Fonte 1: SuperScore; fonte 2: Telegram
+          RoboBet <span className="font-mono">Odd Ao Vivo</span>. Os limiares
+          Spike/Swing/Sustained e as janelas Cantos HT 35–45 / FT 85–90 não mudam
+          aqui. minOdd/maxOdd ficam vazios até Pedro confirmar o backtest. Stake 1u.
         </p>
         {error ? <p className="mt-2 text-sm text-rose-200">{error}</p> : null}
       </section>
+
+      <OverlayPanel payload={data?.overlay ?? null} onSaved={() => void load()} />
 
       <section className="rounded-2xl border border-line bg-panel p-4">
         <h3 className="text-sm font-semibold tracking-wide uppercase">
@@ -207,5 +220,154 @@ export function TipsPage() {
         </div>
       </section>
     </div>
+  )
+}
+
+function oddField(value: number | null): string {
+  return value === null ? '' : String(value)
+}
+
+function parseOddInput(value: string): number | null {
+  const trimmed = value.trim().replace(',', '.')
+  if (!trimmed) return null
+  const n = Number(trimmed)
+  return Number.isFinite(n) && n > 1 ? n : null
+}
+
+function OverlayPanel({
+  payload,
+  onSaved,
+}: {
+  payload: OverlayPayload | null
+  onSaved: () => void
+}) {
+  const [draft, setDraft] = useState<TipOverlay>(payload?.active ?? DEFAULT_TIP_OVERLAY)
+  const [confirm, setConfirm] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const activeKey = JSON.stringify(payload?.active ?? null)
+  useEffect(() => {
+    setDraft(payload?.active ?? DEFAULT_TIP_OVERLAY)
+    setConfirm(false)
+  }, [activeKey])
+
+  function setBucket(
+    key: EntryType,
+    patch: Partial<TipOverlay['buckets'][EntryType]>,
+  ) {
+    setDraft((prev) => ({
+      ...prev,
+      buckets: { ...prev.buckets, [key]: { ...prev.buckets[key], ...patch } },
+    }))
+  }
+
+  return (
+    <section className="rounded-2xl border border-line bg-panel p-4">
+      <h3 className="text-sm font-semibold tracking-wide uppercase">
+        Overlay de odd (não altera regras base)
+      </h3>
+      <p className="mt-1 text-sm text-emerald-100/60">
+        {payload?.note ??
+          'Ficheiro separado de params*.json. min/max vazios = sem corte até o backtest.'}
+      </p>
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={draft.requireOdd}
+          onChange={(e) => setDraft((prev) => ({ ...prev, requireOdd: e.target.checked }))}
+          className="accent-lime"
+        />
+        requireOdd — tip/push só com odd válida
+      </label>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="text-[11px] uppercase tracking-wider text-emerald-100/45">
+          minOdd global
+          <input
+            value={oddField(draft.minOdd)}
+            placeholder="vazio (aguarda backtest)"
+            onChange={(e) =>
+              setDraft((prev) => ({ ...prev, minOdd: parseOddInput(e.target.value) }))
+            }
+            className="mt-1 w-full rounded-xl border border-line bg-pitch px-3 py-2 text-sm text-emerald-50 outline-none focus:border-lime/50"
+          />
+        </label>
+        <label className="text-[11px] uppercase tracking-wider text-emerald-100/45">
+          maxOdd global
+          <input
+            value={oddField(draft.maxOdd)}
+            placeholder="vazio (aguarda backtest)"
+            onChange={(e) =>
+              setDraft((prev) => ({ ...prev, maxOdd: parseOddInput(e.target.value) }))
+            }
+            className="mt-1 w-full rounded-xl border border-line bg-pitch px-3 py-2 text-sm text-emerald-50 outline-none focus:border-lime/50"
+          />
+        </label>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        {ENTRY_ORDER.map((key) => {
+          const row = draft.buckets[key]
+          return (
+            <div key={key} className="rounded-xl border border-line bg-pitch px-3 py-2">
+              <label className="flex items-center gap-2 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  checked={row.enable}
+                  onChange={(e) => setBucket(key, { enable: e.target.checked })}
+                  className="accent-lime"
+                />
+                {ENTRY_LABELS[key]}
+              </label>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <input
+                  value={oddField(row.minOdd)}
+                  placeholder="min"
+                  onChange={(e) => setBucket(key, { minOdd: parseOddInput(e.target.value) })}
+                  className="rounded-lg border border-line bg-panel px-2 py-1 font-mono text-xs"
+                />
+                <input
+                  value={oddField(row.maxOdd)}
+                  placeholder="max"
+                  onChange={(e) => setBucket(key, { maxOdd: parseOddInput(e.target.value) })}
+                  className="rounded-lg border border-line bg-panel px-2 py-1 font-mono text-xs"
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-2 text-sm text-emerald-100/80">
+          <input
+            type="checkbox"
+            checked={confirm}
+            onChange={(e) => setConfirm(e.target.checked)}
+            className="accent-lime"
+          />
+          Confirmo aplicar o overlay (não toca nos params base)
+        </label>
+        <button
+          type="button"
+          disabled={!confirm || busy}
+          onClick={() => {
+            setBusy(true)
+            setError(null)
+            void applyTipOverlay(draft, payload?.proposal?.id)
+              .then(() => {
+                setConfirm(false)
+                onSaved()
+              })
+              .catch((err) =>
+                setError(err instanceof Error ? err.message : 'Falha a aplicar overlay'),
+              )
+              .finally(() => setBusy(false))
+          }}
+          className="rounded-xl bg-lime px-3 py-2 text-sm font-semibold text-pitch disabled:opacity-40"
+        >
+          Confirmar overlay
+        </button>
+      </div>
+      {error ? <p className="mt-2 text-sm text-rose-200">{error}</p> : null}
+    </section>
   )
 }

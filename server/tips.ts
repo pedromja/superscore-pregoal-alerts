@@ -25,6 +25,15 @@ import {
   tipPnl,
   type Tip,
 } from '../src/lib/tips.ts'
+import {
+  DEFAULT_TIP_OVERLAY,
+  normalizeTipOverlay,
+  oddPassesOverlay,
+  OVERLAY_NOTE,
+  type OverlayDecision,
+  type TipOverlay,
+  type TipOverlayProposal,
+} from '../src/lib/tipOverlay.ts'
 import type {
   CornerHalf,
   FeedAlert,
@@ -37,8 +46,12 @@ import { resolveSuperScoreMaisUm } from './odds.ts'
 import {
   appendTipSkip,
   loadRobobetQuotes,
+  loadTipOverlay,
+  loadTipOverlayProposal,
   loadTips,
   saveRobobetQuotes,
+  saveTipOverlay,
+  saveTipOverlayProposal,
   saveTips,
 } from './store.ts'
 
@@ -117,6 +130,74 @@ export async function resolveTipOdd(args: {
     }
   }
   return null
+}
+
+export function decideTipOverlay(
+  market: Market,
+  half: CornerHalf,
+  odd: number | null,
+  overlay: TipOverlay = loadTipOverlay(),
+): OverlayDecision {
+  return oddPassesOverlay(overlay, entryTypeOf(market, half), odd)
+}
+
+export function overlayPayload() {
+  return {
+    active: loadTipOverlay(),
+    proposal: loadTipOverlayProposal(),
+    defaults: DEFAULT_TIP_OVERLAY,
+    note: OVERLAY_NOTE,
+  }
+}
+
+export function proposeTipOverlay(
+  raw: unknown,
+  reason = 'manual',
+): TipOverlayProposal {
+  const overlay = normalizeTipOverlay(raw)
+  const proposal: TipOverlayProposal = {
+    id: `overlay-${Date.now()}`,
+    ts: new Date().toISOString(),
+    reason,
+    applied: false,
+    overlay,
+    note: `${OVERLAY_NOTE} Proposta gravada — confirme na UI/API para activar.`,
+  }
+  saveTipOverlayProposal(proposal)
+  return proposal
+}
+
+export function applyTipOverlay(opts: {
+  confirm?: boolean
+  overlay?: unknown
+  id?: string
+  reason?: string
+}): TipOverlayProposal {
+  if (opts.confirm !== true) {
+    throw new Error(
+      'Aplicação do overlay exige confirmação explícita (confirm:true).',
+    )
+  }
+  const proposed = loadTipOverlayProposal()
+  const overlay = opts.overlay
+    ? normalizeTipOverlay(opts.overlay)
+    : proposed && (opts.id === proposed.id || opts.id === 'latest' || !opts.id)
+      ? proposed.overlay
+      : null
+  if (!overlay) {
+    throw new Error('Proposta de overlay inexistente')
+  }
+  saveTipOverlay(overlay)
+  const applied: TipOverlayProposal = {
+    id: proposed?.id ?? `overlay-${Date.now()}`,
+    ts: new Date().toISOString(),
+    reason: opts.reason || 'manual',
+    applied: true,
+    overlay,
+    note: 'Overlay activo confirmado. params*.json / regras Spike-Swing-Sustained não foram alterados.',
+  }
+  saveTipOverlayProposal(applied)
+  return applied
 }
 
 export function logTipSkip(reason: string, extra: Record<string, unknown>): void {
@@ -303,6 +384,7 @@ export function tipsPayload() {
     roi: computeRoi(tips),
     leagues: computeLeagueFollowup(tips),
     quotes: loadRobobetQuotes().slice(-20).reverse(),
+    overlay: overlayPayload(),
     horizonLongCap: HORIZON_LONG_CAP,
   }
 }

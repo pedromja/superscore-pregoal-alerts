@@ -5,6 +5,7 @@ import { alertNotificationCopy, sampleFeedAlert } from '../src/lib/tally.ts'
 import type { CornerHalf, Market } from '../src/lib/types.ts'
 import { parseCornerHalfOpt } from '../src/lib/windows.ts'
 import {
+  LEARN_AUTO_APPLY,
   LEARN_AUTO_MIN_OUTCOMES,
   ROOT,
   SERVER_PORT,
@@ -35,7 +36,13 @@ import {
   loadSubscriptions,
   saveActiveMarket,
 } from './store.ts'
-import { ingestRobobet, tipsPayload } from './tips.ts'
+import {
+  applyTipOverlay,
+  ingestRobobet,
+  overlayPayload,
+  proposeTipOverlay,
+  tipsPayload,
+} from './tips.ts'
 import type { PushSub } from './types.ts'
 
 const app = express()
@@ -70,6 +77,9 @@ function learnPayload(market: Market, half?: CornerHalf) {
     history: loadHistory(market, half).slice(-12).reverse(),
     recentAlerts: loadAlerts(market, half).slice(-40).reverse(),
     autoAfter: LEARN_AUTO_MIN_OUTCOMES,
+    autoApply: false,
+    confirmRequired: true,
+    learnAutoApplyEnv: LEARN_AUTO_APPLY,
   }
 }
 
@@ -151,6 +161,50 @@ app.post('/api/robobet/ingest', (req, res) => {
 
 app.get('/api/tips', (_req, res) => {
   res.json(tipsPayload())
+})
+
+app.get('/api/tips/overlay', (_req, res) => {
+  res.json(overlayPayload())
+})
+
+app.put('/api/tips/overlay', (req, res) => {
+  const body = (req.body ?? {}) as { overlay?: unknown; confirm?: unknown }
+  const overlay = body.overlay ?? ('requireOdd' in (body as object) ? req.body : undefined)
+  try {
+    if (body.confirm === true) {
+      res.json(applyTipOverlay({ confirm: true, overlay, reason: 'manual' }))
+      return
+    }
+    if (overlay === undefined) {
+      res.status(400).json({ error: 'overlay em falta' })
+      return
+    }
+    res.json(proposeTipOverlay(overlay, 'manual'))
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
+  }
+})
+
+app.post('/api/tips/overlay/apply', (req, res) => {
+  const body = (req.body ?? {}) as {
+    confirm?: unknown
+    confirmed?: unknown
+    overlay?: unknown
+    id?: string
+  }
+  const confirm = body.confirm === true || body.confirmed === true
+  try {
+    res.json(
+      applyTipOverlay({
+        confirm,
+        overlay: body.overlay,
+        id: body.id,
+        reason: 'manual',
+      }),
+    )
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
+  }
 })
 
 app.get('/api/learn/market', (_req, res) => {
@@ -248,8 +302,14 @@ app.post('/api/learn/apply', (req, res) => {
   try {
     const market = marketFromReq(req)
     const half = halfFromReq(req)
-    const id = String((req.body as { id?: string })?.id || 'latest')
-    res.json(applyProposal(id, 'manual', market, half))
+    const body = (req.body ?? {}) as {
+      id?: string
+      confirm?: unknown
+      confirmed?: unknown
+    }
+    const id = String(body.id || 'latest')
+    const confirm = body.confirm === true || body.confirmed === true
+    res.json(applyProposal(id, 'manual', market, half, { confirm }))
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
   }

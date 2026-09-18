@@ -15,7 +15,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test:robobet": "tsx scripts/verify-robobet-parser.ts",
-    "test:windows": "tsx scripts/verify-corner-windows.ts"
+    "test:windows": "tsx scripts/verify-corner-windows.ts",
+    "test:overlay": "tsx scripts/verify-tip-overlay.ts"
   },
   "engines": {
     "node": ">=20"

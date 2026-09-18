@@ -23,6 +23,7 @@ import {
 } from './store.ts'
 import {
   createTipFromAlert,
+  decideTipOverlay,
   logTipSkip,
   resolveTipOdd,
   settleTipsForMatch,
@@ -156,7 +157,6 @@ async function processFixture(fixture: Fixture): Promise<number> {
     if (!notify.notificationsEnabled) continue
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     if (loadSent().includes(key)) continue
-    if (!markSent(key)) continue
     if (tipAlreadyOpen(fixture.id, alert.id)) continue
 
     const half = halfOfAlert(market, alert.min, alert.period, alert.cornerHalf)
@@ -165,6 +165,22 @@ async function processFixture(fixture: Fixture): Promise<number> {
         ? (alert.cornersTally?.home ?? 0) + (alert.cornersTally?.away ?? 0)
         : (alert.goalsTally?.home ?? 0) + (alert.goalsTally?.away ?? 0)
     const odd = await resolveTipOdd({ fixture, market, half, currentTotal })
+    const overlay = decideTipOverlay(market, half, odd?.odd ?? null)
+    if (!overlay.ok) {
+      logTipSkip(overlay.reason, {
+        fixtureId: fixture.id,
+        match: `${fixture.team1} vs ${fixture.team2}`,
+        market,
+        half,
+        bucket: overlay.bucket,
+        minute: alert.min,
+        alertId: alert.id,
+        odd: odd?.odd ?? null,
+        source: odd?.source ?? null,
+      })
+      if (overlay.permanent) markSent(key)
+      continue
+    }
     if (!odd) {
       logTipSkip('sem odd mais-um (SuperScore nem RoboBet Odd Ao Vivo)', {
         fixtureId: fixture.id,
@@ -176,6 +192,7 @@ async function processFixture(fixture: Fixture): Promise<number> {
       })
       continue
     }
+    if (!markSent(key)) continue
     const tip = createTipFromAlert({ fixture, alert, odd })
     const copy = tipNotificationCopy(tip)
     const alertKey = `${fixture.id}:${alert.id}`

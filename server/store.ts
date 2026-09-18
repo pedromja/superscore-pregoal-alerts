@@ -12,7 +12,16 @@ import { parseCornerHalf, parseCornerHalfOpt } from '../src/lib/windows.ts'
 import { DATA_DIR, MATCHES_DIR } from './config.ts'
 import type { RobobetQuote } from '../src/lib/robobet.ts'
 import type { Tip } from '../src/lib/tips.ts'
+import {
+  DEFAULT_TIP_OVERLAY,
+  normalizeTipOverlay,
+  type TipOverlay,
+  type TipOverlayProposal,
+} from '../src/lib/tipOverlay.ts'
 import type { GoalRecord, LoggedAlert, ParamVersion, PushSub, StoredMatch } from './types.ts'
+
+const TIP_OVERLAY_FILE = 'tip_overlay.json'
+const TIP_OVERLAY_PROPOSAL_FILE = 'tip_overlay_proposal.json'
 
 export type LearnScope = 'goals' | 'corners_ht' | 'corners_ft'
 
@@ -107,6 +116,27 @@ export function appendTipSkip(entry: unknown): void {
   const items = readJson<unknown[]>('tip_skips.json', [])
   items.push(entry)
   writeJson('tip_skips.json', items.slice(-200))
+}
+
+export function loadTipOverlay(): TipOverlay {
+  const stored = readJson<unknown>(TIP_OVERLAY_FILE, null)
+  if (stored == null) {
+    writeJson(TIP_OVERLAY_FILE, DEFAULT_TIP_OVERLAY)
+    return { ...DEFAULT_TIP_OVERLAY, buckets: { ...DEFAULT_TIP_OVERLAY.buckets } }
+  }
+  return normalizeTipOverlay(stored)
+}
+
+export function saveTipOverlay(overlay: TipOverlay): void {
+  writeJson(TIP_OVERLAY_FILE, normalizeTipOverlay(overlay))
+}
+
+export function loadTipOverlayProposal(): TipOverlayProposal | null {
+  return readJson<TipOverlayProposal | null>(TIP_OVERLAY_PROPOSAL_FILE, null)
+}
+
+export function saveTipOverlayProposal(item: TipOverlayProposal | null): void {
+  writeJson(TIP_OVERLAY_PROPOSAL_FILE, item)
 }
 
 export function loadAlerts(

@@ -8,6 +8,18 @@ O mercado activo escolhe-se no cabeçalho: **Golos | Cantos**. Golos é o defaul
 
 **Sem odd não há tip nem Web Push.** Os alertas de momentum SuperScore continuam no monitor e na aprendizagem; o push remoto e o feed de tips só disparam com preço de «mais um».
 
+Isto é um **overlay** em cima dos limiares Spike / Swing / Sustained existentes — **não** substitui nem reescreve os defaults de Golos ou Cantos HT/FT. As janelas de Cantos mantêm-se HT 35–45 / FT 85–90.
+
+O overlay vive em `data/tip_overlay.json`, **separado** de `params.json` / `params_corners_ht.json` / `params_corners_ft.json`. Campos:
+
+| Campo | Default | Notas |
+|---|---|---|
+| `requireOdd` | `true` | Tip/push só com odd válida |
+| `minOdd` / `maxOdd` | `null` | Vazios até Pedro confirmar números de backtest — **não** inventar cortes de produção |
+| `buckets.goals_ht` / `goals_ft` / `corners_ht` / `corners_ft` | `enable: true`, `minOdd`/`maxOdd` `null` | Cada bucket pode desligar-se ou ter min/max próprios |
+
+A aprendizagem **pode propor** deltas de overlay ou de limiares, mas **não os escreve** nas definições activas sem um passo de confirmação (botão na UI ou `POST` com `confirm: true`). **As regras base não mudam sem confirmação do utilizador.**
+
 Ordem das fontes:
 
 1. **SuperScore (primário)** — o protobuf `OddsApiModel` em `GET /v2/public/stats/offer/market/item?match_id=&app_market=&app_variant=superscore` só traz 1X2 (`name` 1/X/2: `uuid`, `outcome_id`, `price`). Isso **não** é a odd da tip. O `event_id` desse modelo (o mesmo das `odds[]` no fixture) abre os mercados que a UI SuperScore mostra nos tabs de odds, via Superbet offer: `GET https://production-superbet-offer-{ro|pl|br}.freetls.fastly.net/v3/{locale}/events?events={event_id}&includeOnly=fixture,markets,superbets` (SSE em `/v3/subscription/...`). Daí extraímos **Over current+0,5** em Total goluri / Prima repriză - Total goluri, ou Total cornere / Prima repriză - Total cornere. Não se usa 1X2 (`Final`).
@@ -32,7 +44,7 @@ WEBHOOK_URL=https://<host>/api/robobet/ingest
 
 `conta` A ≈ cantos, B ≈ golos, se o mercado não vier no texto. Também aceita campos já parseados: `{ odd, linha, mercado, liga, jogo }` (além de `text`).
 
-As cotações ingeridas ficam em `data/robobet_tips.json` (máx. ~500). As tips enviadas (abertas/liquidadas) em `data/tips.json`.
+As cotações ingeridas ficam em `data/robobet_tips.json` (máx. ~500). As tips enviadas (abertas/liquidadas) em `data/tips.json`. O overlay activo em `data/tip_overlay.json`; uma proposta de overlay (ainda não confirmada) em `data/tip_overlay_proposal.json`.
 
 ROI (stake 1u binário): **Golos HT, Golos FT, Cantos HT, Cantos FT**. Acerto = evento SuperScore depois do minuto do alerta, dentro do horizonte existente. Follow-up por liga na página Tips / ROI.
 
@@ -128,9 +140,9 @@ Dois horizontes (golo do mesmo lado, estritamente depois do alerta):
 
 Golos sem pré-alerta no horizonte = misses (recall).
 
-**Recalcular** faz uma grelha leve em torno dos defaults (spike 70–90, swing 40–70, sustained 2–5 / 25–40). O score é **0,4×precisão(≤5 min) + 0,6×precisão(longo)**, com penalização se alertas/jogo > 12. A guarda automática (≥1pp precisão sem cair >3pp no recall) usa o **horizonte longo**.
+**Recalcular** faz uma grelha leve em torno dos defaults (spike 70–90, swing 40–70, sustained 2–5 / 25–40). O score é **0,4×precisão(≤5 min) + 0,6×precisão(longo)**, com penalização se alertas/jogo > 12. A guarda conservadora (≥1pp precisão sem cair >3pp no recall) usa o **horizonte longo** só para **marcar** a proposta como elegível — **nunca** a aplica sozinha.
 
-O histórico fica em `data/params_history.json` (golos), `data/params_history_corners_ht.json` e `data/params_history_corners_ft.json`. Os defaults de treino nunca são substituídos em silêncio. Alertas, eventos e parâmetros nunca se misturam entre mercados nem entre HT e FT.
+O histórico fica em `data/params_history.json` (golos), `data/params_history_corners_ht.json` e `data/params_history_corners_ft.json`. **As regras base não mudam sem confirmação do utilizador** (botão «Aplicar proposta» com checkbox, ou `POST /api/learn/apply` com `{ confirm: true }`). `LEARN_AUTO_APPLY` default `0`; mesmo se `1`, o servidor não escreve `params*.json` em silêncio. Overlay de odd (`data/tip_overlay.json`) é análogo: `PUT /api/tips/overlay` só propõe; `POST /api/tips/overlay/apply` com `confirm: true` activa. Alertas, eventos e parâmetros nunca se misturam entre mercados nem entre HT e FT.
 
 Na Aprendizagem: **Importar amostras Celtic/Drava** para ter métricas imediatamente (no mercado activo).
 
@@ -154,8 +166,9 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `POLLER_ENABLED` | `1` | `0` desliga o poller |
 | `POLLER_INTERVAL_MS` | `45000` | Intervalo entre ticks |
 | `LEARN_WINDOW` | `5` | Horizonte curto (minutos) |
-| `LEARN_AUTO_MIN_OUTCOMES` | `50` | Mínimo para auto-aplicar proposta |
-| `DATA_DIR` | `data` | Subscriptions, alertas, histórico |
+| `LEARN_AUTO_APPLY` | `0` | `1` só anota a proposta; **nunca** auto-aplica params/overlay |
+| `LEARN_AUTO_MIN_OUTCOMES` | `50` | Limiar informativo de elegibilidade (não aplica sozinho) |
+| `DATA_DIR` | `data` | Subscriptions, alertas, histórico, `tip_overlay.json` |
 | `NODE_ENV` | `production` | No Docker já vai definido |
 
 Health check: `GET /api/push/status` (JSON `{ subscribers, hasVapid }`).
@@ -195,6 +208,8 @@ docker run --rm -p 8080:8080 \
 Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 
 ## Regras (defaults do treino)
+
+**As regras base não mudam sem confirmação do utilizador.** O overlay de odd não reescreve Spike / Swing / Sustained. Cantos continuam só nas janelas HT 35–45 / FT 85–90, mercados Golos e Cantos em paralelo.
 
 ### Golos (default)
 

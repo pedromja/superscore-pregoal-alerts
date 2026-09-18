@@ -23,6 +23,8 @@ export const LEARN_WINDOW = Number(process.env.LEARN_WINDOW || 5)
 export const LEARN_AUTO_MIN_OUTCOMES = Number(
   process.env.LEARN_AUTO_MIN_OUTCOMES || 50,
 )
+/** Silent auto-apply is off. Only POST /api/learn/apply with confirm:true writes params. */
+export const LEARN_AUTO_APPLY = process.env.LEARN_AUTO_APPLY === '1'
 export const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:dev@localhost'
 
 mkdirSync(MATCHES_DIR, { recursive: true })
