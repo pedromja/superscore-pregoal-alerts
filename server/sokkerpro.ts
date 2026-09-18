@@ -34,6 +34,7 @@ async function fetchJson(url: string): Promise<unknown | null> {
     const res = await fetch(url, {
       headers: {
         Accept: 'application/json',
+        // m2 is Cloudflare-fronted; Origin/Referer of the public site is required.
         Origin: 'https://sokkerpro.com',
         Referer: 'https://sokkerpro.com/',
       },

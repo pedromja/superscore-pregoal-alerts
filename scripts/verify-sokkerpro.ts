@@ -96,6 +96,23 @@ const nestedOdds = collectOddsMap({
 })
 check(nestedOdds.BET365_GOLS_OVER_2_5 === '1.90#0', 'collect nested preodds keys')
 
+const latestWins = collectOddsMap({
+  preodds: [
+    {
+      created_at: '2026-09-18T15:00:00.000Z',
+      BET365_GOLS_OVER_2_5: '2.67#0',
+      BET365_CANTO_OVER_9: '2.50#0',
+    },
+    {
+      created_at: '2026-09-17T05:00:00.000Z',
+      BET365_GOLS_OVER_2_5: '2.10#0',
+      BET365_CANTO_OVER_9: '1.80#0',
+    },
+  ],
+})
+check(latestWins.BET365_GOLS_OVER_2_5 === '2.67#0', `latest snapshot wins, got ${latestWins.BET365_GOLS_OVER_2_5}`)
+check(latestWins.BET365_CANTO_OVER_9 === '2.50#0', 'latest CANTO snapshot')
+
 const goalsMap = {
   BET365_GOLS_OVER_1_5: '1.95#0',
   BET365_GOLS_UNDER_1_5: '1.80#0',

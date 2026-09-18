@@ -128,23 +128,60 @@ function str(value: unknown): string {
   return ''
 }
 
+function ingestOddsEntry(into: Record<string, string>, key: string, value: unknown): void {
+  if (!parseSokkerProOddsKey(key)) return
+  if (typeof value === 'string' || typeof value === 'number') {
+    into[key] = String(value)
+    return
+  }
+  if (value && typeof value === 'object' && 'price' in (value as object)) {
+    into[key] = String((value as { price: unknown }).price)
+  }
+}
+
+function mergePreoddsSnapshots(rows: unknown[], into: Record<string, string>): void {
+  const snaps = rows
+    .map(asRecord)
+    .filter((row): row is Record<string, unknown> => Boolean(row))
+    .sort((a, b) => {
+      const ta = Date.parse(str(a.created_at)) || 0
+      const tb = Date.parse(str(b.created_at)) || 0
+      return ta - tb
+    })
+  for (const snap of snaps) {
+    for (const [key, value] of Object.entries(snap)) {
+      ingestOddsEntry(into, key, value)
+    }
+  }
+}
+
 export function collectOddsMap(raw: unknown, into: Record<string, string> = {}, depth = 0): Record<string, string> {
   if (!raw || depth > 8) return into
   if (Array.isArray(raw)) {
+    const looksLikePreodds = raw.some((item) => {
+      const rec = asRecord(item)
+      return Boolean(rec && (rec.created_at || Object.keys(rec).some((k) => parseSokkerProOddsKey(k))))
+    })
+    if (looksLikePreodds) {
+      mergePreoddsSnapshots(raw, into)
+      return into
+    }
     for (const item of raw) collectOddsMap(item, into, depth + 1)
     return into
   }
   const obj = asRecord(raw)
   if (!obj) return into
-  for (const [key, value] of Object.entries(obj)) {
-    if (parseSokkerProOddsKey(key)) {
-      if (typeof value === 'string' || typeof value === 'number') {
-        into[key] = String(value)
-      } else if (value && typeof value === 'object' && 'price' in (value as object)) {
-        into[key] = String((value as { price: unknown }).price)
-      }
-      continue
+  if (Array.isArray(obj.preodds)) {
+    mergePreoddsSnapshots(obj.preodds, into)
+    for (const [key, value] of Object.entries(obj)) {
+      if (key === 'preodds') continue
+      collectOddsMap(value, into, depth + 1)
     }
+    return into
+  }
+  for (const [key, value] of Object.entries(obj)) {
+    ingestOddsEntry(into, key, value)
+    if (parseSokkerProOddsKey(key)) continue
     if (value && typeof value === 'object') collectOddsMap(value, into, depth + 1)
   }
   return into
