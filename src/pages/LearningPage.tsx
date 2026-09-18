@@ -76,7 +76,7 @@ export function LearningPage({
         <h2 className="text-lg font-semibold">Aprendizagem · {copy.toggle}</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
           {market === 'corners'
-            ? 'Cantos: HT (35–45, W=5) e FT (85–90, W=3) nunca misturam limiares nem amostras. Fora destas janelas não há aprendizagem. HIT exige alert_min < canto_min no mesmo mercado/janela.'
+            ? `Cantos: HT (${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to}, W=${CORNER_WINDOWS.ht.shortHorizon}) e FT (${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to}, W=${CORNER_WINDOWS.ft.shortHorizon}) nunca misturam limiares nem amostras. Fora destas janelas não há aprendizagem. HIT exige alert_min < canto_min no mesmo mercado/janela.`
             : `Dois horizontes por alerta (${copy.noun} do mesmo lado, nunca no minuto do ${copy.noun}): ≤5 min e ≤15 min ou fim da parte/jogo.`}{' '}
           {goalsData?.summary.scoreNote ??
             htData?.summary.scoreNote ??

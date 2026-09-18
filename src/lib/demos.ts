@@ -67,7 +67,7 @@ export const TRAINING_CORNERS_HT = {
   nMatches: 95,
   nEvents: 89,
   dates: '2026-09-08 → 2026-09-17',
-  window: '35–45',
+  window: '32–42',
   coincidence: {
     spike70AtEvent: 21.35,
     spike70Pre5: 47.19,
@@ -104,7 +104,7 @@ export const TRAINING_CORNERS_FT = {
   nMatches: 95,
   nEvents: 52,
   dates: '2026-09-08 → 2026-09-17',
-  window: '85–90',
+  window: '82–87',
   coincidence: {
     spike70AtEvent: 21.15,
     spike70Pre5: 38.46,

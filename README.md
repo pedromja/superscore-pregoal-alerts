@@ -20,7 +20,7 @@ Tip/ROI **anexa** a odd quando existe (stake 1u). Missing odd não cria tip, mas
 
 Isto é um **overlay futuro** em `data/tip_overlay.json`, **separado** de `params*.json`. **Não** se aplica o overlay de backtest (golos minOdd≥3 / cantos OFF). `requireOdd` / `minOdd` / `maxOdd` por bucket existem para a aprendizagem propor mais tarde — **nunca** entram em vigor sem confirmação explícita na UI/API.
 
-**As regras de odd vêm mais tarde via aprendizagem + confirmação do utilizador.** As regras base Spike/Swing/Sustained e as janelas Cantos HT 35–45 / FT 85–90 não mudam em silêncio.
+**As regras de odd vêm mais tarde via aprendizagem + confirmação do utilizador.** As regras base Spike/Swing/Sustained e as janelas Cantos HT 32–42 / FT 82–87 não mudam em silêncio.
 
 Fontes SuperScore (não 1X2):
 
@@ -52,7 +52,7 @@ ROI (stake 1u binário): **Golos HT, Golos FT, Cantos HT, Cantos FT**. Acerto = 
 
 
 Treino de referência (golos): 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/Lisbon).
-Treino de cantos (janelas): 95 jogos, HT 89 cantos (35–45) e FT 52 cantos (85–90), mesmas datas. Fora destas janelas a app de cantos não avalia, não envia push e não grava amostras.
+Treino de cantos (janelas): 95 jogos, HT 89 cantos e FT 52 cantos, mesmas datas. Avaliação ao vivo só nas janelas HT 32–42 / FT 82–87. Fora destas janelas a app de cantos não avalia, não envia push e não grava amostras.
 
 ## Como correr
 
@@ -211,7 +211,7 @@ Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 
 ## Regras (defaults do treino)
 
-**As regras base não mudam sem confirmação do utilizador.** O overlay de odd não reescreve Spike / Swing / Sustained. Cantos continuam só nas janelas HT 35–45 / FT 85–90, mercados Golos e Cantos em paralelo.
+**As regras base não mudam sem confirmação do utilizador.** O overlay de odd não reescreve Spike / Swing / Sustained. Cantos continuam só nas janelas HT 32–42 / FT 82–87, mercados Golos e Cantos em paralelo. Limiares Spike/Swing/Sustained dos cantos inalterados.
 
 ### Golos (default)
 
@@ -223,16 +223,16 @@ Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 
 Avaliação estrita `alert_minute < goal_minute`. Spike70 sozinho não é regra.
 
-### Cantos (`type=14`) — só janelas HT 35–45 / FT 85–90
+### Cantos (`type=14`) — só janelas HT 32–42 / FT 82–87
 
 `min` é o relógio absoluto do jogo em ambas as partes (a 2.ª começa em 46). Prolongamento (P1>45 / P2>90) fica fora das janelas.
 
-O minuto ao vivo escolhe o conjunto de parâmetros: 35–45 → HT; 85–90 → FT. Definições mostra as duas metades.
+O minuto ao vivo escolhe o conjunto de parâmetros: 32–42 → HT; 82–87 → FT. Definições mostra as duas metades.
 
 | Janela | W | Primária | Secundária | Reserva |
 |---|---|---|---|---|
-| **HT 35–45** | 5 | Sustained \|v\|≥30 ×2 | Spike60 ∧ (Swing40 ∨ Sustained3@25) | Sustained \|v\|≥30 ×4 |
-| **FT 85–90** | 3 | Spike80 ∧ (Swing50 ∨ Sustained3@30) | Sustained \|v\|≥25 ×2 | Spike \|v\|≥85 |
+| **HT 32–42** | 5 | Sustained \|v\|≥30 ×2 | Spike60 ∧ (Swing40 ∨ Sustained3@25) | Sustained \|v\|≥30 ×4 |
+| **FT 82–87** | 3 | Spike80 ∧ (Swing50 ∨ Sustained3@30) | Sustained \|v\|≥25 ×2 | Spike \|v\|≥85 |
 
 Aprendizagem: `alerts_corners_ht.json` / `alerts_corners_ft.json` (e params/history/proposal equivalentes). HIT exige `alert_minute < corner_minute` **e** canto na mesma janela. O horizonte curto do FT é 3 min (`hit5` na API continua a ser o horizonte curto).
 

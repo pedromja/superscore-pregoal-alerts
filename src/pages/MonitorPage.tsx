@@ -272,7 +272,7 @@ export function MonitorPage({
       ? null
       : liveHalf
         ? `Parâmetros ${CORNER_WINDOWS[liveHalf].shortLabel}`
-        : 'Fora das janelas HT 35–45 / FT 85–90'
+        : `Fora das janelas ${CORNER_WINDOWS.ht.shortLabel} / ${CORNER_WINDOWS.ft.shortLabel}`
 
   return (
     <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
@@ -488,7 +488,7 @@ export function MonitorPage({
               Sustained cruzam os limiares — sempre com o lado do sinal do
               momentum. Mercado activo: {copy.toggle}
               {market === 'corners'
-                ? ' · só nas janelas HT 35–45 e FT 85–90.'
+                ? ` · só nas janelas ${CORNER_WINDOWS.ht.shortLabel} e ${CORNER_WINDOWS.ft.shortLabel}.`
                 : '.'}
             </p>
           ) : (

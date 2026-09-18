@@ -3,6 +3,7 @@ import { pct } from '../lib/format'
 import { ENTRY_LABELS, ENTRY_ORDER, formatOddPt, type EntryType, type LeagueRow, type RoiRow, type Tip } from '../lib/tips'
 import { DEFAULT_TIP_OVERLAY, type TipOverlay } from '../lib/tipOverlay'
 import { applyTipOverlay, fetchTips, type OverlayPayload, type TipsPayload } from '../lib/tipsApi'
+import { CORNER_WINDOWS } from '../lib/windows'
 
 function statusLabel(status: Tip['status']): string {
   if (status === 'won') return 'Ganha'
@@ -171,8 +172,9 @@ export function TipsPage() {
           <span className="font-mono">data/odds_observations.json</span>. Tip/ROI
           anexa a odd se existir; sem odd o alerta continua. Regras de odd vêm
           mais tarde via aprendizagem + confirmação. Não se aplica o overlay de
-          backtest (golos minOdd≥3 / cantos OFF). Janelas Cantos HT 35–45 / FT
-          85–90 inalteradas.
+          backtest (golos minOdd≥3 / cantos OFF). Janelas Cantos{' '}
+          {CORNER_WINDOWS.ht.shortLabel} / {CORNER_WINDOWS.ft.shortLabel}.
+          Limiares Spike/Swing/Sustained inalterados.
         </p>
         {error ? <p className="mt-2 text-sm text-rose-200">{error}</p> : null}
       </section>
