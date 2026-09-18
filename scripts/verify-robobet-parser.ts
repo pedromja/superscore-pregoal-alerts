@@ -1,4 +1,4 @@
-import { pickMaisUmOdd, type SuperbetEvent } from '../src/lib/oddsMarkets.ts'
+import { pickAsianSnapshot, pickLimitSnapshot, pickMaisUmOdd, type SuperbetEvent } from '../src/lib/oddsMarkets.ts'
 import {
   parseRobobetText,
   quoteFromIngestBody,
@@ -84,6 +84,14 @@ const event: SuperbetEvent = {
       ],
     },
     {
+      name: 'Handicap asiatic',
+      id: 12,
+      odds: [
+        { price: 1.91, metadata: { name: '1 (-0.5)' }, status: 1, display: true },
+        { price: 1.89, metadata: { name: '2 (+0.5)' }, status: 1, display: true },
+      ],
+    },
+    {
       name: 'Prima repriză - Total cornere',
       id: 878,
       odds: [
@@ -109,6 +117,15 @@ if (only1x2) fail.push('1X2 Final must not be used as mais-um odd')
 const cornersPick = pickMaisUmOdd(event, 'corners', 'ht', 4)
 if (!cornersPick || cornersPick.line !== 4.5 || cornersPick.odd !== 1.72) {
   fail.push(`corners HT pick ${JSON.stringify(cornersPick)}`)
+}
+
+const limitGoals = pickLimitSnapshot(event, 'goals', 'ft', 1)
+if (!limitGoals?.prices.some((p) => p.side === 'over' && p.line === 1.5 && p.price === 1.95)) {
+  fail.push(`limit goals ${JSON.stringify(limitGoals)}`)
+}
+const asianGoals = pickAsianSnapshot(event, 'goals', 'ft')
+if (!asianGoals || asianGoals.marketName !== 'Handicap asiatic') {
+  fail.push(`asian goals ${JSON.stringify(asianGoals)}`)
 }
 
 const score = fixtureMatchesQuote('FC Porto', 'SL Benfica', 'Porto', 'Benfica')

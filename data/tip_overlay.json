@@ -1,0 +1,11 @@
+{
+  "requireOdd": false,
+  "minOdd": null,
+  "maxOdd": null,
+  "buckets": {
+    "goals_ht": { "enable": true, "minOdd": null, "maxOdd": null },
+    "goals_ft": { "enable": true, "minOdd": null, "maxOdd": null },
+    "corners_ht": { "enable": true, "minOdd": null, "maxOdd": null },
+    "corners_ft": { "enable": true, "minOdd": null, "maxOdd": null }
+  }
+}

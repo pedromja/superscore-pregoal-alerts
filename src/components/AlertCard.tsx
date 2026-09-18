@@ -1,5 +1,6 @@
 import { marketCopy, parseMarket } from '../lib/market'
 import { formatRelative, formatSigned, minuteLabel, sideLabel } from '../lib/format'
+import { formatObservationLine } from '../lib/oddsObserve'
 import { alertDomId, feedAlertKey } from '../lib/notifications'
 import { RULE_SHORT } from '../lib/rules'
 import { talliesLineOf } from '../lib/tally'
@@ -69,6 +70,7 @@ export function AlertCard({
 }) {
   const copy = marketCopy(parseMarket(market ?? alert.market))
   const tallies = talliesLineOf(alert)
+  const oddsLine = formatObservationLine(alert.odds)
   return (
     <article
       id={alertDomId(feedAlertKey(alert))}
@@ -107,6 +109,11 @@ export function AlertCard({
         </p>
       ) : null}
       <AlertMetrics alert={alert} />
+      {oddsLine ? (
+        <p className="mt-2 font-mono text-[11px] text-lime/90">
+          {oddsLine}
+        </p>
+      ) : null}
       {onFeedback ? (
         <div className="mt-2 flex gap-1">
           <button

@@ -1,6 +1,8 @@
 import type { CornerHalf, Market } from '../src/lib/types.ts'
 import {
   parseOddsApiModel,
+  pickAsianSnapshot,
+  pickLimitSnapshot,
   pickMaisUmOdd,
   type LiveOddPick,
   type SuperbetEvent,
@@ -72,6 +74,18 @@ export async function fetchSuperbetEvent(
   return events?.find((e) => e.event_id === eventId) ?? events?.[0] ?? null
 }
 
+export async function loadSuperbetEvent(
+  fixtureId: string,
+  known?: number | null,
+): Promise<SuperbetEvent | null> {
+  const cached = cache.get(fixtureId)
+  if (cached && Date.now() - cached.ts < CACHE_MS) return cached.event
+  const eventId = await fetchSuperScoreEventId(fixtureId, known ?? cached?.eventId)
+  const event = eventId ? await fetchSuperbetEvent(eventId) : null
+  cache.set(fixtureId, { ts: Date.now(), event, eventId })
+  return event
+}
+
 export async function resolveSuperScoreMaisUm(args: {
   fixtureId: string
   eventId?: number | null
@@ -79,14 +93,19 @@ export async function resolveSuperScoreMaisUm(args: {
   half: CornerHalf
   currentTotal: number
 }): Promise<LiveOddPick | null> {
-  const cached = cache.get(args.fixtureId)
-  let event = cached && Date.now() - cached.ts < CACHE_MS ? cached.event : null
-  let eventId = cached?.eventId ?? args.eventId ?? null
-  if (!event) {
-    eventId = await fetchSuperScoreEventId(args.fixtureId, eventId)
-    event = eventId ? await fetchSuperbetEvent(eventId) : null
-    cache.set(args.fixtureId, { ts: Date.now(), event, eventId })
-  }
+  const event = await loadSuperbetEvent(args.fixtureId, args.eventId)
   if (!event) return null
   return pickMaisUmOdd(event, args.market, args.half, args.currentTotal)
+}
+
+export function snapshotsFromEvent(
+  event: SuperbetEvent | null,
+  market: Market,
+  half: CornerHalf,
+  currentTotal: number,
+): { limit: ReturnType<typeof pickLimitSnapshot>; asian: ReturnType<typeof pickAsianSnapshot> } {
+  return {
+    limit: pickLimitSnapshot(event, market, half, currentTotal),
+    asian: pickAsianSnapshot(event, market, half),
+  }
 }

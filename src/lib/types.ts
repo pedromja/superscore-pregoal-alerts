@@ -1,3 +1,5 @@
+import type { OddsObservation } from './oddsObserve'
+
 export type Side = 'home' | 'away'
 export type RuleId = 'primary' | 'secondary' | 'fallback'
 export type TabId = 'monitor' | 'replay' | 'definicoes' | 'aprendizagem' | 'tips'
@@ -178,4 +180,5 @@ export type FeedAlert = FiredAlert & {
   cornerHalf?: CornerHalf
   goalsTally?: MatchTally
   cornersTally?: MatchTally
+  odds?: OddsObservation
 }

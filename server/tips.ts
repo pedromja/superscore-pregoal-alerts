@@ -25,6 +25,21 @@ import {
   tipPnl,
   type Tip,
 } from '../src/lib/tips.ts'
+import {
+  emptyObservation,
+  maisUmPriceOf,
+  type OddsObservation,
+} from '../src/lib/oddsObserve.ts'
+import {
+  ALERT_ODD_GATE_ENABLED,
+  DEFAULT_TIP_OVERLAY,
+  normalizeTipOverlay,
+  oddPassesOverlay,
+  OVERLAY_NOTE,
+  type OverlayDecision,
+  type TipOverlay,
+  type TipOverlayProposal,
+} from '../src/lib/tipOverlay.ts'
 import type {
   CornerHalf,
   FeedAlert,
@@ -33,12 +48,18 @@ import type {
   Market,
 } from '../src/lib/types.ts'
 import { cornerHalfOf } from '../src/lib/windows.ts'
-import { resolveSuperScoreMaisUm } from './odds.ts'
+import { loadSuperbetEvent, resolveSuperScoreMaisUm, snapshotsFromEvent } from './odds.ts'
 import {
+  appendOddsObservation,
   appendTipSkip,
+  loadOddsObservations,
   loadRobobetQuotes,
+  loadTipOverlay,
+  loadTipOverlayProposal,
   loadTips,
   saveRobobetQuotes,
+  saveTipOverlay,
+  saveTipOverlayProposal,
   saveTips,
 } from './store.ts'
 
@@ -117,6 +138,159 @@ export async function resolveTipOdd(args: {
     }
   }
   return null
+}
+
+export async function attachOddsToAlerts(args: {
+  fixture: Fixture
+  alerts: FeedAlert[]
+  market: Market
+}): Promise<FeedAlert[]> {
+  if (!args.alerts.length) return args.alerts
+  const event = await loadSuperbetEvent(args.fixture.id, args.fixture.oddsEventId)
+  const rb = matchRobobetQuote(args.fixture, args.market)
+  return args.alerts.map((alert) => {
+    const market = parseMarket(alert.market ?? args.market)
+    const half = halfOfAlert(market, alert.min, alert.period, alert.cornerHalf)
+    const currentTotal =
+      market === 'corners'
+        ? (alert.cornersTally?.home ?? 0) + (alert.cornersTally?.away ?? 0)
+        : (alert.goalsTally?.home ?? 0) + (alert.goalsTally?.away ?? 0)
+    const snaps = snapshotsFromEvent(event, market, half, currentTotal)
+    const robobet =
+      rb?.odd && rb.odd > 1 ? { odd: rb.odd, line: rb.linha } : null
+    let obs: OddsObservation = {
+      ...emptyObservation({
+        ts: alert.firedAt || new Date().toISOString(),
+        fixtureId: args.fixture.id,
+        matchLabel: alert.matchLabel,
+        league: args.fixture.competition,
+        market,
+        half,
+        minute: alert.min,
+        period: alert.period,
+        alertId: alert.id,
+        currentTotal,
+      }),
+      limit: snaps.limit,
+      asian: snaps.asian,
+      robobet,
+    }
+    if (snaps.limit || snaps.asian) {
+      obs = {
+        ...obs,
+        source: robobet ? 'mixed' : 'superscore',
+        sourceLabel: [
+          snaps.limit ? `SuperScore · ${snaps.limit.marketName}` : null,
+          snaps.asian ? `Asiático · ${snaps.asian.marketName}` : null,
+          robobet ? 'RoboBet · Odd Ao Vivo' : null,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      }
+    } else if (robobet) {
+      obs = {
+        ...obs,
+        source: 'robobet',
+        sourceLabel: 'RoboBet · Odd Ao Vivo',
+        limit: {
+          kind: 'limit',
+          marketName: rb?.marketRaw || 'Odd Ao Vivo',
+          line: robobet.line,
+          prices: [
+            {
+              name: 'Odd Ao Vivo',
+              price: robobet.odd,
+              line: robobet.line,
+              side: 'over',
+            },
+          ],
+        },
+      }
+    }
+    appendOddsObservation(obs)
+    return { ...alert, odds: obs }
+  })
+}
+
+export function resolvedOddFromAlert(alert: FeedAlert): ResolvedOdd | null {
+  const picked = maisUmPriceOf(alert.odds)
+  if (!picked) return null
+  return {
+    odd: picked.odd,
+    line: picked.line,
+    source: alert.odds?.source === 'robobet' ? 'robobet' : 'superscore',
+    sourceLabel: alert.odds?.sourceLabel || 'observação',
+    league: alert.odds?.league,
+  }
+}
+
+export function decideTipOverlay(
+  market: Market,
+  half: CornerHalf,
+  odd: number | null,
+  overlay: TipOverlay = loadTipOverlay(),
+): OverlayDecision {
+  return oddPassesOverlay(overlay, entryTypeOf(market, half), odd)
+}
+
+export function overlayPayload() {
+  return {
+    active: loadTipOverlay(),
+    proposal: loadTipOverlayProposal(),
+    defaults: DEFAULT_TIP_OVERLAY,
+    note: OVERLAY_NOTE,
+    alertGate: ALERT_ODD_GATE_ENABLED,
+  }
+}
+
+export function proposeTipOverlay(
+  raw: unknown,
+  reason = 'manual',
+): TipOverlayProposal {
+  const overlay = normalizeTipOverlay(raw)
+  const proposal: TipOverlayProposal = {
+    id: `overlay-${Date.now()}`,
+    ts: new Date().toISOString(),
+    reason,
+    applied: false,
+    overlay,
+    note: OVERLAY_NOTE,
+  }
+  saveTipOverlayProposal(proposal)
+  return proposal
+}
+
+export function applyTipOverlay(opts: {
+  confirm?: boolean
+  overlay?: unknown
+  id?: string
+  reason?: string
+}): TipOverlayProposal {
+  if (opts.confirm !== true) {
+    throw new Error(
+      'Aplicação do overlay exige confirmação explícita (confirm:true).',
+    )
+  }
+  const proposed = loadTipOverlayProposal()
+  const overlay = opts.overlay
+    ? normalizeTipOverlay(opts.overlay)
+    : proposed && (opts.id === proposed.id || opts.id === 'latest' || !opts.id)
+      ? proposed.overlay
+      : null
+  if (!overlay) {
+    throw new Error('Proposta de overlay inexistente')
+  }
+  saveTipOverlay(overlay)
+  const applied: TipOverlayProposal = {
+    id: proposed?.id ?? `overlay-${Date.now()}`,
+    ts: new Date().toISOString(),
+    reason: opts.reason || 'manual',
+    applied: true,
+    overlay,
+    note: 'Overlay gravado para uso futuro. Alertas e push NÃO são filtrados por odd. Regras de odd só depois de aprendizagem + confirmação.',
+  }
+  saveTipOverlayProposal(applied)
+  return applied
 }
 
 export function logTipSkip(reason: string, extra: Record<string, unknown>): void {
@@ -303,6 +477,8 @@ export function tipsPayload() {
     roi: computeRoi(tips),
     leagues: computeLeagueFollowup(tips),
     quotes: loadRobobetQuotes().slice(-20).reverse(),
+    overlay: overlayPayload(),
+    observations: loadOddsObservations().slice(-40).reverse(),
     horizonLongCap: HORIZON_LONG_CAP,
   }
 }

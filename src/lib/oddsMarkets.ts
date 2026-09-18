@@ -1,3 +1,4 @@
+import type { OddsPrice, OddsSnapshot } from './oddsObserve'
 import type { CornerHalf, Market } from './types'
 
 export type SuperbetOdd = {
@@ -175,6 +176,139 @@ export function pickMaisUmOdd(
       source: 'superscore',
       eventId: event?.event_id ?? null,
     }
+  }
+  return null
+}
+
+export function isAsianMarket(name: string, family: Market): boolean {
+  const n = name.toLowerCase()
+  const asianHint = /asiatic|asian|asiático/.test(n)
+  const handicapHint = /handicap/.test(n)
+  if (!asianHint && !handicapHint) return false
+  if (family === 'corners') {
+    return isCornersFamily(name) || /cornere/.test(n)
+  }
+  if (isCornersFamily(name)) return false
+  return asianHint || handicapHint
+}
+
+export function parseAsianOutcome(
+  label: string,
+): { side: OddsPrice['side']; line: number | null } {
+  const ou = parseOverUnder(label)
+  if (ou) return { side: ou.side, line: ou.line }
+  const wrapped = label.match(
+    /^(1|2|Home|Away|Gazde|Oaspeți|Oaspeti|Casa)\s*\(\s*([+-]?[0-9]+(?:[.,][0-9]+)?)\s*\)/i,
+  )
+  if (wrapped) {
+    const side: OddsPrice['side'] = /^(2|away|oaspe)/i.test(wrapped[1])
+      ? 'away'
+      : 'home'
+    const line = Number(wrapped[2].replace(',', '.'))
+    return { side, line: Number.isFinite(line) ? line : null }
+  }
+  const bare = label.match(/^([+-][0-9]+(?:[.,][0-9]+)?)$/)
+  if (bare) {
+    const line = Number(bare[1].replace(',', '.'))
+    return { side: 'other', line: Number.isFinite(line) ? line : null }
+  }
+  return { side: 'other', line: null }
+}
+
+function scoreAsianMarket(
+  market: SuperbetMarket,
+  family: Market,
+  half: CornerHalf,
+): number {
+  const name = nameOf(market)
+  if (!name || !isAsianMarket(name, family)) return -1
+  const mh = marketHalf(name)
+  if (mh === half) return 3
+  if (mh === 'any' && half === 'ft') return 2
+  if (mh === 'any' && half === 'ht') return 1
+  return -1
+}
+
+function snapshotPrices(
+  market: SuperbetMarket,
+  kind: OddsSnapshot['kind'],
+  filter?: (price: OddsPrice) => boolean,
+): OddsSnapshot | null {
+  const prices: OddsPrice[] = []
+  for (const odd of market.odds ?? []) {
+    const price = usableOdd(odd)
+    if (price === null) continue
+    const label = oddLabel(odd)
+    const parsed =
+      kind === 'limit'
+        ? (() => {
+            const ou = parseOverUnder(label)
+            return ou
+              ? { side: ou.side as OddsPrice['side'], line: ou.line }
+              : { side: 'other' as const, line: null }
+          })()
+        : parseAsianOutcome(label)
+    const row: OddsPrice = {
+      name: label || String(price),
+      price,
+      line: parsed.line,
+      side: parsed.side,
+    }
+    if (filter && !filter(row)) continue
+    prices.push(row)
+  }
+  if (!prices.length) return null
+  const line =
+    prices.find((p) => p.line !== null)?.line ??
+    prices[0]?.line ??
+    null
+  return { kind, marketName: nameOf(market), line, prices }
+}
+
+export function pickLimitSnapshot(
+  event: SuperbetEvent | null | undefined,
+  family: Market,
+  half: CornerHalf,
+  currentTotal: number,
+): OddsSnapshot | null {
+  const want = wantedLine(currentTotal)
+  const alt = currentTotal - 0.5
+  const markets = collectMarkets(event)
+    .map((market) => ({ market, score: scoreMarket(market, family, half) }))
+    .filter((row) => row.score >= 0)
+    .sort((a, b) => b.score - a.score)
+  for (const row of markets) {
+    const snap = snapshotPrices(row.market, 'limit', (price) => {
+      if (price.side !== 'over' && price.side !== 'under') return false
+      if (price.line === null) return false
+      if (Math.abs(price.line - want) < 1e-6) return true
+      if (alt >= 0 && Math.abs(price.line - alt) < 1e-6) return true
+      return false
+    })
+    if (snap) {
+      const preferred = snap.prices.filter((p) => p.line !== null && Math.abs(p.line - want) < 1e-6)
+      return {
+        ...snap,
+        line: want,
+        prices: preferred.length ? [...preferred, ...snap.prices.filter((p) => !preferred.includes(p))] : snap.prices,
+      }
+    }
+  }
+  return null
+}
+
+export function pickAsianSnapshot(
+  event: SuperbetEvent | null | undefined,
+  family: Market,
+  half: CornerHalf,
+): OddsSnapshot | null {
+  const markets = collectMarkets(event)
+    .map((market) => ({ market, score: scoreAsianMarket(market, family, half) }))
+    .filter((row) => row.score >= 0)
+    .sort((a, b) => b.score - a.score)
+  for (const row of markets) {
+    const snap = snapshotPrices(row.market, 'asian')
+    if (snap) return snap
   }
   return null
 }

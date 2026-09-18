@@ -1,3 +1,4 @@
+import type { OddsObservation } from '../src/lib/oddsObserve.ts'
 import type {
   AlertSettings,
   CornerHalf,
@@ -39,6 +40,7 @@ export type LoggedAlert = {
   labeledAt: string | null
   feedback: 'up' | 'down' | null
   sentPush: boolean
+  odds?: OddsObservation
 }
 
 export type GoalRecord = {

@@ -29,7 +29,7 @@ import {
   parseCornerHalf,
   parseCornerHalfOpt,
 } from '../src/lib/windows.ts'
-import { LEARN_AUTO_MIN_OUTCOMES, LEARN_WINDOW, ROOT } from './config.ts'
+import { LEARN_AUTO_APPLY, LEARN_AUTO_MIN_OUTCOMES, LEARN_WINDOW, ROOT } from './config.ts'
 import {
   listMatches,
   loadActiveMarket,
@@ -147,6 +147,7 @@ export function toLoggedAlert(
     labeledAt: null,
     feedback: null,
     sentPush,
+    odds: alert.odds,
   }
 }
 
@@ -252,7 +253,7 @@ function weightedHit(alert: LoggedAlert, field: 'hit5' | 'hitLong'): boolean | n
 function scoreNoteFor(settings: AlertSettings): string {
   const short = settings.evaluationWindow || HORIZON_SHORT
   const cap = settings.market === 'corners' ? 16 : 12
-  return `Score = 0,4×precisão(≤${short} min) + 0,6×precisão(≤15 min ou fim da janela/parte), menos penalização se alertas/jogo > ${cap}. A guarda automática olha para o horizonte longo.`
+  return `Score = 0,4×precisão(≤${short} min) + 0,6×precisão(≤15 min ou fim da janela/parte), menos penalização se alertas/jogo > ${cap}. A aprendizagem só propõe; as regras base não mudam sem confirmação na UI.`
 }
 
 export function computeMetrics(
@@ -551,23 +552,21 @@ export function recalculate(
     score: best.score,
     autoEligible: autoEligible && changed,
     note: !changed
-      ? 'Os defaults atuais já maximizam o score neste conjunto.'
+      ? 'Os defaults atuais já maximizam o score neste conjunto. Regras base inalteradas.'
       : autoEligible
-        ? 'Precisão sobe ≥1pp sem recall cair >3pp — pode aplicar-se automaticamente.'
-        : 'Proposta fora da guarda conservadora: confirme na UI antes de aplicar.',
+        ? 'Precisão sobe ≥1pp sem recall cair >3pp — proposta conservadora. Confirme na UI para aplicar; nada é escrito em silêncio.'
+        : 'Proposta fora da guarda conservadora: confirme na UI antes de aplicar. As regras base não mudam sem essa confirmação.',
   }
   saveProposal(proposal, m, base.cornerHalf)
 
-  const labeled = loadAlerts(m, base.cornerHalf).filter(
-    (a) => a.hit !== null || a.feedback,
-  ).length
-  if (
-    proposal.autoEligible &&
-    labeled >= LEARN_AUTO_MIN_OUTCOMES &&
-    reason !== 'manual' &&
-    reason !== 'seed-demos'
-  ) {
-    return applyProposal(proposal.id, 'auto', m, base.cornerHalf)
+  if (LEARN_AUTO_APPLY && proposal.autoEligible) {
+    const labeled = loadAlerts(m, base.cornerHalf).filter(
+      (a) => a.hit !== null || a.feedback,
+    ).length
+    if (labeled >= LEARN_AUTO_MIN_OUTCOMES) {
+      proposal.note = `${proposal.note} LEARN_AUTO_APPLY=1 está definido, mas o auto-aplicar continua desligado — use o botão / API de confirmação.`
+      saveProposal(proposal, m, base.cornerHalf)
+    }
   }
   return proposal
 }
@@ -577,7 +576,16 @@ export function applyProposal(
   reason = 'manual',
   market?: Market,
   half?: CornerHalf | null,
+  opts: { confirm?: boolean } = {},
 ): ParamVersion {
+  if (opts.confirm !== true) {
+    throw new Error(
+      'Aplicação exige confirmação explícita (confirm:true). As regras base não mudam em silêncio.',
+    )
+  }
+  if (reason === 'auto') {
+    throw new Error('Auto-aplicar está desligado. Confirme a proposta na UI.')
+  }
   const m = market ?? loadActiveMarket()
   const h = m === 'corners' ? parseCornerHalf(half) : undefined
   const proposal = loadProposal(m, h)
