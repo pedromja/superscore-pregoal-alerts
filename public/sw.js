@@ -1,5 +1,5 @@
-/* SuperScore pre-goal alerts — local notifications (no Web Push/VAPID yet). */
-const SW_VERSION = 'pregoal-notify-v1'
+/* SuperScore — local SHOW_NOTIFICATION + Web Push */
+const SW_VERSION = 'pregoal-push-v2'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
@@ -9,21 +9,48 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim())
 })
 
+function show(title, options) {
+  return self.registration.showNotification(title, {
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    renotify: true,
+    vibrate: [80, 40, 80],
+    ...options,
+  })
+}
+
 self.addEventListener('message', (event) => {
   const data = event.data
   if (!data || data.type !== 'SHOW_NOTIFICATION') return
-
   event.waitUntil(
-    self.registration.showNotification(data.title, {
+    show(data.title, {
       body: data.body,
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
       tag: data.tag,
-      renotify: true,
-      vibrate: [80, 40, 80],
+      data: { url: data.url, alertKey: data.alertKey, version: SW_VERSION },
+    }),
+  )
+})
+
+self.addEventListener('push', (event) => {
+  let payload = {
+    title: 'Alerta pré-golo',
+    body: 'Novo momentum SuperScore',
+    url: '/#/monitor',
+    alertKey: '',
+    tag: `pregoal:${Date.now()}`,
+  }
+  try {
+    if (event.data) payload = { ...payload, ...event.data.json() }
+  } catch {
+    if (event.data) payload.body = event.data.text()
+  }
+  event.waitUntil(
+    show(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
       data: {
-        url: data.url,
-        alertKey: data.alertKey,
+        url: payload.url || '/#/monitor',
+        alertKey: payload.alertKey,
         version: SW_VERSION,
       },
     }),
@@ -42,8 +69,7 @@ async function openOrFocus(target) {
     includeUncontrolled: true,
   })
   for (const client of windowClients) {
-    const origin = self.location.origin
-    if (!client.url.startsWith(origin)) continue
+    if (!client.url.startsWith(self.location.origin)) continue
     await client.focus()
     client.postMessage({ type: 'OPEN_ALERT', url: target })
     return

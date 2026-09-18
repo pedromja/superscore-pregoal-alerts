@@ -1,9 +1,10 @@
-import { Activity, Settings2, TimerReset } from 'lucide-react'
+import { Activity, Brain, Settings2, TimerReset } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { NotificationBar } from './components/NotificationBar'
 import { lisbonToday } from './lib/format'
 import { parseAppHash, registerServiceWorker } from './lib/notifications'
 import { loadSettings, saveSettings } from './lib/settings'
+import { LearningPage } from './pages/LearningPage'
 import { MonitorPage } from './pages/MonitorPage'
 import { ReplayPage } from './pages/ReplayPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -12,6 +13,7 @@ import type { AlertSettings, TabId } from './lib/types'
 const TABS: { id: TabId; label: string; icon: typeof Activity }[] = [
   { id: 'monitor', label: 'Alertas ao vivo', icon: Activity },
   { id: 'replay', label: 'Replay / treino', icon: TimerReset },
+  { id: 'aprendizagem', label: 'Aprendizagem', icon: Brain },
   { id: 'definicoes', label: 'Definições', icon: Settings2 },
 ]
 
@@ -114,6 +116,9 @@ export default function App() {
       ) : null}
       {tab === 'replay' ? (
         <ReplayPage settings={settings} date={date} onDate={setDate} />
+      ) : null}
+      {tab === 'aprendizagem' ? (
+        <LearningPage settings={settings} onChange={setSettings} />
       ) : null}
       {tab === 'definicoes' ? (
         <SettingsPage settings={settings} onChange={setSettings} />

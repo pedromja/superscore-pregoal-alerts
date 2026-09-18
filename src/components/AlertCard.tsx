@@ -56,10 +56,12 @@ export function AlertCard({
   alert,
   now,
   highlighted = false,
+  onFeedback,
 }: {
   alert: FeedAlert
   now?: number
   highlighted?: boolean
+  onFeedback?: (id: string, vote: 'up' | 'down') => void
 }) {
   return (
     <article
@@ -89,6 +91,24 @@ export function AlertCard({
         </p>
       ) : null}
       <AlertMetrics alert={alert} />
+      {onFeedback ? (
+        <div className="mt-2 flex gap-1">
+          <button
+            type="button"
+            className="rounded-lg border border-line px-2 py-0.5 text-xs hover:border-lime/50"
+            onClick={() => onFeedback(`${alert.fixtureId}:${alert.id}`, 'up')}
+          >
+            👍 útil
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-line px-2 py-0.5 text-xs hover:border-rose-400/50"
+            onClick={() => onFeedback(`${alert.fixtureId}:${alert.id}`, 'down')}
+          >
+            👎 falso
+          </button>
+        </div>
+      ) : null}
     </article>
   )
 }

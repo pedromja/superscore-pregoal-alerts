@@ -119,13 +119,16 @@ export function showTestNotification(): Promise<void> {
 }
 
 export function parseAppHash(hash = window.location.hash): {
-  tab: 'monitor' | 'replay' | 'definicoes'
+  tab: 'monitor' | 'replay' | 'definicoes' | 'aprendizagem'
   alertKey: string | null
 } {
   const raw = hash.replace(/^#\/?/, '')
   const [path, query] = raw.split('?')
   const tab =
-    path === 'replay' || path === 'definicoes' || path === 'monitor'
+    path === 'replay' ||
+    path === 'definicoes' ||
+    path === 'monitor' ||
+    path === 'aprendizagem'
       ? path
       : 'monitor'
   const params = new URLSearchParams(query ?? '')

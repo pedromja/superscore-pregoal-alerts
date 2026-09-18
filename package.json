@@ -4,24 +4,35 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k -n web,api -c cyan,magenta \"vite\" \"tsx watch server/index.ts\"",
+    "dev:web": "vite",
+    "dev:api": "tsx watch server/index.ts",
+    "start": "tsx server/index.ts",
+    "vapid:generate": "tsx server/vapid-generate.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
+    "concurrently": "^10.0.5",
+    "dotenv": "^18.0.0",
+    "express": "^5.2.1",
     "lucide-react": "^0.544.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.13",
+    "@types/express": "^5.0.6",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
     "tailwindcss": "^4.1.13",
+    "tsx": "^4.23.13",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   }

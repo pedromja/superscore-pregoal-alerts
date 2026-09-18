@@ -1,6 +1,6 @@
 export type Side = 'home' | 'away'
 export type RuleId = 'primary' | 'secondary' | 'fallback'
-export type TabId = 'monitor' | 'replay' | 'definicoes'
+export type TabId = 'monitor' | 'replay' | 'definicoes' | 'aprendizagem'
 
 export type AlertSettings = {
   spikeThreshold: number

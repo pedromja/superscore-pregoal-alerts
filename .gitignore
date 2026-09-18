@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 agent-tools
+.env
+data/*.json
+data/matches/
+!data/.gitkeep
 
 # Editor directories and files
 .vscode/*

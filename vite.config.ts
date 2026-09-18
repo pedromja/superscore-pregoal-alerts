@@ -2,7 +2,12 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
+const apiServer = 'http://127.0.0.1:43174'
+
 const proxy = {
+  '/api/push': { target: apiServer, changeOrigin: true },
+  '/api/learn': { target: apiServer, changeOrigin: true },
+  '/api/poller': { target: apiServer, changeOrigin: true },
   '/api/ss-fixtures': {
     target: 'https://api.content-prod.superscore.live',
     changeOrigin: true,

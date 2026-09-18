@@ -11,6 +11,12 @@ import {
   showAlertNotification,
   type NotifyPermission,
 } from '../lib/notifications'
+import {
+  currentPushSubscription,
+  sendRemoteTest,
+  subscribeRemotePush,
+  unsubscribeRemotePush,
+} from '../lib/pushRemote'
 import type { AlertSettings } from '../lib/types'
 
 type Props = {
@@ -57,6 +63,12 @@ export function useNotifyPermission(): {
 export function NotificationBar({ settings, onChange, compact = false }: Props) {
   const { permission, activate } = useNotifyPermission()
   const [testNote, setTestNote] = useState<string | null>(null)
+  const [remote, setRemote] = useState(false)
+  const [remoteNote, setRemoteNote] = useState<string | null>(null)
+
+  useEffect(() => {
+    void currentPushSubscription().then((sub) => setRemote(Boolean(sub)))
+  }, [])
 
   if (permission === 'unsupported') {
     return (
@@ -97,7 +109,7 @@ export function NotificationBar({ settings, onChange, compact = false }: Props) 
       return (
         <p className="inline-flex items-center gap-1 text-xs text-lime">
           <BellRing size={12} />
-          Notificações ativas
+          {remote ? 'Push remoto ativo' : 'Notificações ativas'}
         </p>
       )
     }
@@ -129,8 +141,8 @@ export function NotificationBar({ settings, onChange, compact = false }: Props) 
         </p>
         <h2 className="text-lg font-semibold">Telemóvel e PC</h2>
         <p className="mt-1 text-sm text-emerald-100/60">
-          Avisos locais enquanto o monitor estiver aberto (separador ou PWA).
-          Sem Push remoto — se fechar a página, não há alerta.
+          Locais: o separador/PWA tem de estar aberto. Remotas: o poller do
+          servidor envia Web Push mesmo com a app fechada (VAPID).
         </p>
       </div>
 
@@ -205,10 +217,79 @@ export function NotificationBar({ settings, onChange, compact = false }: Props) 
           onClick={() => void handleTest()}
           className="rounded-xl border border-line px-3 py-2 text-sm hover:border-lime/50"
         >
-          Enviar notificação de teste
+          Teste local
         </button>
         {testNote ? (
           <span className="text-xs text-emerald-100/60">{testNote}</span>
+        ) : null}
+      </div>
+
+      <div className="rounded-xl border border-line bg-pitch px-3 py-3">
+        <p className="text-sm font-semibold">Push remoto (app fechada)</p>
+        <p className="mt-1 text-xs text-emerald-100/55">
+          {remote
+            ? 'Este dispositivo está subscrito. O poller avisa os telemóveis e PCs registados.'
+            : 'Subscreva para receber alertas com a PWA fechada.'}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {remote ? (
+            <button
+              type="button"
+              onClick={() =>
+                void unsubscribeRemotePush()
+                  .then(() => {
+                    setRemote(false)
+                    setRemoteNote('Subscription removida.')
+                  })
+                  .catch((err: unknown) =>
+                    setRemoteNote(err instanceof Error ? err.message : 'Falha'),
+                  )
+              }
+              className="rounded-xl border border-line px-3 py-2 text-sm"
+            >
+              Cancelar Push remoto
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                void subscribeRemotePush()
+                  .then(() => {
+                    setRemote(true)
+                    onChange({
+                      ...settings,
+                      notificationsEnabled: true,
+                      notifyPrimary: true,
+                    })
+                    setRemoteNote('Subscrito. Pode fechar a app.')
+                  })
+                  .catch((err: unknown) =>
+                    setRemoteNote(err instanceof Error ? err.message : 'Falha'),
+                  )
+              }
+              className="rounded-xl bg-lime px-3 py-2 text-sm font-semibold text-pitch"
+            >
+              Ativar notificações remotas
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() =>
+              void sendRemoteTest()
+                .then((r) =>
+                  setRemoteNote(`Push de teste enviado a ${r.sent} dispositivo(s).`),
+                )
+                .catch((err: unknown) =>
+                  setRemoteNote(err instanceof Error ? err.message : 'Servidor offline'),
+                )
+            }
+            className="rounded-xl border border-line px-3 py-2 text-sm"
+          >
+            Teste remoto
+          </button>
+        </div>
+        {remoteNote ? (
+          <p className="mt-2 text-xs text-emerald-100/60">{remoteNote}</p>
         ) : null}
       </div>
     </section>

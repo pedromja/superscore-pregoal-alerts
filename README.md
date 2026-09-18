@@ -1,6 +1,6 @@
 # SuperScore · Alertas pré-golo
 
-Painel web (PT-PT) que lê o **attacking momentum** SuperScore e dispara alertas que devem **preceder** o golo. Um pico no mesmo minuto do golo é marcado como coincidente e **não** conta como acerto.
+Painel web (PT-PT) que lê o **attacking momentum** SuperScore e dispara alertas que devem **preceder** o golo. Um pico no mesmo minuto do golo é coincidente e **não** conta como acerto.
 
 Treino de referência: 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/Lisbon).
 
@@ -8,86 +8,97 @@ Treino de referência: 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/L
 
 ```bash
 npm install
+cp .env.example .env   # opcional; o servidor gera VAPID em data/vapid.json se faltar
+npm run vapid:generate # imprime VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY — cole no .env
 npm run dev
 ```
 
-O Vite sobe em `http://127.0.0.1:43173` e faz proxy das APIs SuperScore (evita CORS).
+Isto sobe **dois** processos:
+
+| Processo | URL |
+|---|---|
+| Vite (UI + proxy) | `http://127.0.0.1:43173` |
+| API Node (Push + poller + aprendizagem) | `http://127.0.0.1:43174` |
+
+O Vite encaminha `/api/push`, `/api/learn` e `/api/poller` para o sidecar.
 
 ```bash
 npm run build
-npm run preview
+npm run preview   # UI; a API continua a precisar de `npm run dev:api` ou `npm start`
 ```
 
 ## Páginas
 
-1. **Alertas ao vivo** — data (default: hoje em Europe/Lisbon), lista de jogos da região `ro` (a usada no treino), poll do momentum, feed de alertas (mais recente primeiro).
-2. **Replay / treino** — amostras offline (Celtic vs Ferencváros, Drava Ptuj vs NK Bistrica) ou um jogo terminado por ID/data. Mostra antecedência por golo e picos coincidentes.
-3. **Definições** — limiares, toggles de regras e notificações; persistidos em `localStorage`.
+1. **Alertas ao vivo** — data (hoje, Europe/Lisbon), região `ro`, poll do momentum, feed, 👍/👎.
+2. **Replay / treino** — amostras Celtic / Drava ou jogo por ID.
+3. **Aprendizagem** — precisão/recall, proposta de limiares, histórico, importar amostras.
+4. **Definições** — limiares, regras, notificações locais e **Ativar notificações remotas**.
 
-## Notificações (PC e telemóvel)
+## Web Push (app fechada)
 
-Avisos **locais** via Web Notifications API + Service Worker, enquanto o **monitor está a correr** (separador aberto ou PWA instalada). Não há servidor Push/VAPID nesta fase: se fechar a página, não recebe alertas.
+O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras e faz `webpush.sendNotification` para as subscriptions guardadas em `data/subscriptions.json`. Deduplica por `fixtureId:alertId`. O primeiro snapshot de um jogo **não** envia push.
 
-Cada notificação mostra: jogo, minuto, lado (casa/fora), regra e valor de momentum. O clique foca o painel no alerta correspondente (`#/monitor?alert=…`).
+### Gerar VAPID
 
-O primeiro snapshot de um jogo **não** notifica (evita spam do histórico). Só disparos novos, e não os picos coincidentes com o golo.
+```bash
+npm run vapid:generate
+```
 
-Por defeito só a regra **primária** notifica. Secundária e reserva ligam-se em Definições.
+Cole as três linhas no `.env` (ver `.env.example`). A chave **privada** nunca vai para o cliente — o browser só recebe `GET /api/push/vapidPublicKey`.
 
-### Ativar no PC (Chrome, Edge, Firefox)
+Se o `.env` estiver vazio, o servidor cria `data/vapid.json` automaticamente (gitignored).
 
-1. Abra o painel (`npm run dev` → `http://127.0.0.1:43173`).
-2. Clique **Ativar notificações** (canto superior ou Definições).
-3. Aceite o pedido do browser.
-4. Opcional: **Enviar notificação de teste**.
-5. Deixe o separador do monitor aberto (pode estar em segundo plano).
+### Subscrever
 
-HTTPS ou `localhost` são obrigatórios. Se recusar, volte a permitir no ícone à esquerda da barra de endereço.
+1. Arrancar `npm run dev`.
+2. Definições → **Ativar notificações** (permissão do browser).
+3. **Ativar notificações remotas** (`pushManager.subscribe` + `POST /api/push/subscribe`).
+4. Opcional: **Teste remoto**.
+5. Pode fechar a PWA; o poller continua no Node.
 
-### Ativar no Android (Chrome)
+### Android Chrome
 
-1. Abra o URL do painel.
-2. Menu ⋮ → **Adicionar ao ecrã inicial** (recomendado; o `manifest.webmanifest` já está no projeto).
-3. Abra a PWA ou o separador e clique **Ativar notificações**.
-4. Mantenha a app/separador aberta para o polling continuar.
+1. Abrir o URL → ⋮ → **Adicionar ao ecrã inicial**.
+2. Abrir a PWA → Ativar notificações → Ativar notificações remotas.
+3. O poller no servidor (PC/VPS) tem de ficar a correr.
 
-### Ativar no iPhone / iPad (Safari)
+### Desktop (Chrome, Edge, Firefox)
 
-O iOS **só** entrega notificações web se a app estiver instalada como PWA (iOS 16.4+):
+Mesmos botões. HTTPS ou `localhost`. Firefox: permitir notificações no site.
 
-1. Safari → botão Partilhar → **Adicionar ao ecrã inicial**.
-2. Abra o ícone (não o separador do Safari).
-3. Clique **Ativar notificações** e aceite.
-4. Deixe a PWA aberta (mesmo em segundo plano).
+### iOS (Safari)
 
-No Safari “normal” (sem ecrã inicial) as notificações web não funcionam.
+Web Push **só** na PWA do ecrã inicial, iOS 16.4+:
 
-### TODO — Push remoto
+1. Partilhar → **Adicionar ao ecrã inicial**.
+2. Abrir pelo ícone (não o separador Safari).
+3. Ativar notificações remotas.
 
-Quando for preciso avisar com a página **fechada**: Web Push + VAPID, `push` no Service Worker, e um endpoint que publique o alerta. O `sw.js` atual só trata `SHOW_NOTIFICATION` local e `notificationclick`.
+No Safari “normal” não há Push.
+
+## Aprendizagem
+
+Cada alerta no servidor: `{id, fixtureId, matchLabel, minute, side, ruleId, features, thresholdsSnapshot, ts}`.
+
+Etiqueta automática (jogo terminado ou replay das amostras): `hit=true` se golo do mesmo lado em `(alertMin, alertMin+W]` (W=5). Golos sem pré-alerta = misses (recall).
+
+**Recalcular** faz uma grelha leve em torno dos defaults (spike 70–90, swing 40–70, sustained 2–5 / 25–40) e maximiza `0.6*precision + 0.4*recall`, com penalização se alertas/jogo > 12.
+
+Aplicação automática só se precisão subir ≥1pp e recall não cair >3pp, e houver ≥50 outcomes (`LEARN_AUTO_MIN_OUTCOMES`). Caso contrário a UI pede **Aplicar proposta**. O histórico fica em `data/params_history.json`. Os defaults de treino nunca são substituídos em silêncio.
+
+Na Aprendizagem: **Importar amostras Celtic/Drava** para ter métricas imediatamente.
 
 ## Regras (defaults do treino)
 
-Momentum assinado ≈ −100…+100 (**+ casa**, **− fora**). O lado do alerta é o sinal do valor.
-
 | Regra | Condição |
 |---|---|
-| **Primária** (recomendada) | `\|v\| ≥ 80` **e** (`\|Δ1\| ≥ 50` **ou** `\|v\| ≥ 30` durante 3 min no mesmo lado) |
-| **Secundária** | `\|Δ1\| ≥ 60` no último minuto |
-| **Reserva** | `\|v\| ≥ 30` durante 4 minutos consecutivos, mesmo lado |
+| **Primária** | `\|v\| ≥ 80` **e** (`\|Δ1\| ≥ 50` **ou** `\|v\| ≥ 30` × 3 min, mesmo lado) |
+| **Secundária** | `\|Δ1\| ≥ 60` |
+| **Reserva** | `\|v\| ≥ 30` × 4 min, mesmo lado |
 
-Δ1 = diferença face ao ponto anterior da série (amostras de 1 minuto).
+Avaliação estrita `alert_minute < goal_minute`. Spike70 sozinho não é regra.
 
-**Avaliação:** `alert_minute < goal_minute` (estrito). Janela W = 5 min. Spike70 sozinho **não** é regra — 41% dos golos só têm esse pico no minuto do golo.
+## APIs SuperScore
 
-Métricas W=5 da primária: precisão 36,6% · recall 33,9% · ~6,9 alertas/jogo · lead mediana 1 min · 33,9% dos golos com pré-alerta em 1–5 min.
-
-## APIs (sem scraping)
-
-- Jogos: `GET /v2/public/stats/fixtures/by-date/{region}?language=en&date=YYYY-MM-DD&timezone_offset=1`  
-  Proxy local: `/api/ss-fixtures/...` · região de treino: `ro` · `status` 100 ≈ FT · scores `type` 0 = resultado final · `state` 1 = ao vivo.
-- Momentum: `GET /v2/soccer/fixtures/attacking-momentum/superscore/en?fixture-id={id}`  
-  Proxy local: `/api/ss-momentum?fixture-id=`  
-  Golos: `events` com `type === 4` (`side` 1=casa, 2=fora).
-
-Se a API falhar, o Replay continua a funcionar com as amostras em `public/demo/`.
+- Jogos: proxy `/api/ss-fixtures/by-date/{region}` · `status` 100 ≈ FT · `state` 1 = ao vivo.
+- Momentum: `/api/ss-momentum?fixture-id=` · golos `type === 4` (1=casa, 2=fora).

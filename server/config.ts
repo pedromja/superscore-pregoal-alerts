@@ -1,0 +1,69 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { config as loadEnv } from 'dotenv'
+import webpush from 'web-push'
+import { DEFAULT_SETTINGS } from '../src/lib/rules.ts'
+import type { AlertSettings } from '../src/lib/types.ts'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+loadEnv({ path: join(root, '.env') })
+
+export const ROOT = root
+export const DATA_DIR = process.env.DATA_DIR
+  ? join(root, process.env.DATA_DIR)
+  : join(root, 'data')
+export const MATCHES_DIR = join(DATA_DIR, 'matches')
+export const SERVER_PORT = Number(process.env.PORT || 43174)
+export const POLLER_REGION = process.env.POLLER_REGION || 'ro'
+export const POLLER_INTERVAL_MS = Number(process.env.POLLER_INTERVAL_MS || 45000)
+export const POLLER_ENABLED = process.env.POLLER_ENABLED !== '0'
+export const LEARN_WINDOW = Number(process.env.LEARN_WINDOW || 5)
+export const LEARN_AUTO_MIN_OUTCOMES = Number(
+  process.env.LEARN_AUTO_MIN_OUTCOMES || 50,
+)
+export const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:dev@localhost'
+
+mkdirSync(MATCHES_DIR, { recursive: true })
+
+type VapidFile = { publicKey: string; privateKey: string; subject: string }
+
+function readVapidFile(): VapidFile | null {
+  const path = join(DATA_DIR, 'vapid.json')
+  if (!existsSync(path)) return null
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as VapidFile
+  } catch {
+    return null
+  }
+}
+
+function ensureVapid(): VapidFile {
+  const fromEnv =
+    process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY
+      ? {
+          publicKey: process.env.VAPID_PUBLIC_KEY,
+          privateKey: process.env.VAPID_PRIVATE_KEY,
+          subject: VAPID_SUBJECT,
+        }
+      : null
+  if (fromEnv) return fromEnv
+  const existing = readVapidFile()
+  if (existing?.publicKey && existing.privateKey) {
+    return { ...existing, subject: existing.subject || VAPID_SUBJECT }
+  }
+  const generated = webpush.generateVAPIDKeys()
+  const stored: VapidFile = {
+    publicKey: generated.publicKey,
+    privateKey: generated.privateKey,
+    subject: VAPID_SUBJECT,
+  }
+  writeFileSync(join(DATA_DIR, 'vapid.json'), JSON.stringify(stored, null, 2))
+  return stored
+}
+
+export const vapid = ensureVapid()
+
+export function pollerSettings(overrides?: Partial<AlertSettings>): AlertSettings {
+  return { ...DEFAULT_SETTINGS, ...overrides, evaluationWindow: LEARN_WINDOW }
+}

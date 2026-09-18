@@ -25,6 +25,7 @@ import {
   ruleNotifyEnabled,
   showAlertNotification,
 } from '../lib/notifications'
+import { postAlerts, postFeedback, fetchPollerStatus } from '../lib/learnApi'
 import { evaluateAlerts, extractGoals } from '../lib/rules'
 import type { AlertSettings, FeedAlert, Fixture, MomentumPayload } from '../lib/types'
 
@@ -59,6 +60,7 @@ export function MonitorPage({
   const [highlightKey, setHighlightKey] = useState<string | null>(
     focusAlertKey ?? null,
   )
+  const [pollerLine, setPollerLine] = useState<string | null>(null)
   const seen = useRef(loadSeen())
   const primed = useRef(loadPrimed())
 
@@ -94,6 +96,28 @@ export function MonitorPage({
   useEffect(() => {
     const tick = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(tick)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function readPoller() {
+      const status = await fetchPollerStatus()
+      if (cancelled || !status) return
+      const last = status.lastTickAt
+        ? new Date(status.lastTickAt).toLocaleTimeString('pt-PT')
+        : '—'
+      setPollerLine(
+        status.enabled
+          ? `Servidor: ${status.liveWatched} ao vivo · tick ${last} · ${status.alertsSent} push`
+          : 'Poller do servidor desligado',
+      )
+    }
+    void readPoller()
+    const tick = window.setInterval(() => void readPoller(), 20000)
+    return () => {
+      cancelled = true
+      window.clearInterval(tick)
+    }
   }, [])
 
   useEffect(() => {
@@ -142,6 +166,7 @@ export function MonitorPage({
     saveSeen(seen.current)
     if (fresh.length) {
       setFeed((prev) => [...fresh.reverse(), ...prev].slice(0, 80))
+      void postAlerts(fresh)
       if (!firstSnapshot) {
         for (const alert of fresh) {
           if (alert.coincident) continue
@@ -260,6 +285,7 @@ export function MonitorPage({
           </div>
           <p className="mt-2 text-xs text-emerald-100/45">
             {liveCount} ao vivo · {fixtures.length} jogos
+            {pollerLine ? ` · ${pollerLine}` : ''}
           </p>
         </div>
 
@@ -433,6 +459,7 @@ export function MonitorPage({
                     alert={alert}
                     now={now}
                     highlighted={highlightKey === key}
+                    onFeedback={(id, vote) => void postFeedback(id, vote)}
                   />
                 )
               })}
