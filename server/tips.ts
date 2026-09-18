@@ -163,7 +163,7 @@ export async function resolveTipOdd(args: {
   return null
 }
 
-export async function attachOddsToAlerts(args: {
+async function attachOddsToAlertsImpl(args: {
   fixture: Fixture
   alerts: FeedAlert[]
   market: Market
@@ -207,6 +207,22 @@ export async function attachOddsToAlerts(args: {
     appendOddsObservation(obs)
     return { ...alert, odds: obs }
   })
+}
+
+type AttachOddsFn = typeof attachOddsToAlertsImpl
+let attachOddsFn: AttachOddsFn = attachOddsToAlertsImpl
+
+export function setAttachOddsForTests(fn: AttachOddsFn | null): void {
+  attachOddsFn = fn ?? attachOddsToAlertsImpl
+}
+
+/** SuperScore ∥ SokkerPro ∥ RoboBet. Soft-fail. Callers must not await this on the push path. */
+export async function attachOddsToAlerts(args: {
+  fixture: Fixture
+  alerts: FeedAlert[]
+  market: Market
+}): Promise<FeedAlert[]> {
+  return attachOddsFn(args)
 }
 
 export function resolvedOddFromAlert(alert: FeedAlert): ResolvedOdd | null {

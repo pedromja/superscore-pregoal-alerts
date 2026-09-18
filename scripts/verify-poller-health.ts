@@ -198,6 +198,39 @@ try {
   const after = loadAlerts('goals').find((a) => a.id === sample.id)
   check(after?.sentPush === true, 're-ingest must not clobber sentPush true')
   check(after?.matchLabel === 'Teste vs Teste 2', 're-ingest still updates other fields')
+  const withOdds = {
+    ...sample,
+    sentPush: false,
+    odds: {
+      ts: sample.ts,
+      fixtureId: sample.fixtureId,
+      matchLabel: sample.matchLabel,
+      league: 'Teste',
+      market: 'goals' as const,
+      half: 'ft' as const,
+      bucket: 'goals_ft' as const,
+      minute: sample.minute,
+      period: sample.period,
+      alertId: sample.id,
+      currentTotal: 0,
+      source: 'superscore' as const,
+      sourceLabel: 'SuperScore',
+      limit: null,
+      asian: null,
+      sokkerpro: null,
+      robobet: null,
+    },
+  }
+  upsertAlerts([withOdds], 'goals')
+  check(
+    loadAlerts('goals').find((a) => a.id === sample.id)?.odds?.source === 'superscore',
+    're-ingest with odds stores observation',
+  )
+  upsertAlerts([{ ...sample, sentPush: false, odds: undefined }], 'goals')
+  check(
+    loadAlerts('goals').find((a) => a.id === sample.id)?.odds?.source === 'superscore',
+    're-ingest without odds must keep previous observation',
+  )
 } finally {
   saveAlerts(
     previous.filter((a) => a.id !== sample.id),

@@ -2,14 +2,22 @@ import { pushTagFor } from '../src/lib/market.ts'
 import { ruleNotifyEnabled } from '../src/lib/notifications.ts'
 import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../src/lib/rules.ts'
 import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
-import type { CornersByHalf, FeedAlert, Fixture } from '../src/lib/types.ts'
+import type {
+  AlertSettings,
+  CornersByHalf,
+  FeedAlert,
+  Fixture,
+  GoalEvent,
+  Market,
+  MomentumPayload,
+} from '../src/lib/types.ts'
 import {
   POLLER_ENABLED,
   POLLER_INTERVAL_MS,
   POLLER_REGION,
 } from './config.ts'
 import { currentSettings, ingestFeedAlerts, labelMatch } from './learn.ts'
-import { sendPushToAll } from './push.ts'
+import { sendPushToAll, type PushSendResult } from './push.ts'
 import {
   fetchFixturesServer,
   fetchMomentumServer,
@@ -50,8 +58,22 @@ const status: PollerStatus = {
 
 let inFlight = false
 
+type SendPushFn = typeof sendPushToAll
+let sendPush: SendPushFn = sendPushToAll
+const pendingOddsAttach = new Set<Promise<void>>()
+
 export function getPollerStatus(): PollerStatus {
   return { ...status }
+}
+
+export function setPollerSendPushForTests(fn: SendPushFn | null): void {
+  sendPush = fn ?? sendPushToAll
+}
+
+export async function waitForOddsAttachForTests(): Promise<void> {
+  while (pendingOddsAttach.size) {
+    await Promise.all([...pendingOddsAttach])
+  }
 }
 
 export type FixtureTickError = {
@@ -83,14 +105,29 @@ function cornersBundle(): CornersByHalf {
   }
 }
 
+function scheduleOddsAttach(work: () => Promise<void>): void {
+  const run = work()
+    .catch((err) => {
+      console.warn(
+        '[poller] odds attach',
+        err instanceof Error ? err.message : err,
+      )
+    })
+    .finally(() => {
+      pendingOddsAttach.delete(run)
+    })
+  pendingOddsAttach.add(run)
+}
+
 async function notifyFreshAlerts(
   fixture: Fixture,
   market: ReturnType<typeof loadActiveMarket>,
   settings: ReturnType<typeof currentSettings>,
   byHalf: CornersByHalf | undefined,
   fresh: FeedAlert[],
-): Promise<number> {
+): Promise<{ sent: number; notified: FeedAlert[] }> {
   let sent = 0
+  const notified: FeedAlert[] = []
   for (const alert of fresh) {
     if (alert.coincident) continue
     const notify = settingsForAlert(alert, settings, byHalf)
@@ -98,9 +135,10 @@ async function notifyFreshAlerts(
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     if (loadSent().includes(key)) continue
     if (!markSent(key)) continue
+    notified.push(alert)
     const copy = alertNotificationCopy(alert)
     const alertKey = `${fixture.id}:${alert.id}`
-    const result = await sendPushToAll({
+    const result: PushSendResult = await sendPush({
       title: copy.title,
       body: copy.body,
       url: `/#/monitor?alert=${encodeURIComponent(alertKey)}`,
@@ -117,10 +155,156 @@ async function notifyFreshAlerts(
         result.errors.join(' | ') || 'sem detalhe',
       )
     }
-    const odd = resolvedOddFromAlert(alert)
-    if (odd && !tipAlreadyOpen(fixture.id, alert.id)) {
-      createTipFromAlert({ fixture, alert, odd })
+  }
+  return { sent, notified }
+}
+
+async function attachOddsAndEnrich(args: {
+  fixture: Fixture
+  market: Market
+  settings: AlertSettings
+  alerts: FeedAlert[]
+  tipAlerts: FeedAlert[]
+  ingest: boolean
+}): Promise<void> {
+  const withOdds = await attachOddsToAlerts({
+    fixture: args.fixture,
+    market: args.market,
+    alerts: args.alerts,
+  })
+  if (args.ingest) {
+    ingestFeedAlerts(withOdds, args.settings, false, args.market)
+  }
+  if (!args.tipAlerts.length) return
+  const byId = new Map(withOdds.map((alert) => [alert.id, alert]))
+  for (const alert of args.tipAlerts) {
+    const enriched = byId.get(alert.id) ?? alert
+    const odd = resolvedOddFromAlert(enriched)
+    if (odd && !tipAlreadyOpen(args.fixture.id, alert.id)) {
+      createTipFromAlert({ fixture: args.fixture, alert: enriched, odd })
     }
+  }
+}
+
+export type EvaluatedAlertsTick = {
+  fixture: Fixture
+  market: Market
+  settings: AlertSettings
+  byHalf: CornersByHalf | undefined
+  fresh: FeedAlert[]
+  first: boolean
+  finished: boolean
+  payload: MomentumPayload
+  events: GoalEvent[]
+  points: { period: number; min: number }[]
+}
+
+/**
+ * Evaluate/ingest/push on the critical path; SuperScore ∥ SokkerPro ∥ RoboBet
+ * run afterwards. Do not await odds HTTP before notify.
+ */
+export async function processEvaluatedAlerts(
+  args: EvaluatedAlertsTick,
+): Promise<number> {
+  const {
+    fixture,
+    market,
+    settings,
+    byHalf,
+    fresh,
+    first,
+    finished,
+    payload,
+    events,
+    points,
+  } = args
+
+  if (first) {
+    for (const alert of fresh) {
+      markSent(sentKey(market, fixture.id, alert.id, alert.cornerHalf))
+    }
+    if (finished) {
+      ingestFeedAlerts(fresh, settings, false, market)
+      labelMatch(
+        {
+          fixture,
+          payload,
+          finished,
+          updatedAt: new Date().toISOString(),
+        },
+        undefined,
+        market,
+      )
+    }
+    const clock = points.at(-1)
+    settleTipsForMatch({
+      fixture,
+      events,
+      points,
+      market,
+      finished,
+      clockMin: clock?.min,
+      clockPeriod: clock?.period,
+    })
+    if (fresh.length) {
+      scheduleOddsAttach(() =>
+        attachOddsAndEnrich({
+          fixture,
+          market,
+          settings,
+          alerts: fresh,
+          tipAlerts: [],
+          ingest: finished,
+        }),
+      )
+    }
+    return 0
+  }
+
+  ingestFeedAlerts(fresh, settings, false, market)
+  if (finished) {
+    labelMatch(
+      {
+        fixture,
+        payload,
+        finished,
+        updatedAt: new Date().toISOString(),
+      },
+      undefined,
+      market,
+    )
+  }
+
+  const clock = points.at(-1)
+  settleTipsForMatch({
+    fixture,
+    events,
+    points,
+    market,
+    finished,
+    clockMin: clock?.min,
+    clockPeriod: clock?.period,
+  })
+
+  // 1) notify / mark sent / ingest (already done)  2) void odds attach — never await before push
+  const { sent, notified } = await notifyFreshAlerts(
+    fixture,
+    market,
+    settings,
+    byHalf,
+    fresh,
+  )
+  if (fresh.length) {
+    scheduleOddsAttach(() =>
+      attachOddsAndEnrich({
+        fixture,
+        market,
+        settings,
+        alerts: fresh,
+        tipAlerts: notified,
+        ingest: true,
+      }),
+    )
   }
   return sent
 }
@@ -150,80 +334,32 @@ async function processFixture(fixture: Fixture): Promise<number> {
   const first = !isPrimed(primedId)
   if (first) primeFixture(primedId)
 
-  const fresh: FeedAlert[] = await attachOddsToAlerts({
+  const fresh: FeedAlert[] = alerts.map((alert) =>
+    withMatchTallies(
+      {
+        ...alert,
+        fixtureId: fixture.id,
+        matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+        firedAt: new Date().toISOString(),
+        coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+        market,
+      },
+      payload,
+    ),
+  )
+
+  return processEvaluatedAlerts({
     fixture,
     market,
-    alerts: alerts.map((alert) =>
-      withMatchTallies(
-        {
-          ...alert,
-          fixtureId: fixture.id,
-          matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-          firedAt: new Date().toISOString(),
-          coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
-          market,
-        },
-        payload,
-      ),
-    ),
-  })
-
-  if (first) {
-    for (const alert of fresh) {
-      markSent(sentKey(market, fixture.id, alert.id, alert.cornerHalf))
-    }
-    if (finished) {
-      ingestFeedAlerts(fresh, settings, false, market)
-      labelMatch(
-        {
-          fixture,
-          payload,
-          finished,
-          updatedAt: new Date().toISOString(),
-        },
-        undefined,
-        market,
-      )
-    }
-    const clock = points.at(-1)
-    settleTipsForMatch({
-      fixture,
-      events,
-      points,
-      market,
-      finished,
-      clockMin: clock?.min,
-      clockPeriod: clock?.period,
-    })
-    return 0
-  }
-
-  ingestFeedAlerts(fresh, settings, false, market)
-  if (finished) {
-    labelMatch(
-      {
-        fixture,
-        payload,
-        finished,
-        updatedAt: new Date().toISOString(),
-      },
-      undefined,
-      market,
-    )
-  }
-
-  const clock = points.at(-1)
-  settleTipsForMatch({
-    fixture,
+    settings,
+    byHalf,
+    fresh,
+    first,
+    finished,
+    payload,
     events,
     points,
-    market,
-    finished,
-    clockMin: clock?.min,
-    clockPeriod: clock?.period,
   })
-
-  return notifyFreshAlerts(fixture, market, settings, byHalf, fresh)
 }
 
 export async function tick(): Promise<void> {
@@ -238,7 +374,8 @@ export async function tick(): Promise<void> {
       .slice(0, 6)
     const targets = [...live.slice(0, 8), ...recentDone]
     status.liveWatched = live.length
-    await warmupSokkerProBoard()
+    // Prefetch SokkerPro mini in parallel; do not block evaluate/push on board/preodds HTTP.
+    void warmupSokkerProBoard()
     let sent = 0
     const tickErrors: FixtureTickError[] = []
     for (const fixture of targets) {
