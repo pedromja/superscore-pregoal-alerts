@@ -31,12 +31,14 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 43173,
     strictPort: true,
+    allowedHosts: true,
     proxy,
   },
   preview: {
     host: '0.0.0.0',
     port: 43173,
     strictPort: true,
+    allowedHosts: true,
     proxy,
   },
 })
