@@ -205,6 +205,17 @@ export async function fetchPollerStatus(): Promise<{
   lastError: string | null
   liveWatched: number
   alertsSent: number
+  tickInFlight?: boolean
+  lastTickDurationMs?: number | null
+  lastHangAt?: string | null
+  lastFixtureError?: {
+    fixtureId: string
+    matchLabel: string
+    message: string
+    at: string
+  } | null
+  liveProcessed?: number
+  pushSubscribers?: number
 } | null> {
   try {
     const res = await fetch('/api/poller/status')
@@ -217,6 +228,17 @@ export async function fetchPollerStatus(): Promise<{
       lastError: string | null
       liveWatched: number
       alertsSent: number
+      tickInFlight?: boolean
+      lastTickDurationMs?: number | null
+      lastHangAt?: string | null
+      lastFixtureError?: {
+        fixtureId: string
+        matchLabel: string
+        message: string
+        at: string
+      } | null
+      liveProcessed?: number
+      pushSubscribers?: number
     }
   } catch {
     return null

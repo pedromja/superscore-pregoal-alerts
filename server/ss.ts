@@ -1,5 +1,6 @@
 import { flattenFixtures } from '../src/lib/api.ts'
 import type { Fixture, MomentumPayload } from '../src/lib/types.ts'
+import { combinedAbortSignal } from './pollerHealth.ts'
 
 const FETCH_TIMEOUT_MS = 8000
 const JSON_RETRY_DELAY_MS = 250
@@ -61,19 +62,26 @@ export async function fetchUpstreamJson(
   url: string,
   label: string,
   fixtureId?: string,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   let lastErr: unknown
   for (let attempt = 1; attempt <= 2; attempt += 1) {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error(`${label} abortado`)
+    }
     try {
       const res = await fetch(url, {
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        signal: combinedAbortSignal(FETCH_TIMEOUT_MS, signal),
       })
       if (!res.ok) throw new Error(`${label} ${res.status}`)
       const text = await res.text()
       return parseUpstreamJson(text, url, fixtureId)
     } catch (err) {
       lastErr = err
+      if (signal?.aborted) throw err
       if (!isRoutineJsonError(err) || attempt === 2) throw err
       console.warn(
         '[ss]',
@@ -91,6 +99,7 @@ export async function fetchUpstreamJson(
 export async function fetchFixturesServer(
   date: string,
   region: string,
+  signal?: AbortSignal,
 ): Promise<Fixture[]> {
   const params = new URLSearchParams({
     language: 'en',
@@ -98,7 +107,7 @@ export async function fetchFixturesServer(
     timezone_offset: '1',
   })
   const url = `https://api.content-prod.superscore.live/v2/public/stats/fixtures/by-date/${region}?${params}`
-  const raw = await fetchUpstreamJson(url, 'Jogos')
+  const raw = await fetchUpstreamJson(url, 'Jogos', undefined, signal)
   if (!raw || typeof raw !== 'object') {
     throw new UpstreamJsonError(`JSON inválido (${url})`, url)
   }
@@ -107,9 +116,10 @@ export async function fetchFixturesServer(
 
 export async function fetchMomentumServer(
   fixtureId: string,
+  signal?: AbortSignal,
 ): Promise<MomentumPayload> {
   const url = `https://scorealarm-stats.freetls.fastly.net/v2/soccer/fixtures/attacking-momentum/superscore/en?fixture-id=${encodeURIComponent(fixtureId)}`
-  const raw = await fetchUpstreamJson(url, 'Momentum', fixtureId)
+  const raw = await fetchUpstreamJson(url, 'Momentum', fixtureId, signal)
   const payload = raw as MomentumPayload
   if (!payload || !Array.isArray(payload.timeline)) {
     throw new UpstreamJsonError(

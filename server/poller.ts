@@ -12,11 +12,24 @@ import type {
   MomentumPayload,
 } from '../src/lib/types.ts'
 import {
+  POLLER_CONCURRENCY,
   POLLER_ENABLED,
+  POLLER_FINISHED_LIMIT,
+  POLLER_FIXTURE_TIMEOUT_MS,
   POLLER_INTERVAL_MS,
+  POLLER_JSON_BACKOFF_MAX_MS,
+  POLLER_LIVE_LIMIT,
   POLLER_REGION,
+  POLLER_TICK_WATCHDOG_MS,
 } from './config.ts'
 import { currentSettings, ingestFeedAlerts, labelMatch } from './learn.ts'
+import {
+  JsonBackoff,
+  TimeoutError,
+  mapLimit,
+  selectLiveTargets,
+  withTimeout,
+} from './pollerHealth.ts'
 import { sendPushToAll, type PushSendResult } from './push.ts'
 import {
   fetchFixturesServer,
@@ -29,6 +42,7 @@ import {
   isPrimed,
   loadActiveMarket,
   loadSent,
+  loadSubscriptions,
   markAlertPushed,
   markSent,
   primedKey,
@@ -54,16 +68,59 @@ const status: PollerStatus = {
   lastError: null,
   liveWatched: 0,
   alertsSent: 0,
+  tickInFlight: false,
+  lastTickDurationMs: null,
+  lastHangAt: null,
+  lastFixtureError: null,
+  liveProcessed: 0,
+  pushSubscribers: 0,
 }
 
 let inFlight = false
+let tickGen = 0
+let tickIndex = 0
+let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+let tickAbort: AbortController | null = null
+let fixtureTimeoutMs = POLLER_FIXTURE_TIMEOUT_MS
+let tickWatchdogMs = POLLER_TICK_WATCHDOG_MS
+let liveLimit = POLLER_LIVE_LIMIT
+let finishedLimit = POLLER_FINISHED_LIMIT
+let concurrency = POLLER_CONCURRENCY
+const jsonBackoff = new JsonBackoff(POLLER_INTERVAL_MS, POLLER_JSON_BACKOFF_MAX_MS)
+const lastMomentumOkAt = new Map<string, number>()
+let storeTail = Promise.resolve()
 
 type SendPushFn = typeof sendPushToAll
 let sendPush: SendPushFn = sendPushToAll
 const pendingOddsAttach = new Set<Promise<void>>()
 
+type ProcessFixtureFn = (fixture: Fixture, signal?: AbortSignal) => Promise<number>
+type FetchFixturesFn = (signal?: AbortSignal) => Promise<Fixture[]>
+type WarmupFn = () => Promise<unknown>
+
+let processFixtureFn: ProcessFixtureFn = processFixture
+let fetchFixturesFn: FetchFixturesFn = defaultFetchFixtures
+let warmupFn: WarmupFn = warmupSokkerProBoard
+
+async function defaultFetchFixtures(signal?: AbortSignal): Promise<Fixture[]> {
+  return fetchFixturesServer(lisbonDate(), POLLER_REGION, signal)
+}
+
+function withStoreLock<T>(fn: () => Promise<T> | T): Promise<T> {
+  const run = storeTail.then(fn, fn)
+  storeTail = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
 export function getPollerStatus(): PollerStatus {
-  return { ...status }
+  return {
+    ...status,
+    tickInFlight: inFlight,
+    pushSubscribers: loadSubscriptions().length,
+  }
 }
 
 export function setPollerSendPushForTests(fn: SendPushFn | null): void {
@@ -74,6 +131,62 @@ export async function waitForOddsAttachForTests(): Promise<void> {
   while (pendingOddsAttach.size) {
     await Promise.all([...pendingOddsAttach])
   }
+}
+
+export function setPollerDepsForTests(deps: {
+  processFixture?: ProcessFixtureFn | null
+  fetchFixtures?: FetchFixturesFn | null
+  warmup?: WarmupFn | null
+} | null): void {
+  processFixtureFn = deps?.processFixture ?? processFixture
+  fetchFixturesFn = deps?.fetchFixtures ?? defaultFetchFixtures
+  warmupFn = deps?.warmup ?? warmupSokkerProBoard
+}
+
+export function setPollerLimitsForTests(
+  opts: {
+    fixtureTimeoutMs?: number
+    tickWatchdogMs?: number
+    liveLimit?: number
+    finishedLimit?: number
+    concurrency?: number
+  } | null,
+): void {
+  fixtureTimeoutMs = opts?.fixtureTimeoutMs ?? POLLER_FIXTURE_TIMEOUT_MS
+  tickWatchdogMs = opts?.tickWatchdogMs ?? POLLER_TICK_WATCHDOG_MS
+  liveLimit = opts?.liveLimit ?? POLLER_LIVE_LIMIT
+  finishedLimit = opts?.finishedLimit ?? POLLER_FINISHED_LIMIT
+  concurrency = opts?.concurrency ?? POLLER_CONCURRENCY
+}
+
+export function resetPollerRuntimeForTests(): void {
+  clearWatchdog()
+  tickAbort?.abort()
+  tickAbort = null
+  inFlight = false
+  tickGen += 1
+  tickIndex = 0
+  jsonBackoff.reset()
+  lastMomentumOkAt.clear()
+  storeTail = Promise.resolve()
+  fixtureTimeoutMs = POLLER_FIXTURE_TIMEOUT_MS
+  tickWatchdogMs = POLLER_TICK_WATCHDOG_MS
+  liveLimit = POLLER_LIVE_LIMIT
+  finishedLimit = POLLER_FINISHED_LIMIT
+  concurrency = POLLER_CONCURRENCY
+  processFixtureFn = processFixture
+  fetchFixturesFn = defaultFetchFixtures
+  warmupFn = warmupSokkerProBoard
+  status.lastTickAt = null
+  status.lastError = null
+  status.liveWatched = 0
+  status.alertsSent = 0
+  status.tickInFlight = false
+  status.lastTickDurationMs = null
+  status.lastHangAt = null
+  status.lastFixtureError = null
+  status.liveProcessed = 0
+  status.pushSubscribers = 0
 }
 
 export type FixtureTickError = {
@@ -148,7 +261,7 @@ async function notifyFreshAlerts(
     if (result.sent > 0) {
       markAlertPushed(alertKey, market, alert.cornerHalf)
       sent += 1
-    } else {
+    } else if (!result.errors.includes('sem subscritores')) {
       console.error(
         '[poller] push não enviado',
         alertKey,
@@ -309,105 +422,231 @@ export async function processEvaluatedAlerts(
   return sent
 }
 
-async function processFixture(fixture: Fixture): Promise<number> {
-  const payload = await fetchMomentumServer(fixture.id)
+async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<number> {
+  const payload = await fetchMomentumServer(fixture.id, signal)
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error ? signal.reason : new Error('abortado')
+  }
+  lastMomentumOkAt.set(fixture.id, Date.now())
+  jsonBackoff.noteSuccess(fixture.id)
   const finished = fixture.state === 2 || fixture.status >= 100
-  saveMatch({
-    fixture,
-    payload,
-    finished,
-    updatedAt: new Date().toISOString(),
-  })
-
-  const market = loadActiveMarket()
-  const settings = currentSettings(market)
-  const byHalf = market === 'corners' ? cornersBundle() : undefined
-  const { points, alerts } = evaluateAlerts(payload, settings, undefined, byHalf)
-  const events = extractMarketEvents(
-    payload,
-    points,
-    market,
-    market === 'corners' ? undefined : settings.cornerHalf,
-  )
-  const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
-  const primedId = primedKey(market, fixture.id)
-  const first = !isPrimed(primedId)
-  if (first) primeFixture(primedId)
-
-  const fresh: FeedAlert[] = alerts.map((alert) =>
-    withMatchTallies(
-      {
-        ...alert,
-        fixtureId: fixture.id,
-        matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-        firedAt: new Date().toISOString(),
-        coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
-        market,
-      },
+  return withStoreLock(async () => {
+    saveMatch({
+      fixture,
       payload,
-    ),
-  )
+      finished,
+      updatedAt: new Date().toISOString(),
+    })
 
-  return processEvaluatedAlerts({
-    fixture,
-    market,
-    settings,
-    byHalf,
-    fresh,
-    first,
-    finished,
-    payload,
-    events,
-    points,
+    const market = loadActiveMarket()
+    const settings = currentSettings(market)
+    const byHalf = market === 'corners' ? cornersBundle() : undefined
+    const { points, alerts } = evaluateAlerts(payload, settings, undefined, byHalf)
+    const events = extractMarketEvents(
+      payload,
+      points,
+      market,
+      market === 'corners' ? undefined : settings.cornerHalf,
+    )
+    const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
+    const primedId = primedKey(market, fixture.id)
+    const first = !isPrimed(primedId)
+    if (first) primeFixture(primedId)
+
+    const fresh: FeedAlert[] = alerts.map((alert) =>
+      withMatchTallies(
+        {
+          ...alert,
+          fixtureId: fixture.id,
+          matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+          firedAt: new Date().toISOString(),
+          coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+          market,
+        },
+        payload,
+      ),
+    )
+
+    return processEvaluatedAlerts({
+      fixture,
+      market,
+      settings,
+      byHalf,
+      fresh,
+      first,
+      finished,
+      payload,
+      events,
+      points,
+    })
   })
+}
+
+function clearWatchdog(): void {
+  if (watchdogTimer) {
+    clearTimeout(watchdogTimer)
+    watchdogTimer = null
+  }
+}
+
+function releaseHungTick(gen: number, reason: string): void {
+  if (tickGen !== gen || !inFlight) return
+  console.error('[poller] tick hung — a libertar inFlight:', reason)
+  status.lastHangAt = new Date().toISOString()
+  status.lastError = reason
+  inFlight = false
+  status.tickInFlight = false
+  tickAbort?.abort()
+  tickGen += 1
+}
+
+function armWatchdog(gen: number): void {
+  clearWatchdog()
+  watchdogTimer = setTimeout(() => {
+    releaseHungTick(gen, `Tick hung ${tickWatchdogMs}ms`)
+  }, tickWatchdogMs)
+}
+
+function recordFixtureError(fixture: Fixture, message: string): void {
+  status.lastFixtureError = {
+    fixtureId: fixture.id,
+    matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+    message,
+    at: new Date().toISOString(),
+  }
+}
+
+async function processFixtureTimed(
+  fixture: Fixture,
+  parentSignal?: AbortSignal,
+): Promise<number> {
+  const ctrl = new AbortController()
+  const onParentAbort = () => ctrl.abort()
+  parentSignal?.addEventListener('abort', onParentAbort, { once: true })
+  if (parentSignal?.aborted) ctrl.abort()
+  const work = processFixtureFn(fixture, ctrl.signal)
+  try {
+    return await withTimeout(
+      work,
+      fixtureTimeoutMs,
+      `Timeout ${fixtureTimeoutMs}ms (jogo ${fixture.id})`,
+    )
+  } catch (err) {
+    ctrl.abort()
+    void work.catch(() => undefined)
+    throw err
+  } finally {
+    parentSignal?.removeEventListener('abort', onParentAbort)
+  }
 }
 
 export async function tick(): Promise<void> {
   if (!POLLER_ENABLED) return
   if (inFlight) return
+  const gen = ++tickGen
   inFlight = true
+  status.tickInFlight = true
+  const started = Date.now()
+  tickAbort = new AbortController()
+  const signal = tickAbort.signal
+  armWatchdog(gen)
   try {
-    const fixtures = await fetchFixturesServer(lisbonDate(), POLLER_REGION)
+    const fetchWork = fetchFixturesFn(signal)
+    let fixtures: Fixture[]
+    try {
+      fixtures = await withTimeout(
+        fetchWork,
+        Math.max(fixtureTimeoutMs, 8_000),
+        'Timeout a obter jogos',
+      )
+    } catch (err) {
+      tickAbort.abort()
+      void fetchWork.catch(() => undefined)
+      throw err
+    }
+
+    const now = Date.now()
     const live = fixtures.filter((f) => f.state === 1)
+    jsonBackoff.prune(new Set(fixtures.map((f) => f.id)))
+    const liveTargets = selectLiveTargets({
+      live,
+      market: loadActiveMarket(),
+      limit: liveLimit,
+      now,
+      tickIndex,
+      lastOkAt: lastMomentumOkAt,
+      isBackedOff: (id) => jsonBackoff.isBlocked(id, now),
+    })
     const recentDone = fixtures
       .filter((f) => f.state === 2 || f.status >= 100)
-      .slice(0, 6)
-    const targets = [...live.slice(0, 8), ...recentDone]
+      .filter((f) => !jsonBackoff.isBlocked(f.id, now))
+      .slice(0, finishedLimit)
+    const targets = [...liveTargets, ...recentDone]
+    tickIndex += 1
     status.liveWatched = live.length
-    // Prefetch SokkerPro mini in parallel; do not block evaluate/push on board/preodds HTTP.
-    void warmupSokkerProBoard()
-    let sent = 0
-    const tickErrors: FixtureTickError[] = []
-    for (const fixture of targets) {
-      try {
-        sent += await processFixture(fixture)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Falha num jogo'
-        const url = err instanceof UpstreamJsonError ? err.url : undefined
-        console.error(
-          '[poller] jogo falhou',
-          fixture.id,
-          `${fixture.team1} vs ${fixture.team2}`,
-          url ?? '',
-          message,
-        )
-        tickErrors.push({
-          fixtureId: fixture.id,
-          matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-          message,
-          routineJson: isRoutineJsonError(err),
-          url,
-        })
-      }
+    status.liveProcessed = 0
+    status.pushSubscribers = loadSubscriptions().length
+    if (status.pushSubscribers === 0) {
+      console.warn(
+        '[poller] Web Push: 0 subscritores neste tick — os alertas não chegam ao telemóvel (ativar notificações remotas na PWA)',
+      )
     }
+    // Prefetch SokkerPro mini in parallel; do not block evaluate/push on board/preodds HTTP.
+    void warmupFn()
+    const tickErrors: FixtureTickError[] = []
+    const sentParts = await mapLimit(
+      targets,
+      concurrency,
+      async (fixture) => {
+        if (signal.aborted) return 0
+        try {
+          const n = await processFixtureTimed(fixture, signal)
+          status.liveProcessed += 1
+          return n
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Falha num jogo'
+          const url = err instanceof UpstreamJsonError ? err.url : undefined
+          console.error(
+            '[poller] jogo falhou',
+            fixture.id,
+            `${fixture.team1} vs ${fixture.team2}`,
+            url ?? '',
+            message,
+          )
+          if (isRoutineJsonError(err)) jsonBackoff.noteFailure(fixture.id, Date.now())
+          recordFixtureError(fixture, message)
+          tickErrors.push({
+            fixtureId: fixture.id,
+            matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+            message,
+            routineJson: isRoutineJsonError(err),
+            url,
+          })
+          status.liveProcessed += 1
+          return 0
+        }
+      },
+    )
+    if (tickGen !== gen) return
+    const sent = sentParts.reduce((sum, n) => sum + n, 0)
     status.alertsSent += sent
     status.lastTickAt = new Date().toISOString()
     status.lastError = lastErrorAfterFixtureFailures(tickErrors, targets.length)
   } catch (err) {
+    if (tickGen !== gen) return
     status.lastError = err instanceof Error ? err.message : 'Tick falhou'
     status.lastTickAt = new Date().toISOString()
+    if (err instanceof TimeoutError) {
+      status.lastHangAt = status.lastTickAt
+    }
   } finally {
-    inFlight = false
+    clearWatchdog()
+    if (tickGen === gen) {
+      inFlight = false
+      status.tickInFlight = false
+      status.lastTickDurationMs = Date.now() - started
+      tickAbort = null
+    }
   }
 }
 

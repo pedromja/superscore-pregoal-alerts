@@ -91,7 +91,7 @@ npm start         # produção: um processo Node (UI + API + poller) em 0.0.0.0:
 
 ## Web Push (app fechada)
 
-O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras do **mercado activo** e faz `webpush.sendNotification` **sem filtro de odd**. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**; a `tag` distingue `pregoal:` vs `precantos:`. A prioridade da regra (Primária / Secundária / Reserva) fica no cartão da app, não no título do push.
+O poller no servidor (intervalo default 45s, região `ro`) vigia até **24 jogos ao vivo** por tick (prioridade: janelas de cantos HT 32–42 / FT 82–87, ou pressão tardia em golos; o resto roda) com **5 em paralelo** e timeout por jogo. Corre as regras do **mercado activo** e faz `webpush.sendNotification` **sem filtro de odd**. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**; a `tag` distingue `pregoal:` vs `precantos:`. A prioridade da regra (Primária / Secundária / Reserva) fica no cartão da app, não no título do push. Health: `GET /api/poller/status` (`tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`).
 
 ### Gerar VAPID
 
@@ -169,6 +169,11 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `POLLER_REGION` | `ro` | Região SuperScore. Alias: `POLL_REGION` |
 | `POLLER_ENABLED` | `1` | `0` desliga o poller |
 | `POLLER_INTERVAL_MS` | `45000` | Intervalo entre ticks |
+| `POLLER_LIVE_LIMIT` | `24` | Jogos ao vivo por tick (janelas primeiro, depois rotação) |
+| `POLLER_CONCURRENCY` | `5` | Fixture processors em paralelo (writes ao disco serializam) |
+| `POLLER_FIXTURE_TIMEOUT_MS` | `12000` | Timeout por jogo — um momentum preso não congela o tick |
+| `POLLER_TICK_WATCHDOG_MS` | `80000` | Se o tick não regressar, liberta `inFlight` para o intervalo seguinte |
+| `POLLER_JSON_BACKOFF_MAX_MS` | `600000` | Tecto do backoff após JSON vazio/truncado repetido |
 | `LEARN_WINDOW` | `5` | Horizonte curto (minutos) |
 | `LEARN_AUTO_APPLY` | `0` | `1` só anota a proposta; **nunca** auto-aplica params/overlay |
 | `LEARN_AUTO_MIN_OUTCOMES` | `50` | Limiar informativo de elegibilidade (não aplica sozinho) |

@@ -1,5 +1,19 @@
-import { lastErrorAfterFixtureFailures } from '../server/poller.ts'
+import {
+  getPollerStatus,
+  lastErrorAfterFixtureFailures,
+  resetPollerRuntimeForTests,
+  setPollerDepsForTests,
+  setPollerLimitsForTests,
+  tick,
+} from '../server/poller.ts'
 import { sendPushToAll } from '../server/push.ts'
+import {
+  JsonBackoff,
+  clockFromElapsed,
+  selectLiveTargets,
+  withTimeout,
+  TimeoutError,
+} from '../server/pollerHealth.ts'
 import {
   isRoutineJsonError,
   parseUpstreamJson,
@@ -14,6 +28,7 @@ import {
   upsertAlerts,
 } from '../server/store.ts'
 import type { LoggedAlert } from '../server/types.ts'
+import type { Fixture } from '../src/lib/types.ts'
 
 const fail: string[] = []
 
@@ -258,10 +273,294 @@ try {
   saveSubscriptions(previousSubs)
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function liveFixture(
+  id: string,
+  elapsedSeconds: number | null,
+  extras: Partial<Fixture> = {},
+): Fixture {
+  return {
+    id,
+    team1: `Home ${id}`,
+    team2: `Away ${id}`,
+    team1Id: `${id}-h`,
+    team2Id: `${id}-a`,
+    competition: 'Test',
+    category: 'test',
+    status: 1,
+    state: 1,
+    dateSeconds: 0,
+    liveElapsedSeconds: elapsedSeconds,
+    scoreHome: 0,
+    scoreAway: 0,
+    scoreIsFt: false,
+    ...extras,
+  }
+}
+
+check(clockFromElapsed(32 * 60)?.min === 32, 'clock 32:00 → min 32')
+check(clockFromElapsed(32 * 60)?.period === 1, 'clock 32:00 → period 1')
+check(clockFromElapsed(82 * 60)?.min === 82, 'clock 82:00 → min 82')
+check(clockFromElapsed(82 * 60)?.period === 2, 'clock 82:00 → period 2')
+
+{
+  const lastOkAt = new Map<string, number>()
+  const now = 1_000_000
+  const live = [
+    liveFixture('early', 10 * 60),
+    liveFixture('ht-window', 36 * 60),
+    liveFixture('mid', 55 * 60),
+    liveFixture('ft-window', 84 * 60),
+    liveFixture('late-first', 40 * 60),
+  ]
+  const corners = selectLiveTargets({
+    live,
+    market: 'corners',
+    limit: 2,
+    now,
+    tickIndex: 0,
+    lastOkAt,
+    isBackedOff: () => false,
+  })
+  check(
+    corners.map((f) => f.id).join(',') === 'ft-window,ht-window',
+    `corners priority windows first, got ${corners.map((f) => f.id)}`,
+  )
+  const goals = selectLiveTargets({
+    live,
+    market: 'goals',
+    limit: 2,
+    now,
+    tickIndex: 0,
+    lastOkAt,
+    isBackedOff: () => false,
+  })
+  check(
+    goals[0]?.id === 'ft-window',
+    `goals prefers late 2nd-half pressure, got ${goals.map((f) => f.id)}`,
+  )
+  const skipped = selectLiveTargets({
+    live,
+    market: 'corners',
+    limit: 10,
+    now,
+    tickIndex: 0,
+    lastOkAt,
+    isBackedOff: (id) => id === 'ht-window',
+  })
+  check(
+    !skipped.some((f) => f.id === 'ht-window'),
+    'backed-off window game is not selected',
+  )
+  const many = Array.from({ length: 30 }, (_, i) => liveFixture(`g${String(i).padStart(2, '0')}`, 12 * 60))
+  const rot0 = selectLiveTargets({
+    live: many,
+    market: 'goals',
+    limit: 5,
+    now,
+    tickIndex: 0,
+    lastOkAt,
+    isBackedOff: () => false,
+  }).map((f) => f.id)
+  const rot1 = selectLiveTargets({
+    live: many,
+    market: 'goals',
+    limit: 5,
+    now,
+    tickIndex: 1,
+    lastOkAt,
+    isBackedOff: () => false,
+  }).map((f) => f.id)
+  check(rot0.length === 5, 'fill limit 5')
+  check(rot0.join(',') !== rot1.join(','), `rotation should move fill set ${rot0} vs ${rot1}`)
+}
+
+{
+  const backoff = new JsonBackoff(45_000, 10 * 60 * 1000)
+  const t0 = 1_000_000
+  backoff.noteFailure('a', t0)
+  check(!backoff.isBlocked('a', t0 + 1), 'first empty JSON still retries next tick')
+  backoff.noteFailure('a', t0 + 45_000)
+  check(backoff.isBlocked('a', t0 + 45_001), 'second consecutive empty JSON backs off')
+  check(backoff.isBlocked('a', t0 + 45_000 + 44_000), 'backoff lasts an interval')
+  check(!backoff.isBlocked('a', t0 + 45_000 + 45_001), 'backoff expires after interval')
+  backoff.noteSuccess('a')
+  check(!backoff.isBlocked('a', t0 + 45_000 + 1), 'success clears backoff')
+}
+
+{
+  let timedOut = false
+  const hang = new Promise<string>((resolve) => {
+    setTimeout(() => resolve('late'), 200)
+  })
+  try {
+    await withTimeout(hang, 20, 'Timeout 20ms (jogo x)')
+  } catch (err) {
+    timedOut = err instanceof TimeoutError
+  }
+  check(timedOut, 'withTimeout rejects with TimeoutError')
+}
+
+try {
+  resetPollerRuntimeForTests()
+  setPollerLimitsForTests({
+    fixtureTimeoutMs: 40,
+    tickWatchdogMs: 2_000,
+    liveLimit: 30,
+    finishedLimit: 0,
+    concurrency: 2,
+  })
+
+  const processed: string[] = []
+  const thirty = Array.from({ length: 30 }, (_, i) =>
+    liveFixture(`live-${String(i).padStart(2, '0')}`, 15 * 60),
+  )
+  setPollerDepsForTests({
+    fetchFixtures: async () => thirty,
+    processFixture: async (fixture) => {
+      processed.push(fixture.id)
+      return 0
+    },
+    warmup: async () => null,
+  })
+  await tick()
+  const covered = getPollerStatus()
+  check(processed.length === 30, `widened live coverage, processed ${processed.length}`)
+  check(covered.liveWatched === 30, `liveWatched 30, got ${covered.liveWatched}`)
+  check(covered.liveProcessed === 30, `liveProcessed 30, got ${covered.liveProcessed}`)
+  check(covered.tickInFlight === false, 'coverage tick not in flight')
+  check(typeof covered.lastTickDurationMs === 'number', 'lastTickDurationMs set')
+  check(covered.lastTickAt != null, 'lastTickAt advances after healthy tick')
+
+  resetPollerRuntimeForTests()
+  setPollerLimitsForTests({
+    fixtureTimeoutMs: 50,
+    tickWatchdogMs: 2_000,
+    liveLimit: 8,
+    finishedLimit: 0,
+    concurrency: 2,
+  })
+  const seen: string[] = []
+  setPollerDepsForTests({
+    fetchFixtures: async () => [liveFixture('ok', 70 * 60), liveFixture('hung', 70 * 60)],
+    processFixture: async (fixture, signal) => {
+      if (fixture.id === 'hung') {
+        await new Promise<never>((_, reject) => {
+          const fail = () => reject(new Error('aborted'))
+          if (signal?.aborted) fail()
+          signal?.addEventListener('abort', fail, { once: true })
+        })
+      }
+      seen.push(fixture.id)
+      return 0
+    },
+    warmup: async () => null,
+  })
+  const t0 = Date.now()
+  await tick()
+  const elapsed = Date.now() - t0
+  const afterTimeout = getPollerStatus()
+  check(seen.includes('ok'), 'fixture timeout still processes the healthy game')
+  check(!seen.includes('hung'), 'hung fixture does not complete after timeout')
+  check(elapsed < 800, `fixture timeout should not block tick, took ${elapsed}ms`)
+  check(afterTimeout.tickInFlight === false, 'inFlight cleared after fixture timeout')
+  check(
+    afterTimeout.lastFixtureError?.fixtureId === 'hung',
+    `lastFixtureError hung, got ${afterTimeout.lastFixtureError?.fixtureId}`,
+  )
+  check(
+    /Timeout/.test(afterTimeout.lastFixtureError?.message ?? ''),
+    `timeout message, got ${afterTimeout.lastFixtureError?.message}`,
+  )
+
+  resetPollerRuntimeForTests()
+  setPollerLimitsForTests({
+    fixtureTimeoutMs: 2_000,
+    tickWatchdogMs: 80,
+    liveLimit: 4,
+    finishedLimit: 0,
+    concurrency: 1,
+  })
+  let fetchCalls = 0
+  setPollerDepsForTests({
+    fetchFixtures: (signal) => {
+      fetchCalls += 1
+      if (fetchCalls === 1) {
+        return new Promise((_, reject) => {
+          const fail = () => reject(new Error('tick-abort'))
+          if (signal?.aborted) fail()
+          signal?.addEventListener('abort', fail, { once: true })
+        })
+      }
+      return Promise.resolve([liveFixture('after-hang', 20 * 60)])
+    },
+    processFixture: async () => 0,
+    warmup: async () => null,
+  })
+  const hungTick = tick()
+  await delay(30)
+  check(getPollerStatus().tickInFlight === true, 'watchdog: tick in flight while hung')
+  await hungTick
+  const afterHang = getPollerStatus()
+  check(afterHang.tickInFlight === false, 'watchdog cleared inFlight')
+  check(afterHang.lastHangAt != null, 'lastHangAt recorded')
+  const recovered = tick()
+  await recovered
+  check(fetchCalls >= 2, `next interval runs after hang, fetchCalls ${fetchCalls}`)
+  check(getPollerStatus().tickInFlight === false, 'recovered tick finished')
+  check(getPollerStatus().lastTickAt != null, 'recovered tick advances lastTickAt')
+
+  resetPollerRuntimeForTests()
+  setPollerLimitsForTests({
+    fixtureTimeoutMs: 200,
+    tickWatchdogMs: 2_000,
+    liveLimit: 4,
+    finishedLimit: 0,
+    concurrency: 1,
+  })
+  const emptyCalls: string[] = []
+  const emptyErr = new UpstreamJsonError(
+    'JSON vazio (jogo empty-1)',
+    'https://example.test/momentum',
+    'empty-1',
+  )
+  setPollerDepsForTests({
+    fetchFixtures: async () => [
+      liveFixture('empty-1', 20 * 60),
+      liveFixture('healthy', 20 * 60),
+    ],
+    processFixture: async (fixture) => {
+      emptyCalls.push(fixture.id)
+      if (fixture.id === 'empty-1') throw emptyErr
+      return 0
+    },
+    warmup: async () => null,
+  })
+  await tick()
+  await tick()
+  const callsAfterTwo = emptyCalls.filter((id) => id === 'empty-1').length
+  check(callsAfterTwo === 2, `empty JSON retried once, got ${callsAfterTwo}`)
+  await tick()
+  const callsAfterThree = emptyCalls.filter((id) => id === 'empty-1').length
+  check(
+    callsAfterThree === 2,
+    `empty JSON backed off on third tick, got ${callsAfterThree}`,
+  )
+  check(
+    emptyCalls.filter((id) => id === 'healthy').length === 3,
+    'healthy fixture still scanned while empty-json game is in backoff',
+  )
+} finally {
+  resetPollerRuntimeForTests()
+}
+
 if (fail.length) {
   console.error('FAIL', fail)
   process.exit(1)
 }
 console.log(
-  'OK: truncated JSON is scoped, lastError clears on partial success, sentPush persists after push',
+  'OK: truncated JSON is scoped, lastError clears on partial success, sentPush persists after push, watchdog/fixture timeout/empty-json backoff',
 )

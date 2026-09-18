@@ -111,6 +111,13 @@ export type StoredMatch = {
   updatedAt: string
 }
 
+export type PollerFixtureError = {
+  fixtureId: string
+  matchLabel: string
+  message: string
+  at: string
+}
+
 export type PollerStatus = {
   enabled: boolean
   region: string
@@ -119,4 +126,10 @@ export type PollerStatus = {
   lastError: string | null
   liveWatched: number
   alertsSent: number
+  tickInFlight: boolean
+  lastTickDurationMs: number | null
+  lastHangAt: string | null
+  lastFixtureError: PollerFixtureError | null
+  liveProcessed: number
+  pushSubscribers: number
 }
