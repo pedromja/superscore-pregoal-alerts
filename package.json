@@ -7,12 +7,16 @@
     "dev": "concurrently -k -n web,api -c cyan,magenta \"vite\" \"tsx watch server/index.ts\"",
     "dev:web": "vite",
     "dev:api": "tsx watch server/index.ts",
-    "start": "tsx server/index.ts",
-    "start:prod": "npm run build && tsx server/index.ts",
+    "start": "node dist-server/index.mjs",
+    "start:prod": "npm run build && npm start",
     "vapid:generate": "tsx server/vapid-generate.ts",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run build:server",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist-server/index.mjs --packages=external --target=node20",
     "lint": "oxlint",
     "preview": "vite preview"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "concurrently": "^10.0.5",
@@ -31,6 +35,7 @@
     "@types/react-dom": "^19.2.7",
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^6.1.1",
+    "esbuild": "^0.28.2",
     "oxlint": "^1.81.0",
     "tailwindcss": "^4.1.13",
     "tsx": "^4.23.13",

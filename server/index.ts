@@ -186,6 +186,6 @@ if (existsSync(dist)) {
 }
 
 app.listen(SERVER_PORT, '0.0.0.0', () => {
-  console.log(`SuperScore API em http://127.0.0.1:${SERVER_PORT}`)
+  console.log(`SuperScore API em 0.0.0.0:${SERVER_PORT}`)
   startPoller()
 })

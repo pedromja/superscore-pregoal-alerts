@@ -15,7 +15,8 @@ export const DATA_DIR = process.env.DATA_DIR
   : join(root, 'data')
 export const MATCHES_DIR = join(DATA_DIR, 'matches')
 export const SERVER_PORT = Number(process.env.PORT || 43174)
-export const POLLER_REGION = process.env.POLLER_REGION || 'ro'
+export const POLLER_REGION =
+  process.env.POLLER_REGION || process.env.POLL_REGION || 'ro'
 export const POLLER_INTERVAL_MS = Number(process.env.POLLER_INTERVAL_MS || 45000)
 export const POLLER_ENABLED = process.env.POLLER_ENABLED !== '0'
 export const LEARN_WINDOW = Number(process.env.LEARN_WINDOW || 5)

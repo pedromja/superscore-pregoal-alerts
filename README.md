@@ -23,9 +23,11 @@ Isto sobe **dois** processos:
 O Vite encaminha `/api/push`, `/api/learn` e `/api/poller` para o sidecar.
 
 ```bash
-npm run build
-npm run preview   # UI; a API continua a precisar de `npm run dev:api` ou `npm start`
+npm run build     # Vite UI + bundle do servidor em dist-server/
+npm start         # produção: um processo Node (UI + API + poller) em 0.0.0.0:$PORT
 ```
+
+`npm start` **não** faz o build — espera `dist/` e `dist-server/` já gerados (no Docker isso acontece no stage de build). Para gerar e arrancar localmente: `npm run start:prod`.
 
 ## Páginas
 
@@ -95,22 +97,65 @@ O histórico fica em `data/params_history.json`. Os defaults de treino nunca sã
 
 Na Aprendizagem: **Importar amostras Celtic/Drava** para ter métricas imediatamente.
 
-## URL público / deploy
+## Deploy permanente
 
-Neste ambiente Cursor o preview da app é o cartão do agente (`http://127.0.0.1:43173`) — **não** é um hostname público na Internet. Não há Vercel/Origin Host ligado a este repo.
+Um único processo Node 24/7: UI (`dist/`) + `/api/*` (Push, aprendizagem, proxy SuperScore) + poller. O `Dockerfile` é multi-stage (build Vite + bundle do servidor; runtime só corre `npm start` / `node`). Escuta em `0.0.0.0` e na `PORT` que o host injecta.
 
-Repo Origin: https://cursor.com/codebase/pedro-andrade/tmp-ca1956a3ac06ace4
+Um túnel trycloudflare é temporário (horas). Para um URL HTTPS estável use Railway ou Render. **Não** basta o `vercel.json` estático — live monitor, Push e aprendizagem precisam deste processo Node.
 
-Para um link partilhável, faça deploy de um único processo Node após o build:
+### Variáveis de ambiente
+
+Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `VAPID_*` o servidor cria `data/vapid.json` (perde-se no redeploy se o disco for efémero).
+
+| Variável | Default | Notas |
+|---|---|---|
+| `PORT` | `8080` em produção / `43174` em local | Railway e Render injectam automaticamente |
+| `VAPID_PUBLIC_KEY` | — | Obrigatório em produção estável |
+| `VAPID_PRIVATE_KEY` | — | Nunca expor no cliente |
+| `VAPID_SUBJECT` | `mailto:dev@localhost` | Use `mailto:` com um email vosso |
+| `POLLER_REGION` | `ro` | Região SuperScore. Alias: `POLL_REGION` |
+| `POLLER_ENABLED` | `1` | `0` desliga o poller |
+| `POLLER_INTERVAL_MS` | `45000` | Intervalo entre ticks |
+| `LEARN_WINDOW` | `5` | Horizonte curto (minutos) |
+| `LEARN_AUTO_MIN_OUTCOMES` | `50` | Mínimo para auto-aplicar proposta |
+| `DATA_DIR` | `data` | Subscriptions, alertas, histórico |
+| `NODE_ENV` | `production` | No Docker já vai definido |
+
+Health check: `GET /api/push/status` (JSON `{ subscribers, hasVapid }`).
+
+### Railway
+
+1. Criar projecto em [railway.app](https://railway.app) → New → GitHub/Origin repo.
+2. O `railway.toml` escolhe o `Dockerfile` e health check `/api/push/status`.
+3. Variables → colar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, e opcionalmente `POLLER_REGION=ro`.
+4. Deploy. Railway define `PORT`. O URL público (`*.up.railway.app`) é HTTPS — no telemóvel: Definições → **Ativar notificações remotas**.
+5. Opcional: volume persistente montado em `/app/data` para subscriptions e histórico sobreviverem a redeploys.
+
+Sem Docker (Nixpacks): Build `npm ci && npm run build`, Start `npm start`. O `Dockerfile` é o caminho recomendado.
+
+### Render
+
+1. [render.com](https://render.com) → New → Blueprint, ou Web Service apontado a este repo.
+2. O `render.yaml` define um web service Docker com health check `/api/push/status`.
+3. Environment: as mesmas `VAPID_*` e `POLLER_REGION` (sync: false no blueprint — preencher no dashboard).
+4. Deploy. O URL `*.onrender.com` é HTTPS. No plano gratuito o serviço pode adormecer; o poller só corre enquanto a instância estiver acordada.
+5. Opcional: disco persistente em `/app/data`.
+
+Manual sem blueprint: Runtime Docker, Dockerfile path `./Dockerfile`, Health Check Path `/api/push/status`.
+
+### Docker local (smoke)
 
 ```bash
-npm run build
-PORT=8080 npm start
+docker build -t superscore-pregoal .
+docker run --rm -p 8080:8080 \
+  -e VAPID_PUBLIC_KEY \
+  -e VAPID_PRIVATE_KEY \
+  -e VAPID_SUBJECT \
+  -e POLLER_REGION=ro \
+  superscore-pregoal
 ```
 
-O `npm start` serve `dist/` + `/api/*` (Push, aprendizagem, proxy SuperScore) e o poller. Use Railway, Fly.io ou Render com `build = npm run build` e `start = npm start`. Variáveis: as de `.env.example`.
-
-`vercel.json` permite um **front estático** (Replay/UI) se ligarem Vercel ao Origin. Live monitor, Push e Aprendizagem precisam do processo Node — o Vercel estático sozinho não chega.
+Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 
 ## Regras (defaults do treino)
 

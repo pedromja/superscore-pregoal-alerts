@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: superscore-pregoal-alerts
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/push/status
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+      - key: POLLER_REGION
+        value: ro
+      - key: POLLER_ENABLED
+        value: "1"
+      - key: POLLER_INTERVAL_MS
+        value: "45000"
+      - key: LEARN_WINDOW
+        value: "5"
+      - key: LEARN_AUTO_MIN_OUTCOMES
+        value: "50"
+      - key: DATA_DIR
+        value: data
