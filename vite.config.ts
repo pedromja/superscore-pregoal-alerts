@@ -8,6 +8,8 @@ const proxy = {
   '/api/push': { target: apiServer, changeOrigin: true },
   '/api/learn': { target: apiServer, changeOrigin: true },
   '/api/poller': { target: apiServer, changeOrigin: true },
+  '/api/robobet': { target: apiServer, changeOrigin: true },
+  '/api/tips': { target: apiServer, changeOrigin: true },
   '/api/ss-fixtures': {
     target: 'https://api.content-prod.superscore.live',
     changeOrigin: true,

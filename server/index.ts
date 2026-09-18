@@ -35,6 +35,7 @@ import {
   loadSubscriptions,
   saveActiveMarket,
 } from './store.ts'
+import { ingestRobobet, tipsPayload } from './tips.ts'
 import type { PushSub } from './types.ts'
 
 const app = express()
@@ -126,6 +127,30 @@ app.post('/api/push/test', async (req, res) => {
 
 app.get('/api/poller/status', (_req, res) => {
   res.json(getPollerStatus())
+})
+
+app.post('/api/robobet/ingest', (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const text = body.texto_alerta ?? body.text
+  const hasParsed =
+    body.odd !== undefined ||
+    body.jogo !== undefined ||
+    body.mercado !== undefined ||
+    body.liga !== undefined
+  if (typeof text !== 'string' && !hasParsed) {
+    res.status(400).json({ error: 'texto_alerta ou text em falta' })
+    return
+  }
+  const quote = ingestRobobet(body)
+  res.json({
+    ok: true,
+    quote,
+    usable: Boolean(quote.odd && quote.odd > 1),
+  })
+})
+
+app.get('/api/tips', (_req, res) => {
+  res.json(tipsPayload())
 })
 
 app.get('/api/learn/market', (_req, res) => {

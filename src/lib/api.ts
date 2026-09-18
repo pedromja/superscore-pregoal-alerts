@@ -11,6 +11,14 @@ type RawScore = {
   type: number
 }
 
+type RawOdd = {
+  outcome_id?: number
+  price?: number
+  uuid?: string
+  event_id?: number
+  name?: string
+}
+
 type RawMatch = {
   id: string
   status: number
@@ -20,6 +28,8 @@ type RawMatch = {
   scores?: RawScore[]
   team1: RawTeam
   team2: RawTeam
+  odds?: RawOdd[]
+  offer_id?: string | null
 }
 
 type RawCompetitionBlock = {
@@ -64,6 +74,7 @@ export function flattenFixtures(data: FixturesResponse): Fixture[] {
         scoreHome: score.home,
         scoreAway: score.away,
         scoreIsFt: score.ft,
+        oddsEventId: match.odds?.[0]?.event_id ?? null,
       })
     }
   }

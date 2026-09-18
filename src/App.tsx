@@ -1,4 +1,4 @@
-import { Activity, Brain, Settings2, TimerReset } from 'lucide-react'
+import { Activity, Brain, Coins, Settings2, TimerReset } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { MarketToggle } from './components/MarketToggle'
 import { NotificationBar } from './components/NotificationBar'
@@ -18,10 +18,12 @@ import { LearningPage } from './pages/LearningPage'
 import { MonitorPage } from './pages/MonitorPage'
 import { ReplayPage } from './pages/ReplayPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { TipsPage } from './pages/TipsPage'
 import type { AlertSettings, CornersByHalf, Market, TabId } from './lib/types'
 
 const TABS: { id: TabId; label: string; icon: typeof Activity }[] = [
   { id: 'monitor', label: 'Alertas ao vivo', icon: Activity },
+  { id: 'tips', label: 'Tips / ROI', icon: Coins },
   { id: 'replay', label: 'Replay / treino', icon: TimerReset },
   { id: 'aprendizagem', label: 'Aprendizagem', icon: Brain },
   { id: 'definicoes', label: 'Definições', icon: Settings2 },
@@ -176,6 +178,7 @@ export default function App() {
           onFocusConsumed={onFocusConsumed}
         />
       ) : null}
+      {tab === 'tips' ? <TipsPage /> : null}
       {tab === 'replay' ? (
         <ReplayPage
           settings={settings}

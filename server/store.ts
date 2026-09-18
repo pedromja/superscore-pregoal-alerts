@@ -10,6 +10,8 @@ import type {
 } from '../src/lib/types.ts'
 import { parseCornerHalf, parseCornerHalfOpt } from '../src/lib/windows.ts'
 import { DATA_DIR, MATCHES_DIR } from './config.ts'
+import type { RobobetQuote } from '../src/lib/robobet.ts'
+import type { Tip } from '../src/lib/tips.ts'
 import type { GoalRecord, LoggedAlert, ParamVersion, PushSub, StoredMatch } from './types.ts'
 
 export type LearnScope = 'goals' | 'corners_ht' | 'corners_ft'
@@ -83,6 +85,28 @@ export function loadSubscriptions(): PushSub[] {
 
 export function saveSubscriptions(items: PushSub[]): void {
   writeJson('subscriptions.json', items)
+}
+
+export function loadRobobetQuotes(): RobobetQuote[] {
+  return readJson('robobet_tips.json', [])
+}
+
+export function saveRobobetQuotes(items: RobobetQuote[]): void {
+  writeJson('robobet_tips.json', items)
+}
+
+export function loadTips(): Tip[] {
+  return readJson('tips.json', [])
+}
+
+export function saveTips(items: Tip[]): void {
+  writeJson('tips.json', items.slice(-2000))
+}
+
+export function appendTipSkip(entry: unknown): void {
+  const items = readJson<unknown[]>('tip_skips.json', [])
+  items.push(entry)
+  writeJson('tip_skips.json', items.slice(-200))
 }
 
 export function loadAlerts(
