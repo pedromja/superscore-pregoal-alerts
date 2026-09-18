@@ -1,3 +1,4 @@
+import type { OddsObservation } from './oddsObserve'
 import type { LeagueRow, RoiRow, Tip } from './tips'
 import type { RobobetQuote } from './robobet'
 import type { TipOverlay, TipOverlayProposal } from './tipOverlay'
@@ -7,6 +8,7 @@ export type OverlayPayload = {
   proposal: TipOverlayProposal | null
   defaults: TipOverlay
   note: string
+  alertGate?: boolean
 }
 
 export type TipsPayload = {
@@ -16,6 +18,7 @@ export type TipsPayload = {
   leagues: LeagueRow[]
   quotes: RobobetQuote[]
   overlay?: OverlayPayload
+  observations?: OddsObservation[]
   horizonLongCap: number
 }
 

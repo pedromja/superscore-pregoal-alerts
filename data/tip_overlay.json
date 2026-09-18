@@ -1,5 +1,5 @@
 {
-  "requireOdd": true,
+  "requireOdd": false,
   "minOdd": null,
   "maxOdd": null,
   "buckets": {

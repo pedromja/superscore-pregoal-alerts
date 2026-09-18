@@ -147,6 +147,7 @@ export function toLoggedAlert(
     labeledAt: null,
     feedback: null,
     sentPush,
+    odds: alert.odds,
   }
 }
 

@@ -1,5 +1,6 @@
 import { marketCopy, MARKET_EVENT_TYPE, parseMarket, ruleLabels } from './market'
 import { formatSigned, sideLabel } from './format'
+import { formatObservationLine } from './oddsObserve'
 import { RULE_SHORT } from './rules'
 import type {
   CornerHalf,
@@ -85,11 +86,13 @@ export function alertNotificationCopy(
   const prefix = market === 'goals' ? rule : `${copy.pushPrefix} · ${rule}`
   const tallies = talliesLineOf(alert)
   const title = tallies ? `${prefix} · ${tallies}` : `${prefix} · ${alert.matchLabel}`
+  const oddsLine = formatObservationLine(alert.odds)
   const bodyBits = [
     tallies ? alert.matchLabel : null,
     `${alert.min}'`,
     sideLabel(alert.side),
     `v ${formatSigned(alert.momentum)}`,
+    oddsLine,
   ].filter((bit): bit is string => Boolean(bit))
   return { title, body: bodyBits.join(' · ') }
 }

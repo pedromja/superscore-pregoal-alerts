@@ -38,7 +38,7 @@ export type OverlayDecision = {
  * min/max stay null until Pedro confirms backtest cutoffs — do not invent them.
  */
 export const DEFAULT_TIP_OVERLAY: TipOverlay = {
-  requireOdd: true,
+  requireOdd: false,
   minOdd: null,
   maxOdd: null,
   buckets: {
@@ -49,8 +49,11 @@ export const DEFAULT_TIP_OVERLAY: TipOverlay = {
   },
 }
 
+/** Odd min/max/require never gate alerts or push until learning + user confirm. */
+export const ALERT_ODD_GATE_ENABLED = false
+
 export const OVERLAY_NOTE =
-  'Overlay de odd separado de params*.json. Regras Spike/Swing/Sustained não mudam sem confirmação. minOdd/maxOdd null até Pedro confirmar o backtest.'
+  'Overlay de odd separado de params*.json. NÃO filtra alertas nem push. Regras de odd vêm mais tarde via aprendizagem + confirmação. Não aplicar backtest (goals minOdd≥3 / cantos OFF). min/max null.'
 
 function asFiniteOdd(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null
@@ -87,7 +90,7 @@ export function normalizeTipOverlay(raw: unknown): TipOverlay {
     buckets[key] = parseBucket(bucketsRaw[key], DEFAULT_TIP_OVERLAY.buckets[key])
   }
   return {
-    requireOdd: asBool(obj.requireOdd, true),
+    requireOdd: asBool(obj.requireOdd, false),
     minOdd: asFiniteOdd(obj.minOdd),
     maxOdd: asFiniteOdd(obj.maxOdd),
     buckets,

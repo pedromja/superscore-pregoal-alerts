@@ -18,10 +18,14 @@ import {
   type TipOverlay,
   type TipOverlayProposal,
 } from '../src/lib/tipOverlay.ts'
+import type { OddsObservation } from '../src/lib/oddsObserve.ts'
+import { oddsLogKey } from '../src/lib/oddsObserve.ts'
 import type { GoalRecord, LoggedAlert, ParamVersion, PushSub, StoredMatch } from './types.ts'
 
 const TIP_OVERLAY_FILE = 'tip_overlay.json'
 const TIP_OVERLAY_PROPOSAL_FILE = 'tip_overlay_proposal.json'
+const ODDS_LOG_FILE = 'odds_observations.json'
+const ODDS_LOG_CAP = 4000
 
 export type LearnScope = 'goals' | 'corners_ht' | 'corners_ft'
 
@@ -137,6 +141,37 @@ export function loadTipOverlayProposal(): TipOverlayProposal | null {
 
 export function saveTipOverlayProposal(item: TipOverlayProposal | null): void {
   writeJson(TIP_OVERLAY_PROPOSAL_FILE, item)
+}
+
+export type OddsLogFile = {
+  updatedAt: string
+  items: OddsObservation[]
+}
+
+export function loadOddsObservations(): OddsObservation[] {
+  const raw = readJson<OddsLogFile | OddsObservation[]>(ODDS_LOG_FILE, { updatedAt: '', items: [] })
+  if (Array.isArray(raw)) return raw
+  return raw.items ?? []
+}
+
+export function appendOddsObservation(entry: OddsObservation): void {
+  const items = loadOddsObservations()
+  items.push(entry)
+  writeJson(ODDS_LOG_FILE, {
+    updatedAt: entry.ts,
+    items: items.slice(-ODDS_LOG_CAP),
+  })
+}
+
+export function oddsObservationsForKey(
+  market: OddsObservation['market'],
+  half: OddsObservation['half'],
+  league: string,
+): OddsObservation[] {
+  const key = oddsLogKey(market, half, league)
+  return loadOddsObservations().filter(
+    (row) => oddsLogKey(row.market, row.half, row.league) === key,
+  )
 }
 
 export function loadAlerts(

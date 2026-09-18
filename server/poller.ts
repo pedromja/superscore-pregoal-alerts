@@ -1,7 +1,6 @@
 import { pushTagFor } from '../src/lib/market.ts'
 import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../src/lib/rules.ts'
-import { withMatchTallies } from '../src/lib/tally.ts'
-import { halfOfAlert } from '../src/lib/tips.ts'
+import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
 import type { CornersByHalf, FeedAlert, Fixture } from '../src/lib/types.ts'
 import {
   POLLER_ENABLED,
@@ -22,13 +21,11 @@ import {
   sentKey,
 } from './store.ts'
 import {
+  attachOddsToAlerts,
   createTipFromAlert,
-  decideTipOverlay,
-  logTipSkip,
-  resolveTipOdd,
+  resolvedOddFromAlert,
   settleTipsForMatch,
   tipAlreadyOpen,
-  tipNotificationCopy,
 } from './tips.ts'
 import type { PollerStatus } from './types.ts'
 
@@ -78,19 +75,23 @@ async function processFixture(fixture: Fixture): Promise<number> {
   const first = !isPrimed(primedId)
   if (first) primeFixture(primedId)
 
-  const fresh: FeedAlert[] = alerts.map((alert) =>
-    withMatchTallies(
-      {
-        ...alert,
-        fixtureId: fixture.id,
-        matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-        firedAt: new Date().toISOString(),
-        coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
-        market,
-      },
-      payload,
+  const fresh: FeedAlert[] = await attachOddsToAlerts({
+    fixture,
+    market,
+    alerts: alerts.map((alert) =>
+      withMatchTallies(
+        {
+          ...alert,
+          fixtureId: fixture.id,
+          matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+          firedAt: new Date().toISOString(),
+          coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+          market,
+        },
+        payload,
+      ),
     ),
-  )
+  })
 
   if (first) {
     for (const alert of fresh) {
@@ -157,53 +158,21 @@ async function processFixture(fixture: Fixture): Promise<number> {
     if (!notify.notificationsEnabled) continue
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     if (loadSent().includes(key)) continue
-    if (tipAlreadyOpen(fixture.id, alert.id)) continue
-
-    const half = halfOfAlert(market, alert.min, alert.period, alert.cornerHalf)
-    const currentTotal =
-      market === 'corners'
-        ? (alert.cornersTally?.home ?? 0) + (alert.cornersTally?.away ?? 0)
-        : (alert.goalsTally?.home ?? 0) + (alert.goalsTally?.away ?? 0)
-    const odd = await resolveTipOdd({ fixture, market, half, currentTotal })
-    const overlay = decideTipOverlay(market, half, odd?.odd ?? null)
-    if (!overlay.ok) {
-      logTipSkip(overlay.reason, {
-        fixtureId: fixture.id,
-        match: `${fixture.team1} vs ${fixture.team2}`,
-        market,
-        half,
-        bucket: overlay.bucket,
-        minute: alert.min,
-        alertId: alert.id,
-        odd: odd?.odd ?? null,
-        source: odd?.source ?? null,
-      })
-      if (overlay.permanent) markSent(key)
-      continue
-    }
-    if (!odd) {
-      logTipSkip('sem odd mais-um (SuperScore nem RoboBet Odd Ao Vivo)', {
-        fixtureId: fixture.id,
-        match: `${fixture.team1} vs ${fixture.team2}`,
-        market,
-        half,
-        minute: alert.min,
-        alertId: alert.id,
-      })
-      continue
-    }
     if (!markSent(key)) continue
-    const tip = createTipFromAlert({ fixture, alert, odd })
-    const copy = tipNotificationCopy(tip)
+    const copy = alertNotificationCopy(alert)
     const alertKey = `${fixture.id}:${alert.id}`
     await sendPushToAll({
       title: copy.title,
       body: copy.body,
-      url: `/#/tips?tip=${encodeURIComponent(tip.id)}`,
+      url: `/#/monitor?alert=${encodeURIComponent(alertKey)}`,
       alertKey,
-      tag: pushTagFor(market, `tip:${key}`),
+      tag: pushTagFor(market, key),
     })
     sent += 1
+    const odd = resolvedOddFromAlert(alert)
+    if (odd && !tipAlreadyOpen(fixture.id, alert.id)) {
+      createTipFromAlert({ fixture, alert, odd })
+    }
   }
   return sent
 }

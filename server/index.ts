@@ -32,6 +32,7 @@ import {
   loadActiveMarket,
   loadAlerts,
   loadHistory,
+  loadOddsObservations,
   loadProposal,
   loadSubscriptions,
   saveActiveMarket,
@@ -161,6 +162,10 @@ app.post('/api/robobet/ingest', (req, res) => {
 
 app.get('/api/tips', (_req, res) => {
   res.json(tipsPayload())
+})
+
+app.get('/api/tips/observations', (_req, res) => {
+  res.json({ items: loadOddsObservations().slice(-200).reverse() })
 })
 
 app.get('/api/tips/overlay', (_req, res) => {

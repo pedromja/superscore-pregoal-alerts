@@ -164,16 +164,35 @@ export function TipsPage() {
         <h2 className="text-lg font-semibold">Tips · ROI</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
           Overlay em <span className="font-mono">data/tip_overlay.json</span>, separado
-          dos <span className="font-mono">params*.json</span>. Só há tip e Web Push com
-          odd de «mais um» (requireOdd=true). Fonte 1: SuperScore; fonte 2: Telegram
-          RoboBet <span className="font-mono">Odd Ao Vivo</span>. Os limiares
-          Spike/Swing/Sustained e as janelas Cantos HT 35–45 / FT 85–90 não mudam
-          aqui. minOdd/maxOdd ficam vazios até Pedro confirmar o backtest. Stake 1u.
+          dos <span className="font-mono">params*.json</span>. Alertas e Web Push
+          disparam pelas regras de sinal (Spike/Swing/Sustained) — a odd{' '}
+          <strong>não</strong> os bloqueia. Observamos limite (mais-um / over
+          current±0,5) e asiático quando o SuperScore/Superbet os tem, e gravamos em{' '}
+          <span className="font-mono">data/odds_observations.json</span>. Tip/ROI
+          anexa a odd se existir; sem odd o alerta continua. Regras de odd vêm
+          mais tarde via aprendizagem + confirmação. Não se aplica o overlay de
+          backtest (golos minOdd≥3 / cantos OFF). Janelas Cantos HT 35–45 / FT
+          85–90 inalteradas.
         </p>
         {error ? <p className="mt-2 text-sm text-rose-200">{error}</p> : null}
       </section>
 
       <OverlayPanel payload={data?.overlay ?? null} onSaved={() => void load()} />
+
+      {(data?.observations ?? []).length ? (
+        <section className="rounded-2xl border border-line bg-panel p-4">
+          <h3 className="text-sm font-semibold tracking-wide uppercase">
+            Odds observadas (não filtram alertas)
+          </h3>
+          <ul className="mt-3 space-y-2 text-xs text-emerald-100/70">
+            {(data?.observations ?? []).slice(0, 12).map((row) => (
+              <li key={`${row.fixtureId}:${row.alertId}:${row.ts}`} className="rounded-xl border border-line bg-pitch px-3 py-2 font-mono">
+                {row.league} · {row.market}/{row.half} · {row.minute}' · {row.sourceLabel}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="rounded-2xl border border-line bg-panel p-4">
         <h3 className="text-sm font-semibold tracking-wide uppercase">
@@ -278,7 +297,7 @@ function OverlayPanel({
           onChange={(e) => setDraft((prev) => ({ ...prev, requireOdd: e.target.checked }))}
           className="accent-lime"
         />
-        requireOdd — tip/push só com odd válida
+        requireOdd — futuro (agora NÃO filtra alertas/push)
       </label>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="text-[11px] uppercase tracking-wider text-emerald-100/45">
@@ -344,7 +363,7 @@ function OverlayPanel({
             onChange={(e) => setConfirm(e.target.checked)}
             className="accent-lime"
           />
-          Confirmo aplicar o overlay (não toca nos params base)
+          Confirmo gravar o overlay (não filtra alertas agora; regras de odd só após aprendizagem + confirmação)
         </label>
         <button
           type="button"
