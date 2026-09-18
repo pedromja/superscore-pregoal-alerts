@@ -19,14 +19,38 @@ export function removeSubscription(endpoint: string): void {
   saveSubscriptions(loadSubscriptions().filter((s) => s.endpoint !== endpoint))
 }
 
+export type PushSendResult = {
+  sent: number
+  removed: number
+  attempted: number
+  errors: string[]
+}
+
+function pushErrorReason(err: unknown): { status?: number; reason: string } {
+  const status = (err as { statusCode?: number }).statusCode
+  const body = (err as { body?: string }).body
+  const message = err instanceof Error ? err.message : String(err)
+  const detail = body?.trim() ? `${message} ${body}`.trim() : message
+  return {
+    status,
+    reason: status ? `HTTP ${status}: ${detail}` : detail,
+  }
+}
+
 export async function sendPushToAll(payload: {
   title: string
   body: string
   url: string
   alertKey: string
   tag?: string
-}): Promise<{ sent: number; removed: number }> {
+}): Promise<PushSendResult> {
   const subs = loadSubscriptions()
+  const errors: string[] = []
+  if (!subs.length) {
+    const reason = 'sem subscritores'
+    console.error('[push]', payload.alertKey, reason)
+    return { sent: 0, removed: 0, attempted: 0, errors: [reason] }
+  }
   let sent = 0
   let removed = 0
   const body = JSON.stringify(payload)
@@ -41,12 +65,26 @@ export async function sendPushToAll(payload: {
       )
       sent += 1
     } catch (err) {
-      const status = (err as { statusCode?: number }).statusCode
+      const { status, reason } = pushErrorReason(err)
+      console.error(
+        '[push] falhou',
+        payload.alertKey,
+        sub.endpoint.slice(0, 64),
+        reason,
+      )
+      errors.push(reason)
       if (status === 404 || status === 410) {
         removeSubscription(sub.endpoint)
         removed += 1
       }
     }
   }
-  return { sent, removed }
+  if (sent === 0) {
+    console.error(
+      '[push] nenhum envio',
+      payload.alertKey,
+      errors.join(' | ') || 'sem detalhe',
+    )
+  }
+  return { sent, removed, attempted: subs.length, errors }
 }

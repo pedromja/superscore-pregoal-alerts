@@ -1,4 +1,5 @@
 import { pushTagFor } from '../src/lib/market.ts'
+import { ruleNotifyEnabled } from '../src/lib/notifications.ts'
 import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../src/lib/rules.ts'
 import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
 import type { CornersByHalf, FeedAlert, Fixture } from '../src/lib/types.ts'
@@ -9,11 +10,18 @@ import {
 } from './config.ts'
 import { currentSettings, ingestFeedAlerts, labelMatch } from './learn.ts'
 import { sendPushToAll } from './push.ts'
-import { fetchFixturesServer, fetchMomentumServer, lisbonDate } from './ss.ts'
+import {
+  fetchFixturesServer,
+  fetchMomentumServer,
+  isRoutineJsonError,
+  lisbonDate,
+  UpstreamJsonError,
+} from './ss.ts'
 import {
   isPrimed,
   loadActiveMarket,
   loadSent,
+  markAlertPushed,
   markSent,
   primedKey,
   primeFixture,
@@ -39,8 +47,32 @@ const status: PollerStatus = {
   alertsSent: 0,
 }
 
+let inFlight = false
+
 export function getPollerStatus(): PollerStatus {
   return { ...status }
+}
+
+export type FixtureTickError = {
+  fixtureId: string
+  matchLabel: string
+  message: string
+  routineJson: boolean
+  url?: string
+}
+
+/** Truncated/invalid JSON on a subset of fixtures is logged, not sticky lastError. */
+export function lastErrorAfterFixtureFailures(
+  errors: FixtureTickError[],
+  targetCount: number,
+): string | null {
+  if (!errors.length) return null
+  const allFailed = targetCount > 0 && errors.length >= targetCount
+  const serious = errors.filter((e) => !e.routineJson)
+  if (!serious.length && !allFailed) return null
+  const shown = (serious.length ? serious : errors)[0]
+  if (allFailed) return shown.message
+  return `${serious.length}/${targetCount} jogos: ${shown.message}`
 }
 
 function cornersBundle(): CornersByHalf {
@@ -48,6 +80,48 @@ function cornersBundle(): CornersByHalf {
     ht: currentSettings('corners', 'ht'),
     ft: currentSettings('corners', 'ft'),
   }
+}
+
+async function notifyFreshAlerts(
+  fixture: Fixture,
+  market: ReturnType<typeof loadActiveMarket>,
+  settings: ReturnType<typeof currentSettings>,
+  byHalf: CornersByHalf | undefined,
+  fresh: FeedAlert[],
+): Promise<number> {
+  let sent = 0
+  for (const alert of fresh) {
+    if (alert.coincident) continue
+    const notify = settingsForAlert(alert, settings, byHalf)
+    if (!ruleNotifyEnabled(notify, alert.rule)) continue
+    const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
+    if (loadSent().includes(key)) continue
+    if (!markSent(key)) continue
+    const copy = alertNotificationCopy(alert)
+    const alertKey = `${fixture.id}:${alert.id}`
+    const result = await sendPushToAll({
+      title: copy.title,
+      body: copy.body,
+      url: `/#/monitor?alert=${encodeURIComponent(alertKey)}`,
+      alertKey,
+      tag: pushTagFor(market, key),
+    })
+    if (result.sent > 0) {
+      markAlertPushed(alertKey, market, alert.cornerHalf)
+      sent += 1
+    } else {
+      console.error(
+        '[poller] push não enviado',
+        alertKey,
+        result.errors.join(' | ') || 'sem detalhe',
+      )
+    }
+    const odd = resolvedOddFromAlert(alert)
+    if (odd && !tipAlreadyOpen(fixture.id, alert.id)) {
+      createTipFromAlert({ fixture, alert, odd })
+    }
+  }
+  return sent
 }
 
 async function processFixture(fixture: Fixture): Promise<number> {
@@ -148,37 +222,13 @@ async function processFixture(fixture: Fixture): Promise<number> {
     clockPeriod: clock?.period,
   })
 
-  let sent = 0
-  for (const alert of fresh) {
-    if (alert.coincident) continue
-    const notify = settingsForAlert(alert, settings, byHalf)
-    if (alert.rule === 'secondary' && !notify.notifySecondary) continue
-    if (alert.rule === 'fallback' && !notify.notifyFallback) continue
-    if (alert.rule === 'primary' && !notify.notifyPrimary) continue
-    if (!notify.notificationsEnabled) continue
-    const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
-    if (loadSent().includes(key)) continue
-    if (!markSent(key)) continue
-    const copy = alertNotificationCopy(alert)
-    const alertKey = `${fixture.id}:${alert.id}`
-    await sendPushToAll({
-      title: copy.title,
-      body: copy.body,
-      url: `/#/monitor?alert=${encodeURIComponent(alertKey)}`,
-      alertKey,
-      tag: pushTagFor(market, key),
-    })
-    sent += 1
-    const odd = resolvedOddFromAlert(alert)
-    if (odd && !tipAlreadyOpen(fixture.id, alert.id)) {
-      createTipFromAlert({ fixture, alert, odd })
-    }
-  }
-  return sent
+  return notifyFreshAlerts(fixture, market, settings, byHalf, fresh)
 }
 
 export async function tick(): Promise<void> {
   if (!POLLER_ENABLED) return
+  if (inFlight) return
+  inFlight = true
   try {
     const fixtures = await fetchFixturesServer(lisbonDate(), POLLER_REGION)
     const live = fixtures.filter((f) => f.state === 1)
@@ -188,20 +238,37 @@ export async function tick(): Promise<void> {
     const targets = [...live.slice(0, 8), ...recentDone]
     status.liveWatched = live.length
     let sent = 0
+    const tickErrors: FixtureTickError[] = []
     for (const fixture of targets) {
       try {
         sent += await processFixture(fixture)
       } catch (err) {
-        status.lastError =
-          err instanceof Error ? err.message : 'Falha num jogo'
+        const message = err instanceof Error ? err.message : 'Falha num jogo'
+        const url = err instanceof UpstreamJsonError ? err.url : undefined
+        console.error(
+          '[poller] jogo falhou',
+          fixture.id,
+          `${fixture.team1} vs ${fixture.team2}`,
+          url ?? '',
+          message,
+        )
+        tickErrors.push({
+          fixtureId: fixture.id,
+          matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+          message,
+          routineJson: isRoutineJsonError(err),
+          url,
+        })
       }
     }
     status.alertsSent += sent
     status.lastTickAt = new Date().toISOString()
-    if (targets.length) status.lastError = status.lastError
+    status.lastError = lastErrorAfterFixtureFailures(tickErrors, targets.length)
   } catch (err) {
     status.lastError = err instanceof Error ? err.message : 'Tick falhou'
     status.lastTickAt = new Date().toISOString()
+  } finally {
+    inFlight = false
   }
 }
 
