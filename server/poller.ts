@@ -1,6 +1,7 @@
 import { pushTagFor } from '../src/lib/market.ts'
 import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../src/lib/rules.ts'
-import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
+import { withMatchTallies } from '../src/lib/tally.ts'
+import { halfOfAlert } from '../src/lib/tips.ts'
 import type { CornersByHalf, FeedAlert, Fixture } from '../src/lib/types.ts'
 import {
   POLLER_ENABLED,
@@ -20,6 +21,14 @@ import {
   saveMatch,
   sentKey,
 } from './store.ts'
+import {
+  createTipFromAlert,
+  logTipSkip,
+  resolveTipOdd,
+  settleTipsForMatch,
+  tipAlreadyOpen,
+  tipNotificationCopy,
+} from './tips.ts'
 import type { PollerStatus } from './types.ts'
 
 const status: PollerStatus = {
@@ -99,6 +108,16 @@ async function processFixture(fixture: Fixture): Promise<number> {
         market,
       )
     }
+    const clock = points.at(-1)
+    settleTipsForMatch({
+      fixture,
+      events,
+      points,
+      market,
+      finished,
+      clockMin: clock?.min,
+      clockPeriod: clock?.period,
+    })
     return 0
   }
 
@@ -116,6 +135,17 @@ async function processFixture(fixture: Fixture): Promise<number> {
     )
   }
 
+  const clock = points.at(-1)
+  settleTipsForMatch({
+    fixture,
+    events,
+    points,
+    market,
+    finished,
+    clockMin: clock?.min,
+    clockPeriod: clock?.period,
+  })
+
   let sent = 0
   for (const alert of fresh) {
     if (alert.coincident) continue
@@ -127,14 +157,34 @@ async function processFixture(fixture: Fixture): Promise<number> {
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     if (loadSent().includes(key)) continue
     if (!markSent(key)) continue
-    const copy = alertNotificationCopy(alert)
+    if (tipAlreadyOpen(fixture.id, alert.id)) continue
+
+    const half = halfOfAlert(market, alert.min, alert.period, alert.cornerHalf)
+    const currentTotal =
+      market === 'corners'
+        ? (alert.cornersTally?.home ?? 0) + (alert.cornersTally?.away ?? 0)
+        : (alert.goalsTally?.home ?? 0) + (alert.goalsTally?.away ?? 0)
+    const odd = await resolveTipOdd({ fixture, market, half, currentTotal })
+    if (!odd) {
+      logTipSkip('sem odd mais-um (SuperScore nem RoboBet Odd Ao Vivo)', {
+        fixtureId: fixture.id,
+        match: `${fixture.team1} vs ${fixture.team2}`,
+        market,
+        half,
+        minute: alert.min,
+        alertId: alert.id,
+      })
+      continue
+    }
+    const tip = createTipFromAlert({ fixture, alert, odd })
+    const copy = tipNotificationCopy(tip)
     const alertKey = `${fixture.id}:${alert.id}`
     await sendPushToAll({
       title: copy.title,
       body: copy.body,
-      url: `/#/monitor?alert=${encodeURIComponent(alertKey)}`,
+      url: `/#/tips?tip=${encodeURIComponent(tip.id)}`,
       alertKey,
-      tag: pushTagFor(market, key),
+      tag: pushTagFor(market, `tip:${key}`),
     })
     sent += 1
   }

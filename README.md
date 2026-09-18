@@ -4,6 +4,39 @@ Painel web (PT-PT) que lê o **attacking momentum** SuperScore e dispara alertas
 
 O mercado activo escolhe-se no cabeçalho: **Golos | Cantos**. Golos é o default; cantos usam limiares treinados à parte e ficheiros de aprendizagem separados.
 
+## Odds da tip (mais um golo / canto)
+
+**Sem odd não há tip nem Web Push.** Os alertas de momentum SuperScore continuam no monitor e na aprendizagem; o push remoto e o feed de tips só disparam com preço de «mais um».
+
+Ordem das fontes:
+
+1. **SuperScore (primário)** — o protobuf `OddsApiModel` em `GET /v2/public/stats/offer/market/item?match_id=&app_market=&app_variant=superscore` só traz 1X2 (`name` 1/X/2: `uuid`, `outcome_id`, `price`). Isso **não** é a odd da tip. O `event_id` desse modelo (o mesmo das `odds[]` no fixture) abre os mercados que a UI SuperScore mostra nos tabs de odds, via Superbet offer: `GET https://production-superbet-offer-{ro|pl|br}.freetls.fastly.net/v3/{locale}/events?events={event_id}&includeOnly=fixture,markets,superbets` (SSE em `/v3/subscription/...`). Daí extraímos **Over current+0,5** em Total goluri / Prima repriză - Total goluri, ou Total cornere / Prima repriză - Total cornere. Não se usa 1X2 (`Final`).
+2. **RoboBet Telegram (fallback)** — só se o SuperScore não tiver odd desse mercado. Parse da linha `Odd Ao Vivo:` (vírgula ou ponto). **Nunca** `Pre-jogo:` nem `Ao Vivo:` (isso é 1X2). A linha «mais um»/over vem de `Mercado:` (`linha` / `Mais de` / `Over` / `Race`).
+3. Sem odd nas duas fontes → não há tip/push (fica só um log interno).
+
+Não há scrapers de casas. A API HTTP inplay do RoboBet também só tem 1X2 — ignora-se.
+
+### Ponte Telethon → ingest
+
+No bridge Telethon, defina:
+
+```bash
+WEBHOOK_URL=https://<host>/api/robobet/ingest
+```
+
+`POST` JSON:
+
+```json
+{ "texto_alerta": "<mensagem bruta>", "conta": "A" }
+```
+
+`conta` A ≈ cantos, B ≈ golos, se o mercado não vier no texto. Também aceita campos já parseados: `{ odd, linha, mercado, liga, jogo }` (além de `text`).
+
+As cotações ingeridas ficam em `data/robobet_tips.json` (máx. ~500). As tips enviadas (abertas/liquidadas) em `data/tips.json`.
+
+ROI (stake 1u binário): **Golos HT, Golos FT, Cantos HT, Cantos FT**. Acerto = evento SuperScore depois do minuto do alerta, dentro do horizonte existente. Follow-up por liga na página Tips / ROI.
+
+
 Treino de referência (golos): 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/Lisbon).
 Treino de cantos (janelas): 95 jogos, HT 89 cantos (35–45) e FT 52 cantos (85–90), mesmas datas. Fora destas janelas a app de cantos não avalia, não envia push e não grava amostras.
 
@@ -23,7 +56,7 @@ Isto sobe **dois** processos:
 | Vite (UI + proxy) | `http://127.0.0.1:43173` |
 | API Node (Push + poller + aprendizagem) | `http://127.0.0.1:43174` |
 
-O Vite encaminha `/api/push`, `/api/learn` e `/api/poller` para o sidecar.
+O Vite encaminha `/api/push`, `/api/learn`, `/api/poller`, `/api/robobet` e `/api/tips` para o sidecar.
 
 ```bash
 npm run build     # Vite UI + bundle do servidor em dist-server/
@@ -35,13 +68,14 @@ npm start         # produção: um processo Node (UI + API + poller) em 0.0.0.0:
 ## Páginas
 
 1. **Alertas ao vivo** — data (hoje, Europe/Lisbon), região `ro`, poll do momentum, feed, 👍/👎.
-2. **Replay / treino** — amostras Celtic / Drava ou jogo por ID.
-3. **Aprendizagem** — precisão/recall, proposta de limiares, histórico, importar amostras.
-4. **Definições** — limiares, regras, notificações locais e **Ativar notificações remotas**.
+2. **Tips / ROI** — tips abertas e liquidadas, ROI por tipo×parte, acompanhamento por liga.
+3. **Replay / treino** — amostras Celtic / Drava ou jogo por ID.
+4. **Aprendizagem** — precisão/recall, proposta de limiares, histórico, importar amostras.
+5. **Definições** — limiares, regras, notificações locais e **Ativar notificações remotas**.
 
 ## Web Push (app fechada)
 
-O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras do **mercado activo** e faz `webpush.sendNotification` para as subscriptions guardadas em `data/subscriptions.json`. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. Título, corpo e `tag` da notificação identificam o mercado (`pregoal:` vs `precantos:`). Cada alerta (push e cartão na app) inclui o marcador **Golos casa-fora · Cantos casa-fora**, contado a partir dos eventos SuperScore (`type=4` / `type=14`) até ao minuto do disparo.
+O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras do **mercado activo** e só faz `webpush.sendNotification` quando há odd de mais-um (SuperScore primeiro, RoboBet `Odd Ao Vivo` em fallback). Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. Título, corpo e `tag` da notificação identificam o mercado (`pregoal:` vs `precantos:`) e incluem a odd. Cada alerta (push e cartão na app) inclui o marcador **Golos casa-fora · Cantos casa-fora**, contado a partir dos eventos SuperScore (`type=4` / `type=14`) até ao minuto do disparo.
 
 ### Gerar VAPID
 

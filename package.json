@@ -13,7 +13,9 @@
     "build": "tsc -b && vite build && npm run build:server",
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist-server/index.mjs --packages=external --target=node20",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:robobet": "tsx scripts/verify-robobet-parser.ts",
+    "test:windows": "tsx scripts/verify-corner-windows.ts"
   },
   "engines": {
     "node": ">=20"

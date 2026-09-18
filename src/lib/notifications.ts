@@ -91,7 +91,7 @@ export function showTestNotification(market: Market = 'goals'): Promise<void> {
 }
 
 export function parseAppHash(hash = window.location.hash): {
-  tab: 'monitor' | 'replay' | 'definicoes' | 'aprendizagem'
+  tab: 'monitor' | 'replay' | 'definicoes' | 'aprendizagem' | 'tips'
   alertKey: string | null
 } {
   const raw = hash.replace(/^#\/?/, '')
@@ -100,9 +100,10 @@ export function parseAppHash(hash = window.location.hash): {
     path === 'replay' ||
     path === 'definicoes' ||
     path === 'monitor' ||
-    path === 'aprendizagem'
+    path === 'aprendizagem' ||
+    path === 'tips'
       ? path
       : 'monitor'
   const params = new URLSearchParams(query ?? '')
-  return { tab, alertKey: params.get('alert') }
+  return { tab, alertKey: params.get('alert') ?? params.get('tip') }
 }

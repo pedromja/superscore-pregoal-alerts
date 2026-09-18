@@ -1,6 +1,6 @@
 export type Side = 'home' | 'away'
 export type RuleId = 'primary' | 'secondary' | 'fallback'
-export type TabId = 'monitor' | 'replay' | 'definicoes' | 'aprendizagem'
+export type TabId = 'monitor' | 'replay' | 'definicoes' | 'aprendizagem' | 'tips'
 export type Market = 'goals' | 'corners'
 export type CornerHalf = 'ht' | 'ft'
 export type RuleKind =
@@ -148,6 +148,7 @@ export type Fixture = {
   scoreHome: number | null
   scoreAway: number | null
   scoreIsFt: boolean
+  oddsEventId?: number | null
 }
 
 export type DemoMatch = {
