@@ -34,7 +34,7 @@ export const MARKET_COPY = {
     nounCap: 'Canto',
     title: 'Alertas pré-canto',
     blurb:
-      'Momentum de ataque assinado (−100 fora / +100 casa). Cantos só alertam na 1.ª parte aos 35–45 e na 2.ª aos 85–90 (relógio absoluto). Fora destas janelas não há avaliação, push nem aprendizagem. O minuto ao vivo escolhe os parâmetros HT ou FT.',
+      `Momentum de ataque assinado (−100 fora / +100 casa). Cantos só alertam na 1.ª parte aos ${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to} e na 2.ª aos ${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to} (relógio absoluto). Fora destas janelas não há avaliação, push nem aprendizagem. O minuto ao vivo escolhe os parâmetros HT ou FT.`,
     pushPrefix: 'Cantos',
     pushTag: 'precantos',
   },
@@ -67,7 +67,7 @@ const GOAL_THRESHOLDS = {
   evaluationWindow: 5,
 }
 
-/** HT 35–45, W=5 — offline retrain 2026-09-18. */
+/** HT 32–42, W=5 — limiares do retrain offline 2026-09-18 (inalterados). */
 const CORNER_HT_THRESHOLDS = {
   primaryKind: 'sustained' as const,
   secondaryKind: 'combo' as const,
@@ -85,7 +85,7 @@ const CORNER_HT_THRESHOLDS = {
   evaluationWindow: CORNER_WINDOWS.ht.shortHorizon,
 }
 
-/** FT 85–90, W=3 — offline retrain 2026-09-18. */
+/** FT 82–87, W=3 — limiares do retrain offline 2026-09-18 (inalterados). */
 const CORNER_FT_THRESHOLDS = {
   primaryKind: 'combo' as const,
   secondaryKind: 'sustained' as const,

@@ -10,25 +10,25 @@ export type CornerWindow = {
   shortLabel: string
 }
 
-/** HT 35–45 and FT 85–90 on the absolute SuperScore match clock. */
+/** HT 32–42 and FT 82–87 on the absolute SuperScore match clock. */
 export const CORNER_WINDOWS: Record<CornerHalf, CornerWindow> = {
   ht: {
     half: 'ht',
     period: 1,
-    from: 35,
-    to: 45,
+    from: 32,
+    to: 42,
     shortHorizon: 5,
-    label: '1.ª parte · 35–45',
-    shortLabel: 'HT 35–45',
+    label: '1.ª parte · 32–42',
+    shortLabel: 'HT 32–42',
   },
   ft: {
     half: 'ft',
     period: 2,
-    from: 85,
-    to: 90,
+    from: 82,
+    to: 87,
     shortHorizon: 3,
-    label: '2.ª parte · 85–90',
-    shortLabel: 'FT 85–90',
+    label: '2.ª parte · 82–87',
+    shortLabel: 'FT 82–87',
   },
 }
 
@@ -57,8 +57,12 @@ export function cornerHalfOf(
   min: number,
   period: number,
 ): CornerHalf | null {
-  if (period === 1 && min >= 35 && min <= 45) return 'ht'
-  if (period === 2 && min >= 85 && min <= 90) return 'ft'
+  for (const half of CORNER_HALVES) {
+    const window = CORNER_WINDOWS[half]
+    if (period === window.period && min >= window.from && min <= window.to) {
+      return half
+    }
+  }
   return null
 }
 

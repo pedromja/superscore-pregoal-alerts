@@ -1,4 +1,5 @@
 import { marketCopy, parseMarket } from '../lib/market'
+import { CORNER_WINDOWS } from '../lib/windows'
 import { formatRelative, formatSigned, minuteLabel, sideLabel } from '../lib/format'
 import { formatObservationLine } from '../lib/oddsObserve'
 import { alertDomId, feedAlertKey } from '../lib/notifications'
@@ -96,7 +97,7 @@ export function AlertCard({
         <div className="flex flex-wrap justify-end gap-1">
           {alert.cornerHalf ? (
             <span className="rounded-full bg-emerald-800/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-100">
-              {alert.cornerHalf === 'ft' ? 'FT 85–90' : 'HT 35–45'}
+              {CORNER_WINDOWS[alert.cornerHalf].shortLabel}
             </span>
           ) : null}
           <RuleChip rule={alert.rule} coincident={alert.coincident} />

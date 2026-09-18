@@ -32,9 +32,16 @@ export function SettingsPage({
           <h2 className="text-lg font-semibold">Definições das regras · Cantos</h2>
           <p className="mt-1 text-sm text-emerald-100/60">
             HT e FT têm limiares e aprendizagem separados. Ao vivo, o minuto
-            absoluto escolhe a janela: <strong>35–45</strong> (1.ª parte) ou{' '}
-            <strong>85–90</strong> (2.ª parte, o relógio começa em 46). Fora
-            destas janelas não há avaliação, push nem amostras de aprendizagem.
+            absoluto escolhe a janela:{' '}
+            <strong>
+              {CORNER_WINDOWS.ht.from}–{CORNER_WINDOWS.ht.to}
+            </strong>{' '}
+            (1.ª parte) ou{' '}
+            <strong>
+              {CORNER_WINDOWS.ft.from}–{CORNER_WINDOWS.ft.to}
+            </strong>{' '}
+            (2.ª parte, o relógio começa em 46). Fora destas janelas não há
+            avaliação, push nem amostras de aprendizagem.
           </p>
         </section>
         <div className="grid gap-4 xl:grid-cols-2">
@@ -305,9 +312,7 @@ function TrainingAside({
       : TRAINING.coincidence.spike70OnlyAtGoal
   const windowLabel =
     settings.market === 'corners'
-      ? settings.cornerHalf === 'ft'
-        ? 'FT 85–90'
-        : 'HT 35–45'
+      ? CORNER_WINDOWS[settings.cornerHalf === 'ft' ? 'ft' : 'ht'].shortLabel
       : copy.toggle
 
   return (
