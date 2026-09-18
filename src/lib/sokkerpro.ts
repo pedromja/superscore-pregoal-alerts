@@ -14,7 +14,11 @@ import type { CornerHalf, Market } from './types'
 export const SOKKERPRO_SOURCE = 'sokkerpro' as const
 export const SOKKERPRO_SOURCE_LABEL = 'SokkerPro O/U'
 export const SOKKERPRO_BOOK = 'BET365'
+/** Default TTL for a successful mini board (~1 MB). Longer than the 45s poller tick. */
+export const SOKKERPRO_BOARD_CACHE_MS = 90_000
+/** Preodds per fixture. */
 export const SOKKERPRO_CACHE_MS = 45_000
+export const SOKKERPRO_PREODDS_CACHE_MS = SOKKERPRO_CACHE_MS
 
 export type SokkerProFamily = Market
 export type SokkerProSide = 'over' | 'under'

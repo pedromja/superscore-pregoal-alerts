@@ -35,6 +35,7 @@ import {
   settleTipsForMatch,
   tipAlreadyOpen,
 } from './tips.ts'
+import { warmupSokkerProBoard } from './sokkerpro.ts'
 import type { PollerStatus } from './types.ts'
 
 const status: PollerStatus = {
@@ -237,6 +238,7 @@ export async function tick(): Promise<void> {
       .slice(0, 6)
     const targets = [...live.slice(0, 8), ...recentDone]
     status.liveWatched = live.length
+    await warmupSokkerProBoard()
     let sent = 0
     const tickErrors: FixtureTickError[] = []
     for (const fixture of targets) {

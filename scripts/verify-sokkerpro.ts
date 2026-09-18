@@ -242,6 +242,228 @@ const asianPlusSpro = composeOddsObservation({
 check(asianPlusSpro.source === 'mixed', 'asian SS + SPro limit is mixed')
 check(maisUmPriceOf(asianPlusSpro)?.source === 'sokkerpro', 'mais-um from SPro when SS has no over')
 
+const {
+  beginSokkerProTick,
+  fetchSokkerProBoard,
+  loadSokkerProMatchOdds,
+  resetSokkerProStateForTests,
+  setSokkerProFetchForTests,
+  setSokkerProNowForTests,
+  warmupSokkerProBoard,
+} = await import('../server/sokkerpro.ts')
+
+function miniPayload(
+  fixtures: Array<{
+    fixtureId: string | number
+    localTeamName: string
+    visitorTeamName: string
+    status?: string
+  }>,
+) {
+  return {
+    data: {
+      sortedCategorizedFixtures: [{ fixtures }],
+    },
+  }
+}
+
+function jsonRes(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+async function runBoardCacheTests(): Promise<void> {
+  const now = new Date('2026-09-18T15:00:00.000Z')
+  const todayUrl = 'https://m2.sokkerpro.com/home/fixtures/2026-09-18/utc/mini'
+  const yesterdayUrl = 'https://m2.sokkerpro.com/home/fixtures/2026-09-17/utc/mini'
+  const warns: string[] = []
+  const origWarn = console.warn
+  console.warn = (...args: unknown[]) => {
+    warns.push(args.map(String).join(' '))
+  }
+
+  try {
+    resetSokkerProStateForTests()
+    setSokkerProNowForTests(now)
+    const urls: string[] = []
+    let inflightStarted = 0
+    let releaseInflight: (() => void) | null = null
+    const inflightGate = new Promise<void>((resolve) => {
+      releaseInflight = resolve
+    })
+    setSokkerProFetchForTests(async (input) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.includes('/utc/mini')) {
+        inflightStarted += 1
+        await inflightGate
+        return jsonRes(
+          miniPayload([
+            {
+              fixtureId: '4242',
+              localTeamName: 'FC Porto',
+              visitorTeamName: 'SL Benfica',
+              status: '2nd',
+            },
+          ]),
+        )
+      }
+      if (url.includes('/preodds')) {
+        return jsonRes({
+          preodds: [{ created_at: '2026-09-18T12:00:00.000Z', BET365_GOLS_OVER_1_5: '1.90#0' }],
+        })
+      }
+      return jsonRes({ success: false }, 404)
+    })
+
+    const p1 = fetchSokkerProBoard('2026-09-18')
+    const p2 = fetchSokkerProBoard('2026-09-18')
+    check(inflightStarted === 1, `inflight coalesces board fetch, started ${inflightStarted}`)
+    releaseInflight?.()
+    const [a, b] = await Promise.all([p1, p2])
+    check(a?.length === 1 && b?.length === 1, 'inflight callers share the board')
+    await fetchSokkerProBoard('2026-09-18')
+    check(
+      urls.filter((u) => u === todayUrl).length === 1,
+      `cache reuses today mini, got ${urls.filter((u) => u === todayUrl).length}`,
+    )
+
+    resetSokkerProStateForTests()
+    setSokkerProNowForTests(now)
+    urls.length = 0
+    inflightStarted = 0
+    setSokkerProFetchForTests(async (input) => {
+      const url = String(input)
+      urls.push(url)
+      if (url === todayUrl) {
+        return jsonRes(
+          miniPayload([
+            {
+              fixtureId: '4242',
+              localTeamName: 'FC Porto',
+              visitorTeamName: 'SL Benfica',
+              status: '2nd',
+            },
+            {
+              fixtureId: '7',
+              localTeamName: 'Sporting',
+              visitorTeamName: 'Braga',
+              status: '1st',
+            },
+          ]),
+        )
+      }
+      if (url.includes('/preodds')) {
+        return jsonRes({
+          preodds: [{ created_at: '2026-09-18T12:00:00.000Z', BET365_GOLS_OVER_1_5: '1.90#0' }],
+        })
+      }
+      return jsonRes({ success: false }, 404)
+    })
+    await warmupSokkerProBoard()
+    const first = await loadSokkerProMatchOdds('Porto', 'Benfica')
+    const second = await loadSokkerProMatchOdds('Sporting', 'Braga')
+    check(first?.fixture.fixtureId === '4242', 'warmup match Porto')
+    check(second?.fixture.fixtureId === '7', 'warmup match Sporting')
+    check(
+      urls.filter((u) => u.includes('/utc/mini')).length === 1,
+      `one mini for two fixtures, got ${urls.filter((u) => u.includes('/utc/mini')).length}`,
+    )
+    check(
+      urls.filter((u) => u === yesterdayUrl).length === 0,
+      'yesterday skipped when today has the match',
+    )
+    check(
+      urls.filter((u) => u.includes('/preodds')).length === 2,
+      'preodds still per fixture',
+    )
+
+    resetSokkerProStateForTests()
+    setSokkerProNowForTests(now)
+    urls.length = 0
+    warns.length = 0
+    setSokkerProFetchForTests(async (input) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.includes('/utc/mini')) {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+      }
+      return jsonRes({ success: false }, 404)
+    })
+    await warmupSokkerProBoard()
+    await loadSokkerProMatchOdds('Porto', 'Benfica')
+    await loadSokkerProMatchOdds('Sporting', 'Braga')
+    check(
+      urls.filter((u) => u === todayUrl).length === 1,
+      `timeout: today fetched once, got ${urls.filter((u) => u === todayUrl).length}`,
+    )
+    check(
+      urls.filter((u) => u === yesterdayUrl).length === 0,
+      'timeout: do not serial-wait yesterday',
+    )
+    const boardWarns = warns.filter((w) => w.includes('/utc/mini'))
+    check(boardWarns.length === 1, `timeout: one board warn per tick, got ${boardWarns.length}`)
+
+    beginSokkerProTick()
+    await loadSokkerProMatchOdds('Porto', 'Benfica')
+    check(
+      urls.filter((u) => u === todayUrl).length === 2,
+      'next tick retries a failed mini once',
+    )
+    check(
+      warns.filter((w) => w.includes('/utc/mini')).length === 2,
+      'next tick may log the retry once',
+    )
+
+    resetSokkerProStateForTests()
+    setSokkerProNowForTests(now)
+    urls.length = 0
+    setSokkerProFetchForTests(async (input) => {
+      const url = String(input)
+      urls.push(url)
+      if (url === todayUrl) {
+        return jsonRes(
+          miniPayload([
+            {
+              fixtureId: '99',
+              localTeamName: 'Other',
+              visitorTeamName: 'Side',
+              status: 'NS',
+            },
+          ]),
+        )
+      }
+      if (url === yesterdayUrl) {
+        return jsonRes(
+          miniPayload([
+            {
+              fixtureId: '100',
+              localTeamName: 'FC Porto',
+              visitorTeamName: 'SL Benfica',
+              status: 'FT',
+            },
+          ]),
+        )
+      }
+      return jsonRes({ preodds: [] })
+    })
+    const late = await loadSokkerProMatchOdds('Porto', 'Benfica')
+    check(late?.fixture.fixtureId === '100', `yesterday used on name miss, got ${late?.fixture.fixtureId}`)
+    check(
+      urls.filter((u) => u === todayUrl).length === 1 &&
+        urls.filter((u) => u === yesterdayUrl).length === 1,
+      'name miss: today then yesterday, not parallel double-timeout',
+    )
+  } finally {
+    console.warn = origWarn
+    resetSokkerProStateForTests()
+  }
+}
+
+await runBoardCacheTests()
+
 if (fail.length) {
   console.error('FAIL', fail)
   process.exit(1)
