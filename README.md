@@ -89,7 +89,7 @@ npm start         # produção: um processo Node (UI + API + poller) em 0.0.0.0:
 
 ## Web Push (app fechada)
 
-O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras do **mercado activo** e faz `webpush.sendNotification` **sem filtro de odd**. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. Título, corpo e `tag` da notificação identificam o mercado (`pregoal:` vs `precantos:`). Cada alerta inclui o marcador **Golos casa-fora · Cantos casa-fora**.
+O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras do **mercado activo** e faz `webpush.sendNotification` **sem filtro de odd**. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**; a `tag` distingue `pregoal:` vs `precantos:`. A prioridade da regra (Primária / Secundária / Reserva) fica no cartão da app, não no título do push.
 
 ### Gerar VAPID
 

@@ -1,7 +1,6 @@
-import { marketCopy, MARKET_EVENT_TYPE, parseMarket, ruleLabels } from './market'
+import { marketCopy, MARKET_EVENT_TYPE, ruleLabels } from './market'
 import { formatSigned, sideLabel } from './format'
 import { formatObservationLine } from './oddsObserve'
-import { RULE_SHORT } from './rules'
 import type {
   CornerHalf,
   FeedAlert,
@@ -80,10 +79,7 @@ export function talliesLineOf(alert: Pick<FeedAlert, 'goalsTally' | 'cornersTall
 export function alertNotificationCopy(
   alert: FeedAlert,
 ): { title: string; body: string } {
-  const market = parseMarket(alert.market)
-  const copy = marketCopy(market)
-  const rule = RULE_SHORT[alert.rule]
-  const prefix = market === 'goals' ? rule : `${copy.pushPrefix} · ${rule}`
+  const prefix = marketCopy(alert.market).pushPrefix
   const tallies = talliesLineOf(alert)
   const title = tallies ? `${prefix} · ${tallies}` : `${prefix} · ${alert.matchLabel}`
   const oddsLine = formatObservationLine(alert.odds)
