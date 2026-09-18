@@ -1,6 +1,7 @@
-import { marketCopy, pushTagFor } from '../src/lib/market.ts'
-import { evaluateAlerts, extractMarketEvents, RULE_SHORT } from '../src/lib/rules.ts'
-import type { FeedAlert, Fixture, Market } from '../src/lib/types.ts'
+import { pushTagFor } from '../src/lib/market.ts'
+import { evaluateAlerts, extractMarketEvents } from '../src/lib/rules.ts'
+import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
+import type { FeedAlert, Fixture } from '../src/lib/types.ts'
 import {
   POLLER_ENABLED,
   POLLER_INTERVAL_MS,
@@ -35,22 +36,6 @@ export function getPollerStatus(): PollerStatus {
   return { ...status }
 }
 
-function copyFor(
-  alert: FeedAlert,
-  market: Market,
-): { title: string; body: string } {
-  const copy = marketCopy(market)
-  const side = alert.side === 'home' ? 'Casa' : 'Fora'
-  const sign = alert.momentum > 0 ? `+${alert.momentum}` : String(alert.momentum)
-  const rule = RULE_SHORT[alert.rule]
-  const prefix = market === 'goals' ? rule : `${copy.pushPrefix} · ${rule}`
-  const bodyPrefix = market === 'goals' ? '' : `${copy.noun} · `
-  return {
-    title: `${prefix} · ${alert.matchLabel}`,
-    body: `${bodyPrefix}${alert.min}' · ${side} · v ${sign}`,
-  }
-}
-
 async function processFixture(fixture: Fixture): Promise<number> {
   const payload = await fetchMomentumServer(fixture.id)
   const finished = fixture.state === 2 || fixture.status >= 100
@@ -70,14 +55,19 @@ async function processFixture(fixture: Fixture): Promise<number> {
   const first = !isPrimed(primedId)
   if (first) primeFixture(primedId)
 
-  const fresh: FeedAlert[] = alerts.map((alert) => ({
-    ...alert,
-    fixtureId: fixture.id,
-    matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-    firedAt: new Date().toISOString(),
-    coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
-    market,
-  }))
+  const fresh: FeedAlert[] = alerts.map((alert) =>
+    withMatchTallies(
+      {
+        ...alert,
+        fixtureId: fixture.id,
+        matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+        firedAt: new Date().toISOString(),
+        coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+        market,
+      },
+      payload,
+    ),
+  )
 
   if (first) {
     for (const alert of fresh) {
@@ -122,7 +112,7 @@ async function processFixture(fixture: Fixture): Promise<number> {
     const key = sentKey(market, fixture.id, alert.id)
     if (loadSent().includes(key)) continue
     if (!markSent(key)) continue
-    const copy = copyFor(alert, market)
+    const copy = alertNotificationCopy(alert)
     const alertKey = `${fixture.id}:${alert.id}`
     await sendPushToAll({
       title: copy.title,

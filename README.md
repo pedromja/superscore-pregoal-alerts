@@ -41,7 +41,7 @@ npm start         # produção: um processo Node (UI + API + poller) em 0.0.0.0:
 
 ## Web Push (app fechada)
 
-O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras do **mercado activo** e faz `webpush.sendNotification` para as subscriptions guardadas em `data/subscriptions.json`. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. Título, corpo e `tag` da notificação identificam o mercado (`pregoal:` vs `precantos:`).
+O poller no servidor (intervalo default 45s, região `ro`) busca jogos ao vivo, corre as regras do **mercado activo** e faz `webpush.sendNotification` para as subscriptions guardadas em `data/subscriptions.json`. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. Título, corpo e `tag` da notificação identificam o mercado (`pregoal:` vs `precantos:`). Cada alerta (push e cartão na app) inclui o marcador **Golos casa-fora · Cantos casa-fora**, contado a partir dos eventos SuperScore (`type=4` / `type=14`) até ao minuto do disparo.
 
 ### Gerar VAPID
 

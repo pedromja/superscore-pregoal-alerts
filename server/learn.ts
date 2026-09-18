@@ -13,6 +13,7 @@ import {
   extractMarketEvents,
   RULE_SHORT,
 } from '../src/lib/rules.ts'
+import { withMatchTallies } from '../src/lib/tally.ts'
 import type {
   AlertSettings,
   FeedAlert,
@@ -579,14 +580,19 @@ export function seedDemos(market?: Market): { matches: number; alerts: number } 
     }
     saveMatch(match)
     const replay = evaluateReplay(payload, settings)
-    const feed: FeedAlert[] = replay.alerts.map((a) => ({
-      ...a,
-      fixtureId: demo.id,
-      matchLabel: `${demo.team1} vs ${demo.team2}`,
-      firedAt: new Date().toISOString(),
-      coincident: replay.coincidentAlerts.some((c) => c.id === a.id),
-      market: m,
-    }))
+    const feed: FeedAlert[] = replay.alerts.map((a) =>
+      withMatchTallies(
+        {
+          ...a,
+          fixtureId: demo.id,
+          matchLabel: `${demo.team1} vs ${demo.team2}`,
+          firedAt: new Date().toISOString(),
+          coincident: replay.coincidentAlerts.some((c) => c.id === a.id),
+          market: m,
+        },
+        payload,
+      ),
+    )
     ingestFeedAlerts(feed, settings, false, m)
     labelMatch(match, LEARN_WINDOW, m)
     alerts += feed.filter((a) => !a.coincident).length

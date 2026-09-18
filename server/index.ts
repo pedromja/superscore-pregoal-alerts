@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import express from 'express'
-import { marketCopy } from '../src/lib/market.ts'
+import { alertNotificationCopy, sampleFeedAlert } from '../src/lib/tally.ts'
 import type { Market } from '../src/lib/types.ts'
 import {
   LEARN_AUTO_MIN_OUTCOMES,
@@ -88,17 +88,11 @@ app.get('/api/push/status', (_req, res) => {
 
 app.post('/api/push/test', async (req, res) => {
   const market = marketFromReq(req)
-  const copy = marketCopy(market)
-  const rule = 'Primária'
-  const title =
-    market === 'goals'
-      ? `${rule} · Celtic vs Ferencváros`
-      : `${copy.pushPrefix} · ${rule} · Celtic vs Ferencváros`
-  const body =
-    market === 'goals' ? "38' · Fora · v −61" : `${copy.noun} · 38' · Fora · v −61`
+  const sample = sampleFeedAlert(market)
+  const copy = alertNotificationCopy(sample)
   const result = await sendPushToAll({
-    title,
-    body,
+    title: copy.title,
+    body: copy.body,
     url: '/#/monitor?alert=demo-teste%3Aprimary-1-38-0',
     alertKey: 'demo-teste:primary-1-38-0',
     tag: market === 'goals' ? 'pregoal:test' : 'precantos:test',

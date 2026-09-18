@@ -2,6 +2,7 @@ import { marketCopy, parseMarket } from '../lib/market'
 import { formatRelative, formatSigned, minuteLabel, sideLabel } from '../lib/format'
 import { alertDomId, feedAlertKey } from '../lib/notifications'
 import { RULE_SHORT } from '../lib/rules'
+import { talliesLineOf } from '../lib/tally'
 import type { FeedAlert, FiredAlert, Market, Side } from '../lib/types'
 
 function SideChip({ side }: { side: Side }) {
@@ -67,6 +68,7 @@ export function AlertCard({
   onFeedback?: (id: string, vote: 'up' | 'down') => void
 }) {
   const copy = marketCopy(parseMarket(market ?? alert.market))
+  const tallies = talliesLineOf(alert)
   return (
     <article
       id={alertDomId(feedAlertKey(alert))}
@@ -79,6 +81,11 @@ export function AlertCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-emerald-50">{alert.matchLabel}</p>
+          {tallies ? (
+            <p className="mt-0.5 font-mono text-xs font-semibold text-lime">
+              {tallies}
+            </p>
+          ) : null}
           <p className="mt-1 text-xs text-emerald-100/55">
             {minuteLabel(alert.min, alert.period)}
             {alert.firedAt ? ` · ${formatRelative(alert.firedAt, now)}` : null}

@@ -144,10 +144,17 @@ export type DemoMatch = {
   note: string
 }
 
+export type MatchTally = {
+  home: number
+  away: number
+}
+
 export type FeedAlert = FiredAlert & {
   fixtureId: string
   matchLabel: string
   firedAt: string
   coincident: boolean
   market?: Market
+  goalsTally?: MatchTally
+  cornersTally?: MatchTally
 }

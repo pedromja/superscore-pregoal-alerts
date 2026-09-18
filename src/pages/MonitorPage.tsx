@@ -28,6 +28,7 @@ import {
 } from '../lib/notifications'
 import { postAlerts, postFeedback, fetchPollerStatus } from '../lib/learnApi'
 import { evaluateAlerts, extractMarketEvents } from '../lib/rules'
+import { withMatchTallies } from '../lib/tally'
 import type { AlertSettings, FeedAlert, Fixture, MomentumPayload } from '../lib/types'
 
 type Props = {
@@ -160,14 +161,19 @@ export function MonitorPage({
       const key = `${fixture.id}:${alert.id}`
       if (seen.current.has(key)) continue
       seen.current.add(key)
-      fresh.push({
-        ...alert,
-        fixtureId: fixture.id,
-        matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-        firedAt: new Date().toISOString(),
-        coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
-        market,
-      })
+      fresh.push(
+        withMatchTallies(
+          {
+            ...alert,
+            fixtureId: fixture.id,
+            matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+            firedAt: new Date().toISOString(),
+            coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+            market,
+          },
+          data,
+        ),
+      )
     }
     if (firstSnapshot) {
       primed.current.add(fixture.id)
