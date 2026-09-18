@@ -24,7 +24,7 @@ export const MARKET_COPY = {
     title: 'Alertas pré-golo',
     blurb:
       'Momentum de ataque assinado (−100 fora / +100 casa). As regras disparam antes do golo — um spike no minuto do golo é coincidente, não um acerto.',
-    pushPrefix: 'Golos',
+    pushPrefix: 'Golo',
     pushTag: 'pregoal',
   },
   corners: {
@@ -35,7 +35,7 @@ export const MARKET_COPY = {
     title: 'Alertas pré-canto',
     blurb:
       `Momentum de ataque assinado (−100 fora / +100 casa). Cantos só alertam na 1.ª parte aos ${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to} e na 2.ª aos ${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to} (relógio absoluto). Fora destas janelas não há avaliação, push nem aprendizagem. O minuto ao vivo escolhe os parâmetros HT ou FT.`,
-    pushPrefix: 'Cantos',
+    pushPrefix: 'Canto',
     pushTag: 'precantos',
   },
 } as const
