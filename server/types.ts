@@ -27,6 +27,11 @@ export type LoggedAlert = {
   coincident: boolean
   hit: boolean | null
   leadMin: number | null
+  hit5: boolean | null
+  hitLong: boolean | null
+  longDeadline: number | null
+  leadTime5: number | null
+  leadTimeLong: number | null
   labeledAt: string | null
   feedback: 'up' | 'down' | null
   sentPush: boolean
@@ -41,6 +46,10 @@ export type GoalRecord = {
   side: Side
   hadPrealert: boolean | null
   leadMin: number | null
+  hadPrealert5: boolean | null
+  hadPrealertLong: boolean | null
+  leadMin5: number | null
+  leadMinLong: number | null
 }
 
 export type RuleMetrics = {
@@ -55,13 +64,21 @@ export type RuleMetrics = {
   medianLead: number | null
 }
 
+export type DualMetrics = {
+  w5: RuleMetrics
+  wLong: RuleMetrics
+}
+
 export type LearnSummary = {
+  horizonShort: number
+  horizonLongCap: number
   window: number
   matches: number
-  global: RuleMetrics
-  byRule: Record<RuleId, RuleMetrics>
+  global: DualMetrics
+  byRule: Record<RuleId, DualMetrics>
   unlabeled: number
   lastRecalcAt: string | null
+  scoreNote: string
 }
 
 export type ParamVersion = {
@@ -70,8 +87,8 @@ export type ParamVersion = {
   reason: string
   applied: boolean
   settings: AlertSettings
-  before: RuleMetrics
-  after: RuleMetrics
+  before: DualMetrics
+  after: DualMetrics
   score: number
   autoEligible: boolean
   note: string

@@ -1,8 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  goalHadPrealert,
+  HORIZON_LONG_CAP,
+  HORIZON_SHORT,
+  outcomeForAlert,
+} from '../src/lib/horizons.ts'
+import {
   DEFAULT_SETTINGS,
+  evaluateAlerts,
   evaluateReplay,
+  extractGoals,
   RULE_SHORT,
 } from '../src/lib/rules.ts'
 import type {
@@ -29,6 +37,7 @@ import {
   upsertGoals,
 } from './store.ts'
 import type {
+  DualMetrics,
   GoalRecord,
   LearnSummary,
   LoggedAlert,
@@ -79,6 +88,11 @@ export function toLoggedAlert(
     coincident: alert.coincident,
     hit: null,
     leadMin: null,
+    hit5: null,
+    hitLong: null,
+    longDeadline: null,
+    leadTime5: null,
+    leadTimeLong: null,
     labeledAt: null,
     feedback: null,
     sentPush,
@@ -87,46 +101,65 @@ export function toLoggedAlert(
 
 export function labelMatch(match: StoredMatch, window = LEARN_WINDOW): void {
   const settings = currentSettings()
-  const replay = evaluateReplay(match.payload, {
+  const { points, alerts: fired } = evaluateAlerts(match.payload, {
     ...settings,
     evaluationWindow: window,
   })
+  const goals = extractGoals(match.payload, points)
+  const firedLite = fired.map((a) => ({
+    min: a.min,
+    period: a.period,
+    side: a.side,
+    coincident: goals.some(
+      (g) => g.period === a.period && g.min === a.min && g.index === a.index,
+    ),
+  }))
+
   const alerts = loadAlerts().map((alert) => {
     if (alert.fixtureId !== match.fixture.id) return alert
-    if (alert.coincident) {
-      return {
-        ...alert,
-        hit: false,
-        leadMin: 0,
-        labeledAt: alert.labeledAt ?? new Date().toISOString(),
-      }
-    }
-    const goal = replay.goals.find(
-      (g) =>
-        g.side === alert.side &&
-        g.index > alert.index &&
-        g.index - alert.index <= window,
+    const out = outcomeForAlert(
+      {
+        min: alert.minute,
+        period: alert.period,
+        side: alert.side,
+        coincident: alert.coincident,
+      },
+      goals,
+      points,
     )
     return {
       ...alert,
-      hit: Boolean(goal),
-      leadMin: goal ? goal.index - alert.index : null,
+      hit: out.hit5,
+      leadMin: out.leadTime5,
+      hit5: out.hit5,
+      hitLong: out.hitLong,
+      longDeadline: out.longDeadline,
+      leadTime5: out.leadTime5,
+      leadTimeLong: out.leadTimeLong,
       labeledAt: new Date().toISOString(),
     }
   })
   saveAlerts(alerts)
 
-  const goals: GoalRecord[] = replay.perGoal.map((row) => ({
-    fixtureId: match.fixture.id,
-    matchLabel: `${match.fixture.team1} vs ${match.fixture.team2}`,
-    period: row.goal.period,
-    min: row.goal.min,
-    index: row.goal.index,
-    side: row.goal.side,
-    hadPrealert: row.hit,
-    leadMin: row.bestLead,
-  }))
-  upsertGoals(goals)
+  const records: GoalRecord[] = goals.map((goal) => {
+    const short = goalHadPrealert(goal, firedLite, points, 'short')
+    const long = goalHadPrealert(goal, firedLite, points, 'long')
+    return {
+      fixtureId: match.fixture.id,
+      matchLabel: `${match.fixture.team1} vs ${match.fixture.team2}`,
+      period: goal.period,
+      min: goal.min,
+      index: goal.index,
+      side: goal.side,
+      hadPrealert: short.hit,
+      leadMin: short.lead,
+      hadPrealert5: short.hit,
+      hadPrealertLong: long.hit,
+      leadMin5: short.lead,
+      leadMinLong: long.lead,
+    }
+  })
+  upsertGoals(records)
 }
 
 function emptyMetrics(): RuleMetrics {
@@ -143,11 +176,14 @@ function emptyMetrics(): RuleMetrics {
   }
 }
 
-function weightedHit(alert: LoggedAlert): boolean | null {
+function weightedHit(alert: LoggedAlert, field: 'hit5' | 'hitLong'): boolean | null {
   if (alert.feedback === 'up') return true
   if (alert.feedback === 'down') return false
-  return alert.hit
+  return alert[field] ?? alert.hit
 }
+
+const SCORE_NOTE =
+  'Score = 0,4×precisão(≤5 min) + 0,6×precisão(≤15 min ou fim da parte), menos penalização se alertas/jogo > 12. A guarda automática olha para o horizonte longo.'
 
 export function computeMetrics(
   settings: AlertSettings = currentSettings(),
@@ -157,23 +193,24 @@ export function computeMetrics(
   const goals = loadGoals()
   const nMatches = Math.max(1, new Set(matches.map((m) => m.fixture.id)).size)
 
-  function forRule(rule?: RuleId): RuleMetrics {
+  function slice(rule: RuleId | undefined, field: 'hit5' | 'hitLong'): RuleMetrics {
     const subset = rule ? alerts.filter((a) => a.ruleId === rule) : alerts
-    const labeled = subset.filter((a) => weightedHit(a) !== null)
-    const hits = labeled.filter((a) => weightedHit(a) === true).length
-    const ruleGoals = goals
-    const goalsHit = goals.filter((g) => g.hadPrealert).length
+    const labeled = subset.filter((a) => weightedHit(a, field) !== null)
+    const hits = labeled.filter((a) => weightedHit(a, field) === true).length
+    const goalsHit = goals.filter((g) =>
+      field === 'hit5' ? g.hadPrealert5 ?? g.hadPrealert : g.hadPrealertLong,
+    ).length
     const leads = labeled
-      .map((a) => a.leadMin)
+      .map((a) => (field === 'hit5' ? a.leadTime5 ?? a.leadMin : a.leadTimeLong))
       .filter((n): n is number => n !== null && n > 0)
       .sort((a, b) => a - b)
     return {
       precision: labeled.length ? hits / labeled.length : null,
-      recall: ruleGoals.length ? goalsHit / ruleGoals.length : null,
+      recall: goals.length ? goalsHit / goals.length : null,
       alerts: subset.length,
       labeled: labeled.length,
       hits,
-      goals: ruleGoals.length,
+      goals: goals.length,
       goalsHit,
       alertsPerMatch: subset.length / nMatches,
       medianLead: leads.length
@@ -182,83 +219,119 @@ export function computeMetrics(
     }
   }
 
+  function dual(rule?: RuleId): DualMetrics {
+    return { w5: slice(rule, 'hit5'), wLong: slice(rule, 'hitLong') }
+  }
+
   const byRule = {
-    primary: forRule('primary'),
-    secondary: forRule('secondary'),
-    fallback: forRule('fallback'),
+    primary: dual('primary'),
+    secondary: dual('secondary'),
+    fallback: dual('fallback'),
   }
   for (const rule of RULES) {
-    const subsetGoals = matches.flatMap((m) => {
-      const replay = evaluateReplay(m.payload, {
-        ...settings,
-        enablePrimary: rule === 'primary',
-        enableSecondary: rule === 'secondary',
-        enableFallback: rule === 'fallback',
-      })
-      return replay.perGoal
-    })
-    const hit = subsetGoals.filter((g) => g.hit).length
-    byRule[rule].goals = subsetGoals.length
-    byRule[rule].goalsHit = hit
-    byRule[rule].recall = subsetGoals.length ? hit / subsetGoals.length : null
+    const replayed = replayRule(settings, rule)
+    byRule[rule] = replayed
   }
 
   const history = loadHistory()
   return {
-    window: settings.evaluationWindow,
+    horizonShort: HORIZON_SHORT,
+    horizonLongCap: HORIZON_LONG_CAP,
+    window: HORIZON_SHORT,
     matches: matches.length,
-    global: forRule(),
+    global: dual(),
     byRule,
-    unlabeled: alerts.filter((a) => a.hit === null && !a.feedback).length,
+    unlabeled: alerts.filter((a) => a.hit5 === null && a.hit === null && !a.feedback)
+      .length,
     lastRecalcAt: history.at(-1)?.ts ?? null,
+    scoreNote: SCORE_NOTE,
   }
 }
 
-function scoreOf(m: RuleMetrics): number {
-  const precision = m.precision ?? 0
-  const recall = m.recall ?? 0
-  const over = Math.max(0, m.alertsPerMatch - 12)
-  return 0.6 * precision + 0.4 * recall - 0.02 * over
+function scoreOf(m: DualMetrics): number {
+  const over = Math.max(0, m.wLong.alertsPerMatch - 12)
+  return 0.4 * (m.w5.precision ?? 0) + 0.6 * (m.wLong.precision ?? 0) - 0.02 * over
 }
 
-function replayAll(settings: AlertSettings): RuleMetrics {
+function replayRule(settings: AlertSettings, rule?: RuleId): DualMetrics {
+  const scoped: AlertSettings = {
+    ...settings,
+    enablePrimary: rule ? rule === 'primary' : settings.enablePrimary,
+    enableSecondary: rule ? rule === 'secondary' : settings.enableSecondary,
+    enableFallback: rule ? rule === 'fallback' : settings.enableFallback,
+  }
+  return replayAll(scoped)
+}
+
+function replayAll(settings: AlertSettings): DualMetrics {
   const matches = listMatches()
-  if (!matches.length) return emptyMetrics()
-    let alerts = 0
-    let tp = 0
-    let goals = 0
-    let goalsHit = 0
-    const leads: number[] = []
-    for (const match of matches) {
-      const replay = evaluateReplay(match.payload, settings)
-      const usable = replay.alerts.filter(
-        (a) => !replay.coincidentAlerts.some((c) => c.id === a.id),
-      )
-      const hitIds = new Set(
-        replay.perGoal.flatMap((row) => row.preAlerts.map((a) => a.id)),
-      )
-      alerts += usable.length
-      tp += usable.filter((a) => hitIds.has(a.id)).length
-      goals += replay.goals.length
-      goalsHit += replay.goalsHit
-      for (const row of replay.perGoal) {
-        if (row.bestLead) leads.push(row.bestLead)
+  if (!matches.length) return { w5: emptyMetrics(), wLong: emptyMetrics() }
+
+  let alerts = 0
+  let tp5 = 0
+  let tpLong = 0
+  let goals = 0
+  let goalsHit5 = 0
+  let goalsHitLong = 0
+  const leads5: number[] = []
+  const leadsLong: number[] = []
+
+  for (const match of matches) {
+    const { points, alerts: fired } = evaluateAlerts(match.payload, settings)
+    const goalsEv = extractGoals(match.payload, points)
+    const usable = fired.filter(
+      (a) => !goalsEv.some((g) => g.period === a.period && g.min === a.min),
+    )
+    alerts += usable.length
+    goals += goalsEv.length
+    for (const alert of usable) {
+      const out = outcomeForAlert(alert, goalsEv, points)
+      if (out.hit5) {
+        tp5 += 1
+        if (out.leadTime5) leads5.push(out.leadTime5)
+      }
+      if (out.hitLong) {
+        tpLong += 1
+        if (out.leadTimeLong) leadsLong.push(out.leadTimeLong)
       }
     }
-    leads.sort((a, b) => a - b)
-    const n = Math.max(1, matches.length)
-    return {
-      precision: alerts ? tp / alerts : null,
-      recall: goals ? goalsHit / goals : null,
-      alerts,
-      labeled: alerts,
-      hits: tp,
-      goals,
-      goalsHit,
-      alertsPerMatch: alerts / n,
-      medianLead: leads.length ? leads[Math.floor((leads.length - 1) / 2)] : null,
+    const lite = usable.map((a) => ({
+      min: a.min,
+      period: a.period,
+      side: a.side,
+      coincident: false,
+    }))
+    for (const goal of goalsEv) {
+      const s = goalHadPrealert(goal, lite, points, 'short')
+      const l = goalHadPrealert(goal, lite, points, 'long')
+      if (s.hit) goalsHit5 += 1
+      if (l.hit) goalsHitLong += 1
     }
   }
+
+  leads5.sort((a, b) => a - b)
+  leadsLong.sort((a, b) => a - b)
+  const n = Math.max(1, matches.length)
+  const pack = (
+    tp: number,
+    goalsHit: number,
+    leads: number[],
+  ): RuleMetrics => ({
+    precision: alerts ? tp / alerts : null,
+    recall: goals ? goalsHit / goals : null,
+    alerts,
+    labeled: alerts,
+    hits: tp,
+    goals,
+    goalsHit,
+    alertsPerMatch: alerts / n,
+    medianLead: leads.length ? leads[Math.floor((leads.length - 1) / 2)] : null,
+  })
+  return {
+    w5: pack(tp5, goalsHit5, leads5),
+    wLong: pack(tpLong, goalsHitLong, leadsLong),
+  }
+}
 
 function around(center: number, step: number, min: number, max: number): number[] {
   const raw = [center - 2 * step, center - step, center, center + step, center + 2 * step]
@@ -303,8 +376,8 @@ export function recalculate(reason = 'manual'): ParamVersion {
   }
 
   const precisionGain =
-    (best.metrics.precision ?? 0) - (before.precision ?? 0)
-  const recallDrop = (before.recall ?? 0) - (best.metrics.recall ?? 0)
+    (best.metrics.wLong.precision ?? 0) - (before.wLong.precision ?? 0)
+  const recallDrop = (before.wLong.recall ?? 0) - (best.metrics.wLong.recall ?? 0)
   const autoEligible = precisionGain >= 0.01 && recallDrop <= 0.03
   const changed =
     JSON.stringify(snapshotOf(best.settings)) !== JSON.stringify(snapshotOf(base))

@@ -8,6 +8,7 @@
     "dev:web": "vite",
     "dev:api": "tsx watch server/index.ts",
     "start": "tsx server/index.ts",
+    "start:prod": "npm run build && tsx server/index.ts",
     "vapid:generate": "tsx server/vapid-generate.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

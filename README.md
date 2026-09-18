@@ -78,15 +78,39 @@ No Safari “normal” não há Push.
 
 ## Aprendizagem
 
-Cada alerta no servidor: `{id, fixtureId, matchLabel, minute, side, ruleId, features, thresholdsSnapshot, ts}`.
+Cada alerta no servidor: `{id, fixtureId, matchLabel, minute, side, ruleId, features, thresholdsSnapshot, ts, hit5, hitLong, longDeadline, leadTime5, leadTimeLong}`.
 
-Etiqueta automática (jogo terminado ou replay das amostras): `hit=true` se golo do mesmo lado em `(alertMin, alertMin+W]` (W=5). Golos sem pré-alerta = misses (recall).
+Dois horizontes (golo do mesmo lado, estritamente depois do alerta):
 
-**Recalcular** faz uma grelha leve em torno dos defaults (spike 70–90, swing 40–70, sustained 2–5 / 25–40) e maximiza `0.6*precision + 0.4*recall`, com penalização se alertas/jogo > 12.
+| Label na UI | Condição |
+|---|---|
+| **≤5 min** | `hit5` — golo em `(alertMin, alertMin+5]` |
+| **≤15 min ou fim da parte/jogo** | `hitLong` — golo em `(alertMin, min(alertMin+15, fim da parte)]`. 1.ª parte → último minuto period 1 (intervalo). 2.ª parte → último minuto period 2 (FT). Se faltarem mais de 15 min para o fim da parte, o prazo é +15. |
 
-Aplicação automática só se precisão subir ≥1pp e recall não cair >3pp, e houver ≥50 outcomes (`LEARN_AUTO_MIN_OUTCOMES`). Caso contrário a UI pede **Aplicar proposta**. O histórico fica em `data/params_history.json`. Os defaults de treino nunca são substituídos em silêncio.
+Golos sem pré-alerta no horizonte = misses (recall).
+
+**Recalcular** faz uma grelha leve em torno dos defaults (spike 70–90, swing 40–70, sustained 2–5 / 25–40). O score é **0,4×precisão(≤5 min) + 0,6×precisão(longo)**, com penalização se alertas/jogo > 12. A guarda automática (≥1pp precisão sem cair >3pp no recall) usa o **horizonte longo**.
+
+O histórico fica em `data/params_history.json`. Os defaults de treino nunca são substituídos em silêncio.
 
 Na Aprendizagem: **Importar amostras Celtic/Drava** para ter métricas imediatamente.
+
+## URL público / deploy
+
+Neste ambiente Cursor o preview da app é o cartão do agente (`http://127.0.0.1:43173`) — **não** é um hostname público na Internet. Não há Vercel/Origin Host ligado a este repo.
+
+Repo Origin: https://cursor.com/codebase/pedro-andrade/tmp-ca1956a3ac06ace4
+
+Para um link partilhável, faça deploy de um único processo Node após o build:
+
+```bash
+npm run build
+PORT=8080 npm start
+```
+
+O `npm start` serve `dist/` + `/api/*` (Push, aprendizagem, proxy SuperScore) e o poller. Use Railway, Fly.io ou Render com `build = npm run build` e `start = npm start`. Variáveis: as de `.env.example`.
+
+`vercel.json` permite um **front estático** (Replay/UI) se ligarem Vercel ao Origin. Live monitor, Push e Aprendizagem precisam do processo Node — o Vercel estático sozinho não chega.
 
 ## Regras (defaults do treino)
 

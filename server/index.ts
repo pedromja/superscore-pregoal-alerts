@@ -1,6 +1,9 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import express from 'express'
 import {
   LEARN_AUTO_MIN_OUTCOMES,
+  ROOT,
   SERVER_PORT,
   vapid,
 } from './config.ts'
@@ -139,6 +142,48 @@ app.post('/api/learn/seed-demos', (_req, res) => {
 app.get('/api/learn/params', (_req, res) => {
   res.json(currentSettings())
 })
+
+app.use('/api/ss-fixtures', async (req, res) => {
+  try {
+    const url = `https://api.content-prod.superscore.live/v2/public/stats/fixtures${req.url}`
+    const upstream = await fetch(url)
+    res.status(upstream.status)
+    res.setHeader(
+      'content-type',
+      upstream.headers.get('content-type') || 'application/json',
+    )
+    res.send(Buffer.from(await upstream.arrayBuffer()))
+  } catch {
+    res.status(502).json({ error: 'fixtures upstream' })
+  }
+})
+
+app.use('/api/ss-momentum', async (req, res) => {
+  try {
+    const url = `https://scorealarm-stats.freetls.fastly.net/v2/soccer/fixtures/attacking-momentum/superscore/en${req.url}`
+    const upstream = await fetch(url)
+    res.status(upstream.status)
+    res.setHeader(
+      'content-type',
+      upstream.headers.get('content-type') || 'application/json',
+    )
+    res.send(Buffer.from(await upstream.arrayBuffer()))
+  } catch {
+    res.status(502).json({ error: 'momentum upstream' })
+  }
+})
+
+const dist = join(ROOT, 'dist')
+if (existsSync(dist)) {
+  app.use(express.static(dist))
+  app.get(/.*/, (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      next()
+      return
+    }
+    res.sendFile(join(dist, 'index.html'))
+  })
+}
 
 app.listen(SERVER_PORT, '0.0.0.0', () => {
   console.log(`SuperScore API em http://127.0.0.1:${SERVER_PORT}`)

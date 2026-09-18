@@ -5,6 +5,7 @@ import {
   postFeedback,
   recalculateLearn,
   seedLearnDemos,
+  type DualMetrics,
   type LearnPayload,
   type RuleMetrics,
 } from '../lib/learnApi'
@@ -54,11 +55,12 @@ export function LearningPage({ settings, onChange }: Props) {
       <section className="rounded-2xl border border-line bg-panel p-4">
         <h2 className="text-lg font-semibold">Aprendizagem</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
-          O servidor etiqueta cada alerta: acerto se um golo do mesmo lado
-          ocorrer nos {data?.summary.window ?? 5} minutos seguintes (não no
-          minuto do golo). O recálculo procura limiares em torno dos defaults
-          do treino e só aplica sozinho se a precisão subir ≥1pp sem o recall
-          cair mais de 3pp.
+          Dois horizontes por alerta (golo do mesmo lado, nunca no minuto do
+          golo): <strong className="text-emerald-50">≤5 min</strong> e{' '}
+          <strong className="text-emerald-50">≤15 min ou fim da parte/jogo</strong>
+          {' '}(1.ª parte até ao intervalo; 2.ª parte até ao FT).{' '}
+          {data?.summary.scoreNote ??
+            'O score de otimização é 0,4×precisão(≤5 min) + 0,6×precisão(longo).'}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <button
@@ -101,11 +103,13 @@ export function LearningPage({ settings, onChange }: Props) {
         </p>
       ) : (
         <>
-          <div className="grid gap-2 md:grid-cols-4">
-            <Metric title="Global" m={data.summary.global} />
-            <Metric title="Primária" m={data.summary.byRule.primary} />
-            <Metric title="Secundária" m={data.summary.byRule.secondary} />
-            <Metric title="Reserva" m={data.summary.byRule.fallback} />
+          <div className="grid gap-2 lg:grid-cols-2">
+            <HorizonBlock title="≤5 min" dualKey="w5" data={data} />
+            <HorizonBlock
+              title="≤15 min ou fim da parte/jogo"
+              dualKey="wLong"
+              data={data}
+            />
           </div>
           <p className="text-xs text-emerald-100/45">
             {data.summary.matches} jogos no arquivo · {data.summary.unlabeled}{' '}
@@ -121,12 +125,12 @@ export function LearningPage({ settings, onChange }: Props) {
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <Diff
                   label="Antes"
-                  m={proposal.before}
+                  m={asDual(proposal.before)}
                   s={settings}
                 />
                 <Diff
                   label="Depois"
-                  m={proposal.after}
+                  m={asDual(proposal.after)}
                   s={proposal.settings}
                 />
               </div>
@@ -181,9 +185,14 @@ export function LearningPage({ settings, onChange }: Props) {
                       {alert.matchLabel} · {alert.minute}' · {alert.ruleId}
                     </p>
                     <p className="font-mono text-[11px] text-emerald-100/45">
-                      v {alert.features.v} · hit{' '}
-                      {alert.hit === null ? '—' : alert.hit ? 'sim' : 'não'}
-                      {alert.leadMin ? ` · lead ${alert.leadMin}` : ''}
+                      v {alert.features.v} · ≤5 min{' '}
+                      {yn(alert.hit5 ?? alert.hit)}
+                      {alert.leadTime5 ? ` (${alert.leadTime5}')` : ''} · longo{' '}
+                      {yn(alert.hitLong)}
+                      {alert.leadTimeLong ? ` (${alert.leadTimeLong}')` : ''}
+                      {alert.longDeadline != null
+                        ? ` · prazo ${alert.longDeadline}'`
+                        : ''}
                     </p>
                   </div>
                   <div className="flex gap-1">
@@ -242,8 +251,43 @@ export function LearningPage({ settings, onChange }: Props) {
   )
 }
 
+function asDual(m: DualMetrics | RuleMetrics): DualMetrics {
+  if (m && typeof m === 'object' && 'w5' in m) return m
+  const single = m as RuleMetrics
+  return { w5: single, wLong: single }
+}
+
+function yn(v: boolean | null | undefined): string {
+  if (v === null || v === undefined) return '—'
+  return v ? 'sim' : 'não'
+}
+
 function fmt(n: number | null): string {
   return n === null ? '—' : pct(n)
+}
+
+function HorizonBlock({
+  title,
+  dualKey,
+  data,
+}: {
+  title: string
+  dualKey: keyof DualMetrics
+  data: LearnPayload
+}) {
+  return (
+    <div className="space-y-2 rounded-2xl border border-line bg-panel/60 p-3">
+      <p className="text-xs font-semibold tracking-wider text-lime uppercase">
+        {title}
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Metric title="Global" m={data.summary.global[dualKey]} />
+        <Metric title="Primária" m={data.summary.byRule.primary[dualKey]} />
+        <Metric title="Secundária" m={data.summary.byRule.secondary[dualKey]} />
+        <Metric title="Reserva" m={data.summary.byRule.fallback[dualKey]} />
+      </div>
+    </div>
+  )
 }
 
 function Metric({ title, m }: { title: string; m: RuleMetrics }) {
@@ -269,7 +313,7 @@ function Diff({
   s,
 }: {
   label: string
-  m: RuleMetrics
+  m: DualMetrics
   s: AlertSettings
 }) {
   return (
@@ -280,7 +324,11 @@ function Diff({
         sust {s.sustainedThreshold}×{s.sustainedComboMinutes}/{s.sustainedFallbackMinutes}
       </p>
       <p className="mt-1">
-        P {fmt(m.precision)} · R {fmt(m.recall)} · {m.alertsPerMatch.toFixed(1)} alt/jogo
+        ≤5 min P {fmt(m.w5.precision)} · R {fmt(m.w5.recall)}
+      </p>
+      <p>
+        Longo P {fmt(m.wLong.precision)} · R {fmt(m.wLong.recall)} ·{' '}
+        {m.wLong.alertsPerMatch.toFixed(1)} alt/jogo
       </p>
     </div>
   )

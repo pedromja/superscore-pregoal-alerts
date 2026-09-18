@@ -12,13 +12,21 @@ export type RuleMetrics = {
   medianLead: number | null
 }
 
+export type DualMetrics = {
+  w5: RuleMetrics
+  wLong: RuleMetrics
+}
+
 export type LearnSummary = {
+  horizonShort: number
+  horizonLongCap: number
   window: number
   matches: number
-  global: RuleMetrics
-  byRule: Record<RuleId, RuleMetrics>
+  global: DualMetrics
+  byRule: Record<RuleId, DualMetrics>
   unlabeled: number
   lastRecalcAt: string | null
+  scoreNote: string
 }
 
 export type ParamVersion = {
@@ -27,8 +35,8 @@ export type ParamVersion = {
   reason: string
   applied: boolean
   settings: AlertSettings
-  before: RuleMetrics
-  after: RuleMetrics
+  before: DualMetrics
+  after: DualMetrics
   score: number
   autoEligible: boolean
   note: string
@@ -44,7 +52,12 @@ export type LoggedAlert = {
   ruleId: RuleId
   features: { v: number; delta1: number | null; sustained: number }
   hit: boolean | null
+  hit5: boolean | null
+  hitLong: boolean | null
+  longDeadline: number | null
   leadMin: number | null
+  leadTime5: number | null
+  leadTimeLong: number | null
   feedback: 'up' | 'down' | null
   coincident: boolean
   ts: string
