@@ -4,6 +4,7 @@ import {
   goalHadPrealert,
   HORIZON_LONG_CAP,
   HORIZON_SHORT,
+  horizonOptionsForHalf,
   outcomeForAlert,
 } from '../src/lib/horizons.ts'
 import { defaultsFor, parseMarket } from '../src/lib/market.ts'
@@ -16,11 +17,18 @@ import {
 import { withMatchTallies } from '../src/lib/tally.ts'
 import type {
   AlertSettings,
+  CornerHalf,
   FeedAlert,
   Market,
   MomentumPayload,
   RuleId,
 } from '../src/lib/types.ts'
+import {
+  CORNER_HALVES,
+  cornerHalfOf,
+  parseCornerHalf,
+  parseCornerHalfOpt,
+} from '../src/lib/windows.ts'
 import { LEARN_AUTO_MIN_OUTCOMES, LEARN_WINDOW, ROOT } from './config.ts'
 import {
   listMatches,
@@ -54,19 +62,36 @@ export function resolveMarket(value?: unknown): Market {
   return parseMarket(value, loadActiveMarket())
 }
 
-export function currentSettings(market?: Market): AlertSettings {
+export function currentSettings(
+  market?: Market,
+  half?: CornerHalf | null,
+): AlertSettings {
   const m = market ?? loadActiveMarket()
+  if (m !== 'corners') {
+    return {
+      ...defaultsFor('goals'),
+      ...loadParams('goals'),
+      market: 'goals',
+      evaluationWindow: LEARN_WINDOW,
+    }
+  }
+  const h = parseCornerHalf(half)
+  const defaults = defaultsFor('corners', h)
   return {
-    ...defaultsFor(m),
-    ...loadParams(m),
-    market: m,
-    evaluationWindow: LEARN_WINDOW,
+    ...defaults,
+    ...loadParams('corners', h),
+    market: 'corners',
+    cornerHalf: h,
   }
 }
 
 export function snapshotOf(settings: AlertSettings): Partial<AlertSettings> {
   return {
     market: settings.market,
+    cornerHalf: settings.cornerHalf,
+    primaryKind: settings.primaryKind,
+    secondaryKind: settings.secondaryKind,
+    fallbackKind: settings.fallbackKind,
     spikeThreshold: settings.spikeThreshold,
     swingComboThreshold: settings.swingComboThreshold,
     swingSecondaryThreshold: settings.swingSecondaryThreshold,
@@ -74,6 +99,7 @@ export function snapshotOf(settings: AlertSettings): Partial<AlertSettings> {
     sustainedComboMinutes: settings.sustainedComboMinutes,
     sustainedFallbackMinutes: settings.sustainedFallbackMinutes,
     fallbackSpikeThreshold: settings.fallbackSpikeThreshold,
+    fallbackSustainedThreshold: settings.fallbackSustainedThreshold,
     sustainedSecondaryThreshold: settings.sustainedSecondaryThreshold,
     sustainedSecondaryMinutes: settings.sustainedSecondaryMinutes,
     evaluationWindow: settings.evaluationWindow,
@@ -86,6 +112,12 @@ export function toLoggedAlert(
   sentPush = false,
 ): LoggedAlert {
   const market = parseMarket(alert.market ?? settings.market)
+  const half =
+    market === 'corners'
+      ? parseCornerHalf(
+          alert.cornerHalf ?? settings.cornerHalf ?? cornerHalfOf(alert.min, alert.period),
+        )
+      : undefined
   return {
     id: `${alert.fixtureId}:${alert.id}`,
     fixtureId: alert.fixtureId,
@@ -96,6 +128,7 @@ export function toLoggedAlert(
     side: alert.side,
     ruleId: alert.rule,
     market,
+    cornerHalf: half,
     features: {
       v: alert.momentum,
       delta1: alert.delta1,
@@ -121,14 +154,20 @@ export function labelMatch(
   match: StoredMatch,
   window = LEARN_WINDOW,
   market?: Market,
+  half?: CornerHalf | null,
 ): void {
   const m = market ?? loadActiveMarket()
-  const settings = currentSettings(m)
+  if (m === 'corners' && !parseCornerHalfOpt(half)) {
+    for (const h of CORNER_HALVES) labelMatch(match, window, m, h)
+    return
+  }
+  const settings = currentSettings(m, half)
   const { points, alerts: fired } = evaluateAlerts(match.payload, {
     ...settings,
-    evaluationWindow: window,
+    evaluationWindow: settings.evaluationWindow || window,
   })
-  const goals = extractMarketEvents(match.payload, points, m)
+  const goals = extractMarketEvents(match.payload, points, m, settings.cornerHalf)
+  const horizon = horizonOptionsForHalf(settings.cornerHalf)
   const firedLite = fired.map((a) => ({
     min: a.min,
     period: a.period,
@@ -138,7 +177,7 @@ export function labelMatch(
     ),
   }))
 
-  const alerts = loadAlerts(m).map((alert) => {
+  const alerts = loadAlerts(m, settings.cornerHalf).map((alert) => {
     if (alert.fixtureId !== match.fixture.id) return alert
     const out = outcomeForAlert(
       {
@@ -149,10 +188,12 @@ export function labelMatch(
       },
       goals,
       points,
+      horizon,
     )
     return {
       ...alert,
       market: m,
+      cornerHalf: settings.cornerHalf,
       hit: out.hit5,
       leadMin: out.leadTime5,
       hit5: out.hit5,
@@ -163,11 +204,11 @@ export function labelMatch(
       labeledAt: new Date().toISOString(),
     }
   })
-  saveAlerts(alerts, m)
+  saveAlerts(alerts, m, settings.cornerHalf)
 
   const records: GoalRecord[] = goals.map((goal) => {
-    const short = goalHadPrealert(goal, firedLite, points, 'short')
-    const long = goalHadPrealert(goal, firedLite, points, 'long')
+    const short = goalHadPrealert(goal, firedLite, points, 'short', horizon)
+    const long = goalHadPrealert(goal, firedLite, points, 'long', horizon)
     return {
       fixtureId: match.fixture.id,
       matchLabel: `${match.fixture.team1} vs ${match.fixture.team2}`,
@@ -176,6 +217,7 @@ export function labelMatch(
       index: goal.index,
       side: goal.side,
       market: m,
+      cornerHalf: settings.cornerHalf,
       hadPrealert: short.hit,
       leadMin: short.lead,
       hadPrealert5: short.hit,
@@ -184,7 +226,7 @@ export function labelMatch(
       leadMinLong: long.lead,
     }
   })
-  upsertGoals(records, m)
+  upsertGoals(records, m, settings.cornerHalf)
 }
 
 function emptyMetrics(): RuleMetrics {
@@ -207,17 +249,22 @@ function weightedHit(alert: LoggedAlert, field: 'hit5' | 'hitLong'): boolean | n
   return alert[field] ?? alert.hit
 }
 
-const SCORE_NOTE =
-  'Score = 0,4×precisão(≤5 min) + 0,6×precisão(≤15 min ou fim da parte), menos penalização se alertas/jogo > 12 (cantos > 16). A guarda automática olha para o horizonte longo.'
+function scoreNoteFor(settings: AlertSettings): string {
+  const short = settings.evaluationWindow || HORIZON_SHORT
+  const cap = settings.market === 'corners' ? 16 : 12
+  return `Score = 0,4×precisão(≤${short} min) + 0,6×precisão(≤15 min ou fim da janela/parte), menos penalização se alertas/jogo > ${cap}. A guarda automática olha para o horizonte longo.`
+}
 
 export function computeMetrics(
   settings: AlertSettings = currentSettings(),
 ): LearnSummary {
   const market = parseMarket(settings.market)
+  const half = market === 'corners' ? parseCornerHalf(settings.cornerHalf) : undefined
   const matches = listMatches()
-  const alerts = loadAlerts(market).filter((a) => !a.coincident)
-  const goals = loadGoals(market)
+  const alerts = loadAlerts(market, half).filter((a) => !a.coincident)
+  const goals = loadGoals(market, half)
   const nMatches = Math.max(1, new Set(matches.map((m) => m.fixture.id)).size)
+  const horizonShort = settings.evaluationWindow || HORIZON_SHORT
 
   function slice(rule: RuleId | undefined, field: 'hit5' | 'hitLong'): RuleMetrics {
     const subset = rule ? alerts.filter((a) => a.ruleId === rule) : alerts
@@ -255,22 +302,23 @@ export function computeMetrics(
     fallback: dual('fallback'),
   }
   for (const rule of RULES) {
-    const replayed = replayRule(settings, rule)
-    byRule[rule] = replayed
+    byRule[rule] = replayRule(settings, rule)
   }
 
-  const history = loadHistory(market)
+  const history = loadHistory(market, half)
   return {
-    horizonShort: HORIZON_SHORT,
+    market,
+    half,
+    horizonShort,
     horizonLongCap: HORIZON_LONG_CAP,
-    window: HORIZON_SHORT,
+    window: horizonShort,
     matches: matches.length,
     global: dual(),
     byRule,
     unlabeled: alerts.filter((a) => a.hit5 === null && a.hit === null && !a.feedback)
       .length,
     lastRecalcAt: history.at(-1)?.ts ?? null,
-    scoreNote: SCORE_NOTE,
+    scoreNote: scoreNoteFor(settings),
   }
 }
 
@@ -297,6 +345,8 @@ function replayAll(settings: AlertSettings): DualMetrics {
   const matches = listMatches()
   if (!matches.length) return { w5: emptyMetrics(), wLong: emptyMetrics() }
   const market = parseMarket(settings.market)
+  const half = market === 'corners' ? parseCornerHalf(settings.cornerHalf) : undefined
+  const horizon = horizonOptionsForHalf(half)
 
   let alerts = 0
   let tp5 = 0
@@ -309,14 +359,14 @@ function replayAll(settings: AlertSettings): DualMetrics {
 
   for (const match of matches) {
     const { points, alerts: fired } = evaluateAlerts(match.payload, settings)
-    const goalsEv = extractMarketEvents(match.payload, points, market)
+    const goalsEv = extractMarketEvents(match.payload, points, market, half)
     const usable = fired.filter(
       (a) => !goalsEv.some((g) => g.period === a.period && g.min === a.min),
     )
     alerts += usable.length
     goals += goalsEv.length
     for (const alert of usable) {
-      const out = outcomeForAlert(alert, goalsEv, points)
+      const out = outcomeForAlert(alert, goalsEv, points, horizon)
       if (out.hit5) {
         tp5 += 1
         if (out.leadTime5) leads5.push(out.leadTime5)
@@ -333,8 +383,8 @@ function replayAll(settings: AlertSettings): DualMetrics {
       coincident: false,
     }))
     for (const goal of goalsEv) {
-      const s = goalHadPrealert(goal, lite, points, 'short')
-      const l = goalHadPrealert(goal, lite, points, 'long')
+      const s = goalHadPrealert(goal, lite, points, 'short', horizon)
+      const l = goalHadPrealert(goal, lite, points, 'long', horizon)
       if (s.hit) goalsHit5 += 1
       if (l.hit) goalsHitLong += 1
     }
@@ -372,26 +422,57 @@ function around(center: number, step: number, min: number, max: number): number[
 function candidateSettings(base: AlertSettings): AlertSettings[] {
   const out: AlertSettings[] = []
   if (base.market === 'corners') {
-    const spikes = around(base.spikeThreshold, 5, 50, 75)
+    const spikes = around(base.spikeThreshold, 5, 50, 90)
     const swings = around(base.swingComboThreshold, 10, 30, 60)
-    const fbSpike = around(base.fallbackSpikeThreshold, 5, 60, 80)
-    const sustT = around(base.sustainedThreshold, 5, 15, 35)
+    const sustT = around(base.sustainedThreshold, 5, 15, 40)
     const sustN = around(base.sustainedComboMinutes, 1, 2, 5)
-    const sustSecN = around(base.sustainedSecondaryMinutes, 1, 3, 6)
-    for (const spikeThreshold of spikes) {
-      for (const swingComboThreshold of swings) {
-        for (const fallbackSpikeThreshold of fbSpike) {
+    const sustSecT = around(base.sustainedSecondaryThreshold, 5, 15, 40)
+    const sustSecN = around(base.sustainedSecondaryMinutes, 1, 2, 5)
+    const fbSpike = around(base.fallbackSpikeThreshold, 5, 70, 95)
+    const fbSustT = around(base.fallbackSustainedThreshold, 5, 20, 40)
+    const fbSustN = around(base.sustainedFallbackMinutes, 1, 2, 5)
+    const half = parseCornerHalf(base.cornerHalf)
+    if (half === 'ft') {
+      for (const spikeThreshold of spikes) {
+        for (const swingComboThreshold of swings) {
           for (const sustainedThreshold of sustT) {
             for (const sustainedComboMinutes of sustN) {
-              for (const sustainedSecondaryMinutes of sustSecN) {
+              for (const sustainedSecondaryThreshold of sustSecT) {
+                for (const fallbackSpikeThreshold of fbSpike) {
+                  out.push({
+                    ...base,
+                    spikeThreshold,
+                    swingComboThreshold,
+                    sustainedThreshold,
+                    sustainedComboMinutes,
+                    sustainedSecondaryThreshold,
+                    fallbackSpikeThreshold,
+                  })
+                }
+              }
+            }
+          }
+        }
+      }
+      return out
+    }
+    for (const spikeThreshold of spikes) {
+      for (const swingComboThreshold of swings) {
+        for (const sustainedThreshold of sustT) {
+          for (const sustainedComboMinutes of sustN) {
+            for (const sustainedSecondaryMinutes of sustSecN) {
+              for (const fallbackSustainedMinutes of fbSustN) {
                 out.push({
                   ...base,
                   spikeThreshold,
                   swingComboThreshold,
-                  fallbackSpikeThreshold,
                   sustainedThreshold,
                   sustainedComboMinutes,
                   sustainedSecondaryMinutes,
+                  sustainedFallbackMinutes: fallbackSustainedMinutes,
+                  fallbackSustainedThreshold: fbSustT.includes(base.fallbackSustainedThreshold)
+                    ? base.fallbackSustainedThreshold
+                    : base.fallbackSustainedThreshold,
                 })
               }
             }
@@ -422,6 +503,7 @@ function candidateSettings(base: AlertSettings): AlertSettings[] {
                 sustainedThreshold,
                 sustainedComboMinutes,
                 sustainedFallbackMinutes,
+                fallbackSustainedThreshold: sustainedThreshold,
               })
             }
           }
@@ -432,9 +514,16 @@ function candidateSettings(base: AlertSettings): AlertSettings[] {
   return out
 }
 
-export function recalculate(reason = 'manual', market?: Market): ParamVersion {
+export function recalculate(
+  reason = 'manual',
+  market?: Market,
+  half?: CornerHalf | null,
+): ParamVersion {
   const m = market ?? loadActiveMarket()
-  const base = currentSettings(m)
+  if (m === 'corners' && !parseCornerHalfOpt(half)) {
+    throw new Error('Recálculo de cantos exige half=ht ou half=ft')
+  }
+  const base = currentSettings(m, half)
   const before = replayAll(base)
   let best = { settings: base, metrics: before, score: scoreOf(before, m) }
 
@@ -467,16 +556,18 @@ export function recalculate(reason = 'manual', market?: Market): ParamVersion {
         ? 'Precisão sobe ≥1pp sem recall cair >3pp — pode aplicar-se automaticamente.'
         : 'Proposta fora da guarda conservadora: confirme na UI antes de aplicar.',
   }
-  saveProposal(proposal, m)
+  saveProposal(proposal, m, base.cornerHalf)
 
-  const labeled = loadAlerts(m).filter((a) => a.hit !== null || a.feedback).length
+  const labeled = loadAlerts(m, base.cornerHalf).filter(
+    (a) => a.hit !== null || a.feedback,
+  ).length
   if (
     proposal.autoEligible &&
     labeled >= LEARN_AUTO_MIN_OUTCOMES &&
     reason !== 'manual' &&
     reason !== 'seed-demos'
   ) {
-    return applyProposal(proposal.id, 'auto', m)
+    return applyProposal(proposal.id, 'auto', m, base.cornerHalf)
   }
   return proposal
 }
@@ -485,14 +576,16 @@ export function applyProposal(
   id: string,
   reason = 'manual',
   market?: Market,
+  half?: CornerHalf | null,
 ): ParamVersion {
   const m = market ?? loadActiveMarket()
-  const proposal = loadProposal(m)
+  const h = m === 'corners' ? parseCornerHalf(half) : undefined
+  const proposal = loadProposal(m, h)
   if (!proposal || (id !== proposal.id && id !== 'latest')) {
     throw new Error('Proposta inexistente')
   }
-  const prev = currentSettings(m)
-  saveParams({ ...proposal.settings, market: m }, m)
+  const prev = currentSettings(m, h)
+  saveParams({ ...proposal.settings, market: m, cornerHalf: h }, m, h)
   const applied: ParamVersion = {
     ...proposal,
     applied: true,
@@ -500,8 +593,8 @@ export function applyProposal(
     ts: new Date().toISOString(),
     note: `Aplicado (${reason}). Antes spike ${prev.spikeThreshold} → ${proposal.settings.spikeThreshold}.`,
   }
-  saveHistory([...loadHistory(m), applied], m)
-  saveProposal(applied, m)
+  saveHistory([...loadHistory(m, h), applied], m, h)
+  saveProposal(applied, m, h)
   return applied
 }
 
@@ -509,14 +602,27 @@ export function setFeedback(
   alertId: string,
   feedback: 'up' | 'down' | null,
   market?: Market,
+  half?: CornerHalf | null,
 ): LoggedAlert {
   const m = market ?? loadActiveMarket()
-  const alerts = loadAlerts(m)
+  if (m === 'corners' && !parseCornerHalfOpt(half)) {
+    try {
+      return setFeedback(alertId, feedback, m, 'ht')
+    } catch {
+      return setFeedback(alertId, feedback, m, 'ft')
+    }
+  }
+  const h = m === 'corners' ? parseCornerHalf(half) : undefined
+  const alerts = loadAlerts(m, h)
   const idx = alerts.findIndex((a) => a.id === alertId)
   if (idx < 0) throw new Error('Alerta não encontrado')
   alerts[idx] = { ...alerts[idx], feedback }
-  saveAlerts(alerts, m)
+  saveAlerts(alerts, m, h)
   return alerts[idx]
+}
+
+function usableCornerAlert(alert: FeedAlert): boolean {
+  return cornerHalfOf(alert.min, alert.period) !== null
 }
 
 export function ingestFeedAlerts(
@@ -524,17 +630,50 @@ export function ingestFeedAlerts(
   settings: AlertSettings,
   sentPush = false,
   market?: Market,
+  half?: CornerHalf | null,
 ): LoggedAlert[] {
   const m = parseMarket(market ?? settings.market ?? alerts[0]?.market)
-  const logged = alerts
-    .filter((a) => !a.coincident)
-    .map((a) => toLoggedAlert({ ...a, market: m }, settings, sentPush))
-  return upsertAlerts(logged, m)
+  if (m !== 'corners') {
+    const logged = alerts
+      .filter((a) => !a.coincident)
+      .map((a) => toLoggedAlert({ ...a, market: m }, settings, sentPush))
+    return upsertAlerts(logged, m)
+  }
+
+  const forced = parseCornerHalfOpt(half)
+  const stored: LoggedAlert[] = []
+  for (const h of forced ? [forced] : CORNER_HALVES) {
+    const slice = alerts.filter((a) => {
+      if (a.coincident) return false
+      const found = a.cornerHalf ?? cornerHalfOf(a.min, a.period)
+      return found === h
+    })
+    if (!slice.length) continue
+    const halfSettings =
+      settings.cornerHalf === h ? settings : currentSettings('corners', h)
+    const logged = slice.map((a) =>
+      toLoggedAlert(
+        { ...a, market: 'corners', cornerHalf: h },
+        halfSettings,
+        sentPush,
+      ),
+    )
+    stored.push(...upsertAlerts(logged, 'corners', h))
+  }
+  return stored
 }
 
-export function seedDemos(market?: Market): { matches: number; alerts: number } {
+export function seedDemos(
+  market?: Market,
+  half?: CornerHalf | null,
+): { matches: number; alerts: number } {
   const m = market ?? loadActiveMarket()
-  const settings = currentSettings(m)
+  if (m === 'corners' && !parseCornerHalfOpt(half)) {
+    const ht = seedDemos(m, 'ht')
+    const ft = seedDemos(m, 'ft')
+    return { matches: ht.matches, alerts: ht.alerts + ft.alerts }
+  }
+  const settings = currentSettings(m, half)
   const demos = [
     {
       id: 'demo-celtic-ferenc',
@@ -580,21 +719,24 @@ export function seedDemos(market?: Market): { matches: number; alerts: number } 
     }
     saveMatch(match)
     const replay = evaluateReplay(payload, settings)
-    const feed: FeedAlert[] = replay.alerts.map((a) =>
-      withMatchTallies(
-        {
-          ...a,
-          fixtureId: demo.id,
-          matchLabel: `${demo.team1} vs ${demo.team2}`,
-          firedAt: new Date().toISOString(),
-          coincident: replay.coincidentAlerts.some((c) => c.id === a.id),
-          market: m,
-        },
-        payload,
-      ),
-    )
-    ingestFeedAlerts(feed, settings, false, m)
-    labelMatch(match, LEARN_WINDOW, m)
+    const feed: FeedAlert[] = replay.alerts
+      .filter((a) => m !== 'corners' || usableCornerAlert(a))
+      .map((a) =>
+        withMatchTallies(
+          {
+            ...a,
+            fixtureId: demo.id,
+            matchLabel: `${demo.team1} vs ${demo.team2}`,
+            firedAt: new Date().toISOString(),
+            coincident: replay.coincidentAlerts.some((c) => c.id === a.id),
+            market: m,
+            cornerHalf: settings.cornerHalf,
+          },
+          payload,
+        ),
+      )
+    ingestFeedAlerts(feed, settings, false, m, settings.cornerHalf)
+    labelMatch(match, settings.evaluationWindow, m, settings.cornerHalf)
     alerts += feed.filter((a) => !a.coincident).length
   }
   return { matches: demos.length, alerts }

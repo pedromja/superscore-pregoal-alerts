@@ -27,12 +27,20 @@ import {
   showAlertNotification,
 } from '../lib/notifications'
 import { postAlerts, postFeedback, fetchPollerStatus } from '../lib/learnApi'
-import { evaluateAlerts, extractMarketEvents } from '../lib/rules'
+import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../lib/rules'
 import { withMatchTallies } from '../lib/tally'
-import type { AlertSettings, FeedAlert, Fixture, MomentumPayload } from '../lib/types'
+import type {
+  AlertSettings,
+  CornersByHalf,
+  FeedAlert,
+  Fixture,
+  MomentumPayload,
+} from '../lib/types'
+import { CORNER_WINDOWS, cornerHalfOf } from '../lib/windows'
 
 type Props = {
   settings: AlertSettings
+  cornersByHalf: CornersByHalf
   date: string
   onDate: (value: string) => void
   focusAlertKey?: string | null
@@ -43,6 +51,7 @@ const POLL_MS = 12000
 
 export function MonitorPage({
   settings,
+  cornersByHalf,
   date,
   onDate,
   focusAlertKey,
@@ -147,12 +156,14 @@ export function MonitorPage({
     return () => window.clearTimeout(timer)
   }, [focusAlertKey, feed, onFocusConsumed])
 
+  const byHalf = market === 'corners' ? cornersByHalf : undefined
+
   function ingest(
     fixture: Fixture,
     data: MomentumPayload,
     markSelected: boolean,
   ) {
-    const { points, alerts } = evaluateAlerts(data, settings)
+    const { points, alerts } = evaluateAlerts(data, settings, undefined, byHalf)
     const events = extractMarketEvents(data, points, market)
     const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
     const firstSnapshot = !primed.current.has(fixture.id)
@@ -186,7 +197,7 @@ export function MonitorPage({
       if (!firstSnapshot) {
         for (const alert of fresh) {
           if (alert.coincident) continue
-          if (!ruleNotifyEnabled(settings, alert.rule)) continue
+          if (!ruleNotifyEnabled(settingsForAlert(alert, settings, byHalf), alert.rule)) continue
           void showAlertNotification(alert)
         }
       }
@@ -233,7 +244,7 @@ export function MonitorPage({
       cancelled = true
       window.clearInterval(tick)
     }
-  }, [selectedId, watchLive, fixtures, settings])
+  }, [selectedId, watchLive, fixtures, settings, cornersByHalf])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -248,9 +259,20 @@ export function MonitorPage({
 
   const liveCount = fixtures.filter((f) => f.state === 1).length
   const chart = payload
-    ? evaluateAlerts(payload, settings)
+    ? evaluateAlerts(payload, settings, undefined, byHalf)
     : { points: [], alerts: [] }
   const goals = payload ? extractMarketEvents(payload, chart.points, market) : []
+  const clockPoint = chart.points.at(-1)
+  const liveHalf =
+    market === 'corners' && clockPoint
+      ? cornerHalfOf(clockPoint.min, clockPoint.period)
+      : null
+  const liveWindowLabel =
+    market !== 'corners'
+      ? null
+      : liveHalf
+        ? `Parâmetros ${CORNER_WINDOWS[liveHalf].shortLabel}`
+        : 'Fora das janelas HT 35–45 / FT 85–90'
 
   return (
     <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
@@ -408,6 +430,7 @@ export function MonitorPage({
                 </div>
                 <p className="font-mono text-xs text-emerald-100/40">
                   poll {POLL_MS / 1000}s
+                  {liveWindowLabel ? ` · ${liveWindowLabel}` : ''}
                 </p>
               </div>
               <div className="mt-4">
@@ -463,7 +486,10 @@ export function MonitorPage({
             <p className="rounded-2xl border border-dashed border-line px-4 py-10 text-center text-sm text-emerald-100/45">
               Ainda sem disparos. Os alertas aparecem quando Spike, Swing ou
               Sustained cruzam os limiares — sempre com o lado do sinal do
-              momentum. Mercado activo: {copy.toggle}.
+              momentum. Mercado activo: {copy.toggle}
+              {market === 'corners'
+                ? ' · só nas janelas HT 35–45 e FT 85–90.'
+                : '.'}
             </p>
           ) : (
             <div className="grid gap-2">
@@ -476,7 +502,9 @@ export function MonitorPage({
                     market={market}
                     now={now}
                     highlighted={highlightKey === key}
-                    onFeedback={(id, vote) => void postFeedback(id, vote, market)}
+                    onFeedback={(id, vote) =>
+                      void postFeedback(id, vote, market, alert.cornerHalf)
+                    }
                   />
                 )
               })}

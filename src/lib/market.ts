@@ -1,4 +1,12 @@
-import type { AlertSettings, Market, RuleId } from './types'
+import type {
+  AlertSettings,
+  CornerHalf,
+  CornersByHalf,
+  Market,
+  RuleId,
+  RuleKind,
+} from './types'
+import { CORNER_WINDOWS, parseCornerHalf } from './windows'
 
 export const MARKETS: Market[] = ['goals', 'corners']
 
@@ -26,7 +34,7 @@ export const MARKET_COPY = {
     nounCap: 'Canto',
     title: 'Alertas pré-canto',
     blurb:
-      'Momentum de ataque assinado (−100 fora / +100 casa). As regras disparam antes do canto — um spike no minuto do canto é coincidente, não um acerto.',
+      'Momentum de ataque assinado (−100 fora / +100 casa). Cantos só alertam na 1.ª parte aos 35–45 e na 2.ª aos 85–90 (relógio absoluto). Fora destas janelas não há avaliação, push nem aprendizagem. O minuto ao vivo escolhe os parâmetros HT ou FT.',
     pushPrefix: 'Cantos',
     pushTag: 'precantos',
   },
@@ -36,7 +44,6 @@ const SHARED_FLAGS = {
   enablePrimary: true,
   enableSecondary: true,
   enableFallback: true,
-  evaluationWindow: 5,
   notificationsEnabled: true,
   notifyPrimary: true,
   notifySecondary: false,
@@ -44,6 +51,9 @@ const SHARED_FLAGS = {
 } as const
 
 const GOAL_THRESHOLDS = {
+  primaryKind: 'combo' as const,
+  secondaryKind: 'swing' as const,
+  fallbackKind: 'sustainedFallback' as const,
   spikeThreshold: 80,
   swingComboThreshold: 50,
   swingSecondaryThreshold: 60,
@@ -51,21 +61,47 @@ const GOAL_THRESHOLDS = {
   sustainedComboMinutes: 3,
   sustainedFallbackMinutes: 4,
   fallbackSpikeThreshold: 80,
+  fallbackSustainedThreshold: 30,
   sustainedSecondaryThreshold: 30,
   sustainedSecondaryMinutes: 5,
-} as const
+  evaluationWindow: 5,
+}
 
-const CORNER_THRESHOLDS = {
+/** HT 35–45, W=5 — offline retrain 2026-09-18. */
+const CORNER_HT_THRESHOLDS = {
+  primaryKind: 'sustained' as const,
+  secondaryKind: 'combo' as const,
+  fallbackKind: 'sustainedFallback' as const,
   spikeThreshold: 60,
   swingComboThreshold: 40,
   swingSecondaryThreshold: 60,
   sustainedThreshold: 25,
   sustainedComboMinutes: 3,
-  sustainedFallbackMinutes: 5,
+  sustainedFallbackMinutes: 4,
   fallbackSpikeThreshold: 70,
-  sustainedSecondaryThreshold: 20,
-  sustainedSecondaryMinutes: 5,
-} as const
+  fallbackSustainedThreshold: 30,
+  sustainedSecondaryThreshold: 30,
+  sustainedSecondaryMinutes: 2,
+  evaluationWindow: CORNER_WINDOWS.ht.shortHorizon,
+}
+
+/** FT 85–90, W=3 — offline retrain 2026-09-18. */
+const CORNER_FT_THRESHOLDS = {
+  primaryKind: 'combo' as const,
+  secondaryKind: 'sustained' as const,
+  fallbackKind: 'spike' as const,
+  spikeThreshold: 80,
+  swingComboThreshold: 50,
+  swingSecondaryThreshold: 60,
+  sustainedThreshold: 30,
+  sustainedComboMinutes: 3,
+  sustainedFallbackMinutes: 4,
+  fallbackSpikeThreshold: 85,
+  fallbackSustainedThreshold: 30,
+  sustainedSecondaryThreshold: 25,
+  sustainedSecondaryMinutes: 2,
+  evaluationWindow: CORNER_WINDOWS.ft.shortHorizon,
+}
 
 export function isMarket(value: unknown): value is Market {
   return value === 'goals' || value === 'corners'
@@ -75,12 +111,31 @@ export function parseMarket(value: unknown, fallback: Market = 'goals'): Market 
   return isMarket(value) ? value : fallback
 }
 
-export function defaultsFor(market: Market = 'goals'): AlertSettings {
-  const thresholds = market === 'corners' ? CORNER_THRESHOLDS : GOAL_THRESHOLDS
+export function defaultsFor(
+  market: Market = 'goals',
+  half: CornerHalf = 'ht',
+): AlertSettings {
+  if (market === 'corners') {
+    const h = parseCornerHalf(half)
+    const thresholds = h === 'ft' ? CORNER_FT_THRESHOLDS : CORNER_HT_THRESHOLDS
+    return {
+      market: 'corners',
+      cornerHalf: h,
+      ...thresholds,
+      ...SHARED_FLAGS,
+    }
+  }
   return {
-    market,
-    ...thresholds,
+    market: 'goals',
+    ...GOAL_THRESHOLDS,
     ...SHARED_FLAGS,
+  }
+}
+
+export function defaultCornersByHalf(): CornersByHalf {
+  return {
+    ht: defaultsFor('corners', 'ht'),
+    ft: defaultsFor('corners', 'ft'),
   }
 }
 
@@ -92,19 +147,51 @@ export function marketCopy(market: Market = 'goals') {
   return MARKET_COPY[parseMarket(market)]
 }
 
-export function ruleLabels(settings: Pick<AlertSettings, 'market'> & Partial<AlertSettings>): Record<RuleId, string> {
-  const s = { ...defaultsFor(parseMarket(settings.market)), ...settings }
-  if (s.market === 'corners') {
-    return {
-      primary: `Primária · Spike${s.spikeThreshold} ∧ (Swing${s.swingComboThreshold} ∨ Sustained${s.sustainedComboMinutes}@${s.sustainedThreshold})`,
-      secondary: `Secundária · Sustained |v|≥${s.sustainedSecondaryThreshold} ×${s.sustainedSecondaryMinutes}`,
-      fallback: `Reserva · Spike${s.fallbackSpikeThreshold} ∧ (Swing${s.swingComboThreshold} ∨ Sustained${s.sustainedComboMinutes}@${s.sustainedThreshold})`,
-    }
+function kindLabel(kind: RuleKind, s: AlertSettings): string {
+  switch (kind) {
+    case 'combo':
+      return s.market === 'corners'
+        ? `Spike${s.spikeThreshold} ∧ (Swing${s.swingComboThreshold} ∨ Sustained${s.sustainedComboMinutes}@${s.sustainedThreshold})`
+        : `Spike${s.spikeThreshold} ∧ (Swing${s.swingComboThreshold} ∨ Sustained${s.sustainedComboMinutes})`
+    case 'comboFallback':
+      return `Spike${s.fallbackSpikeThreshold} ∧ (Swing${s.swingComboThreshold} ∨ Sustained${s.sustainedComboMinutes}@${s.sustainedThreshold})`
+    case 'sustained':
+      return `Sustained |v|≥${s.sustainedSecondaryThreshold} ×${s.sustainedSecondaryMinutes}`
+    case 'sustainedFallback':
+      return `Sustained |v|≥${s.fallbackSustainedThreshold} ×${s.sustainedFallbackMinutes}`
+    case 'spike':
+      return `Spike |v|≥${s.fallbackSpikeThreshold}`
+    case 'swing':
+      return `Swing |Δ1|≥${s.swingSecondaryThreshold}`
   }
+}
+
+export function kindsOf(settings: Partial<AlertSettings> & Pick<AlertSettings, 'market'> | AlertSettings): {
+  primary: RuleKind
+  secondary: RuleKind
+  fallback: RuleKind
+} {
+  const market = parseMarket(settings.market)
+  const defaults = defaultsFor(market, settings.cornerHalf)
   return {
-    primary: `Primária · Spike${s.spikeThreshold} ∧ (Swing${s.swingComboThreshold} ∨ Sustained${s.sustainedComboMinutes})`,
-    secondary: `Secundária · Swing |Δ1|≥${s.swingSecondaryThreshold}`,
-    fallback: `Reserva · Sustained |v|≥${s.sustainedThreshold} ×${s.sustainedFallbackMinutes}`,
+    primary: settings.primaryKind ?? defaults.primaryKind,
+    secondary: settings.secondaryKind ?? defaults.secondaryKind,
+    fallback: settings.fallbackKind ?? defaults.fallbackKind,
+  }
+}
+
+export function ruleLabels(
+  settings: Pick<AlertSettings, 'market'> & Partial<AlertSettings>,
+): Record<RuleId, string> {
+  const s = {
+    ...defaultsFor(parseMarket(settings.market), settings.cornerHalf),
+    ...settings,
+  }
+  const kinds = kindsOf(s)
+  return {
+    primary: `Primária · ${kindLabel(kinds.primary, s)}`,
+    secondary: `Secundária · ${kindLabel(kinds.secondary, s)}`,
+    fallback: `Reserva · ${kindLabel(kinds.fallback, s)}`,
   }
 }
 
@@ -119,4 +206,17 @@ export function ruleDetails(settings: AlertSettings): Record<RuleId, string> {
 
 export function pushTagFor(market: Market, key: string): string {
   return `${marketCopy(market).pushTag}:${key}`
+}
+
+export function syncNotifyFlags(
+  source: AlertSettings,
+  target: AlertSettings,
+): AlertSettings {
+  return {
+    ...target,
+    notificationsEnabled: source.notificationsEnabled,
+    notifyPrimary: source.notifyPrimary,
+    notifySecondary: source.notifySecondary,
+    notifyFallback: source.notifyFallback,
+  }
 }

@@ -1,7 +1,7 @@
 import { pushTagFor } from '../src/lib/market.ts'
-import { evaluateAlerts, extractMarketEvents } from '../src/lib/rules.ts'
+import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../src/lib/rules.ts'
 import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
-import type { FeedAlert, Fixture } from '../src/lib/types.ts'
+import type { CornersByHalf, FeedAlert, Fixture } from '../src/lib/types.ts'
 import {
   POLLER_ENABLED,
   POLLER_INTERVAL_MS,
@@ -36,6 +36,13 @@ export function getPollerStatus(): PollerStatus {
   return { ...status }
 }
 
+function cornersBundle(): CornersByHalf {
+  return {
+    ht: currentSettings('corners', 'ht'),
+    ft: currentSettings('corners', 'ft'),
+  }
+}
+
 async function processFixture(fixture: Fixture): Promise<number> {
   const payload = await fetchMomentumServer(fixture.id)
   const finished = fixture.state === 2 || fixture.status >= 100
@@ -48,8 +55,14 @@ async function processFixture(fixture: Fixture): Promise<number> {
 
   const market = loadActiveMarket()
   const settings = currentSettings(market)
-  const { points, alerts } = evaluateAlerts(payload, settings)
-  const events = extractMarketEvents(payload, points, market)
+  const byHalf = market === 'corners' ? cornersBundle() : undefined
+  const { points, alerts } = evaluateAlerts(payload, settings, undefined, byHalf)
+  const events = extractMarketEvents(
+    payload,
+    points,
+    market,
+    market === 'corners' ? undefined : settings.cornerHalf,
+  )
   const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
   const primedId = primedKey(market, fixture.id)
   const first = !isPrimed(primedId)
@@ -71,7 +84,7 @@ async function processFixture(fixture: Fixture): Promise<number> {
 
   if (first) {
     for (const alert of fresh) {
-      markSent(sentKey(market, fixture.id, alert.id))
+      markSent(sentKey(market, fixture.id, alert.id, alert.cornerHalf))
     }
     if (finished) {
       ingestFeedAlerts(fresh, settings, false, market)
@@ -106,10 +119,12 @@ async function processFixture(fixture: Fixture): Promise<number> {
   let sent = 0
   for (const alert of fresh) {
     if (alert.coincident) continue
-    if (alert.rule === 'secondary' && !settings.notifySecondary) continue
-    if (alert.rule === 'fallback' && !settings.notifyFallback) continue
-    if (alert.rule === 'primary' && !settings.notifyPrimary) continue
-    const key = sentKey(market, fixture.id, alert.id)
+    const notify = settingsForAlert(alert, settings, byHalf)
+    if (alert.rule === 'secondary' && !notify.notifySecondary) continue
+    if (alert.rule === 'fallback' && !notify.notifyFallback) continue
+    if (alert.rule === 'primary' && !notify.notifyPrimary) continue
+    if (!notify.notificationsEnabled) continue
+    const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     if (loadSent().includes(key)) continue
     if (!markSent(key)) continue
     const copy = alertNotificationCopy(alert)

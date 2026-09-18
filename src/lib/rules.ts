@@ -1,12 +1,15 @@
 import {
   defaultsFor,
   eventTypeFor,
+  kindsOf,
   parseMarket,
   ruleLabels,
 } from './market'
 import type {
   AlertSettings,
   AlertSignals,
+  CornerHalf,
+  CornersByHalf,
   FiredAlert,
   GoalEvent,
   GoalReplay,
@@ -14,12 +17,14 @@ import type {
   MomentumPayload,
   ReplayResult,
   RuleId,
+  RuleKind,
   Side,
   TimelinePoint,
 } from './types'
+import { cornerHalfOf, inCornerWindow } from './windows'
 
 export const DEFAULT_SETTINGS: AlertSettings = defaultsFor('goals')
-export const DEFAULT_CORNER_SETTINGS: AlertSettings = defaultsFor('corners')
+export const DEFAULT_CORNER_SETTINGS: AlertSettings = defaultsFor('corners', 'ht')
 
 export const RULE_LABELS: Record<RuleId, string> = ruleLabels(DEFAULT_SETTINGS)
 
@@ -105,6 +110,11 @@ function signalsAt(
     point.index,
     settings.sustainedSecondaryThreshold,
   )
+  const fallbackSustained = sustainedLengthAt(
+    points,
+    point.index,
+    settings.fallbackSustainedThreshold || settings.sustainedThreshold,
+  )
   return {
     spike: point.absValue >= settings.spikeThreshold,
     swingCombo:
@@ -115,11 +125,53 @@ function signalsAt(
       point.absDelta1 >= settings.swingSecondaryThreshold,
     sustainedCombo: point.sustainedLength >= settings.sustainedComboMinutes,
     sustainedFallback:
-      point.sustainedLength >= settings.sustainedFallbackMinutes,
+      fallbackSustained >= settings.sustainedFallbackMinutes,
     fallbackSpike: point.absValue >= settings.fallbackSpikeThreshold,
     sustainedSecondary:
       secondarySustained >= settings.sustainedSecondaryMinutes,
   }
+}
+
+function kindHits(kind: RuleKind, signals: AlertSignals): boolean {
+  switch (kind) {
+    case 'combo':
+      return signals.spike && (signals.swingCombo || signals.sustainedCombo)
+    case 'comboFallback':
+      return (
+        signals.fallbackSpike && (signals.swingCombo || signals.sustainedCombo)
+      )
+    case 'sustained':
+      return signals.sustainedSecondary
+    case 'sustainedFallback':
+      return signals.sustainedFallback
+    case 'spike':
+      return signals.fallbackSpike
+    case 'swing':
+      return signals.swingSecondary
+  }
+}
+
+function lengthForKind(
+  kind: RuleKind,
+  point: TimelinePoint,
+  settings: AlertSettings,
+  points: TimelinePoint[],
+): number {
+  if (kind === 'sustained') {
+    return sustainedLengthAt(
+      points,
+      point.index,
+      settings.sustainedSecondaryThreshold,
+    )
+  }
+  if (kind === 'sustainedFallback') {
+    return sustainedLengthAt(
+      points,
+      point.index,
+      settings.fallbackSustainedThreshold || settings.sustainedThreshold,
+    )
+  }
+  return point.sustainedLength
 }
 
 export function evaluatePoint(
@@ -128,12 +180,25 @@ export function evaluatePoint(
   points: TimelinePoint[] = [],
 ): FiredAlert[] {
   if (!point.side) return []
+  const market = parseMarket(settings.market)
+  const half = cornerHalfOf(point.min, point.period)
+  if (market === 'corners') {
+    if (!half) return []
+    if (settings.cornerHalf && settings.cornerHalf !== half) return []
+  }
+
   const signals = signalsAt(point, settings, points)
   const alerts: FiredAlert[] = []
   const labels = ruleLabels(settings)
-  const market = parseMarket(settings.market)
+  const kinds = kindsOf(settings)
 
   const push = (rule: RuleId) => {
+    const kind =
+      rule === 'primary'
+        ? kinds.primary
+        : rule === 'secondary'
+          ? kinds.secondary
+          : kinds.fallback
     alerts.push({
       id: `${rule}-${point.period}-${point.min}-${point.index}`,
       rule,
@@ -144,43 +209,26 @@ export function evaluatePoint(
       side: point.side as Side,
       momentum: point.value,
       delta1: point.delta1,
-      sustainedLength: point.sustainedLength,
+      sustainedLength: lengthForKind(kind, point, settings, points),
       signals,
+      cornerHalf: market === 'corners' ? (half ?? undefined) : undefined,
     })
   }
 
-  if (
-    settings.enablePrimary &&
-    signals.spike &&
-    (signals.swingCombo || signals.sustainedCombo)
-  ) {
+  if (settings.enablePrimary && kindHits(kinds.primary, signals)) {
     push('primary')
   }
-
-  if (market === 'corners') {
-    if (settings.enableSecondary && signals.sustainedSecondary) {
-      push('secondary')
-    }
-    if (
-      settings.enableFallback &&
-      signals.fallbackSpike &&
-      (signals.swingCombo || signals.sustainedCombo)
-    ) {
-      push('fallback')
-    }
-  } else {
-    if (settings.enableSecondary && signals.swingSecondary) {
-      push('secondary')
-    }
-    if (settings.enableFallback && signals.sustainedFallback) {
-      push('fallback')
-    }
+  if (settings.enableSecondary && kindHits(kinds.secondary, signals)) {
+    push('secondary')
+  }
+  if (settings.enableFallback && kindHits(kinds.fallback, signals)) {
+    push('fallback')
   }
 
   return alerts
 }
 
-export function evaluateAlerts(
+function evaluateWindowed(
   payload: MomentumPayload,
   settings: AlertSettings,
   upToIndex?: number,
@@ -193,6 +241,48 @@ export function evaluateAlerts(
     alerts.push(...evaluatePoint(point, settings, points))
   }
   return { points, alerts }
+}
+
+function mergeAlerts(groups: FiredAlert[][]): FiredAlert[] {
+  const out: FiredAlert[] = []
+  const seen = new Set<string>()
+  for (const group of groups) {
+    for (const alert of group) {
+      const key = `${alert.cornerHalf ?? ''}:${alert.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(alert)
+    }
+  }
+  return out.sort(
+    (a, b) => a.index - b.index || a.period - b.period || a.min - b.min,
+  )
+}
+
+export function evaluateAlerts(
+  payload: MomentumPayload,
+  settings: AlertSettings,
+  upToIndex?: number,
+  cornersByHalf?: CornersByHalf,
+): { points: TimelinePoint[]; alerts: FiredAlert[] } {
+  const market = parseMarket(settings.market)
+  if (market === 'corners' && cornersByHalf) {
+    const ht = evaluateWindowed(
+      payload,
+      { ...cornersByHalf.ht, market: 'corners', cornerHalf: 'ht' },
+      upToIndex,
+    )
+    const ft = evaluateWindowed(
+      payload,
+      { ...cornersByHalf.ft, market: 'corners', cornerHalf: 'ft' },
+      upToIndex,
+    )
+    return {
+      points: ht.points.length ? ht.points : ft.points,
+      alerts: mergeAlerts([ht.alerts, ft.alerts]),
+    }
+  }
+  return evaluateWindowed(payload, settings, upToIndex)
 }
 
 export function extractEvents(
@@ -209,9 +299,10 @@ export function extractEvents(
       )
       const index =
         exact?.index ??
-        points.findLast((p) =>
-          p.period < event.period ||
-          (p.period === event.period && p.min <= event.min),
+        points.findLast(
+          (p) =>
+            p.period < event.period ||
+            (p.period === event.period && p.min <= event.min),
         )?.index ??
         0
       return { min: event.min, period: event.period, side, index }
@@ -229,16 +320,22 @@ export function extractGoals(
 export function extractCorners(
   payload: MomentumPayload,
   points: TimelinePoint[],
+  half?: CornerHalf | null,
 ): GoalEvent[] {
-  return extractEvents(payload, points, eventTypeFor('corners'))
+  return extractEvents(payload, points, eventTypeFor('corners')).filter((event) =>
+    inCornerWindow(event.min, event.period, half),
+  )
 }
 
 export function extractMarketEvents(
   payload: MomentumPayload,
   points: TimelinePoint[],
   market = parseMarket(undefined),
+  half?: CornerHalf | null,
 ): GoalEvent[] {
-  return extractEvents(payload, points, eventTypeFor(parseMarket(market)))
+  const m = parseMarket(market)
+  if (m === 'corners') return extractCorners(payload, points, half)
+  return extractEvents(payload, points, eventTypeFor(m))
 }
 
 function linkAlert(alert: FiredAlert, goal: GoalEvent): LinkedAlert {
@@ -251,13 +348,35 @@ function linkAlert(alert: FiredAlert, goal: GoalEvent): LinkedAlert {
   }
 }
 
+function windowForAlert(
+  alert: FiredAlert,
+  settings: AlertSettings,
+  cornersByHalf?: CornersByHalf,
+): number {
+  if (alert.cornerHalf === 'ft') {
+    return cornersByHalf?.ft.evaluationWindow ?? settings.evaluationWindow
+  }
+  if (alert.cornerHalf === 'ht') {
+    return cornersByHalf?.ht.evaluationWindow ?? settings.evaluationWindow
+  }
+  return settings.evaluationWindow
+}
+
 export function evaluateReplay(
   payload: MomentumPayload,
   settings: AlertSettings,
+  cornersByHalf?: CornersByHalf,
 ): ReplayResult {
-  const { points, alerts } = evaluateAlerts(payload, settings)
-  const goals = extractMarketEvents(payload, points, settings.market)
-  const window = settings.evaluationWindow
+  const market = parseMarket(settings.market)
+  const { points, alerts } = evaluateAlerts(
+    payload,
+    settings,
+    undefined,
+    market === 'corners' ? cornersByHalf : undefined,
+  )
+  const half =
+    market === 'corners' && !cornersByHalf ? settings.cornerHalf : undefined
+  const goals = extractMarketEvents(payload, points, market, half)
 
   const coincidentAlerts = alerts.filter((alert) =>
     goals.some(
@@ -273,15 +392,22 @@ export function evaluateReplay(
   const perGoal: GoalReplay[] = goals.map((goal, goalNumber) => {
     if (goal.side === 'home') home += 1
     else away += 1
+    const goalHalf = cornerHalfOf(goal.min, goal.period)
 
     const linked = alerts
-      .filter((alert) => alert.side === goal.side)
+      .filter((alert) => {
+        if (alert.side !== goal.side) return false
+        if (market !== 'corners') return true
+        const alertHalf = alert.cornerHalf ?? cornerHalfOf(alert.min, alert.period)
+        return alertHalf === goalHalf
+      })
       .map((alert) => linkAlert(alert, goal))
 
     const coincident = linked.filter((a) => a.coincident)
-    const preAlerts = linked.filter(
-      (a) => a.leadMin >= 1 && a.leadMin <= window,
-    )
+    const preAlerts = linked.filter((a) => {
+      const w = windowForAlert(a, settings, cornersByHalf)
+      return a.leadMin >= 1 && a.leadMin <= w
+    })
     const uniqueLead = [...new Set(preAlerts.map((a) => a.leadMin))]
     const bestLead = uniqueLead.length ? Math.min(...uniqueLead) : null
 
@@ -322,4 +448,15 @@ export function isSameAlertKey(a: FiredAlert, b: FiredAlert): boolean {
     a.min === b.min &&
     a.index === b.index
   )
+}
+
+export function settingsForAlert(
+  alert: Pick<FiredAlert, 'cornerHalf'>,
+  settings: AlertSettings,
+  cornersByHalf?: CornersByHalf,
+): AlertSettings {
+  if (alert.cornerHalf && cornersByHalf) {
+    return cornersByHalf[alert.cornerHalf]
+  }
+  return settings
 }

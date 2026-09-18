@@ -4,14 +4,21 @@ import { MarketToggle } from './components/MarketToggle'
 import { NotificationBar } from './components/NotificationBar'
 import { putActiveMarket } from './lib/learnApi'
 import { lisbonToday } from './lib/format'
-import { marketCopy, parseMarket } from './lib/market'
+import { marketCopy, parseMarket, syncNotifyFlags } from './lib/market'
 import { parseAppHash, registerServiceWorker } from './lib/notifications'
-import { loadSettings, saveSettings } from './lib/settings'
+import {
+  loadCornersByHalf,
+  loadMarket,
+  loadSettings,
+  saveCornersByHalf,
+  saveMarket,
+  saveSettings,
+} from './lib/settings'
 import { LearningPage } from './pages/LearningPage'
 import { MonitorPage } from './pages/MonitorPage'
 import { ReplayPage } from './pages/ReplayPage'
 import { SettingsPage } from './pages/SettingsPage'
-import type { AlertSettings, Market, TabId } from './lib/types'
+import type { AlertSettings, CornersByHalf, Market, TabId } from './lib/types'
 
 const TABS: { id: TabId; label: string; icon: typeof Activity }[] = [
   { id: 'monitor', label: 'Alertas ao vivo', icon: Activity },
@@ -24,13 +31,20 @@ export default function App() {
   const initial = parseAppHash()
   const [tab, setTab] = useState<TabId>(initial.tab)
   const [focusAlertKey, setFocusAlertKey] = useState<string | null>(initial.alertKey)
-  const [settings, setSettings] = useState<AlertSettings>(() => loadSettings())
+  const [market, setMarket] = useState<Market>(() => loadMarket())
+  const [goalsSettings, setGoalsSettings] = useState<AlertSettings>(() =>
+    loadSettings('goals'),
+  )
+  const [cornersByHalf, setCornersByHalf] = useState<CornersByHalf>(() =>
+    loadCornersByHalf(),
+  )
   const [date, setDate] = useState(lisbonToday)
-  const copy = marketCopy(settings.market)
+  const settings = market === 'goals' ? goalsSettings : cornersByHalf.ht
+  const copy = marketCopy(market)
 
   useEffect(() => {
     void registerServiceWorker()
-    void putActiveMarket(parseMarket(settings.market))
+    void putActiveMarket(parseMarket(market))
   }, [])
 
   useEffect(() => {
@@ -56,8 +70,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    saveSettings(settings)
-  }, [settings])
+    saveMarket(market)
+  }, [market])
+
+  useEffect(() => {
+    saveSettings(goalsSettings)
+  }, [goalsSettings])
+
+  useEffect(() => {
+    saveCornersByHalf(cornersByHalf)
+  }, [cornersByHalf])
 
   const onFocusConsumed = useCallback(() => setFocusAlertKey(null), [])
 
@@ -69,10 +91,36 @@ export default function App() {
   }
 
   function switchMarket(next: Market) {
-    if (next === settings.market) return
-    saveSettings(settings)
-    setSettings(loadSettings(next))
+    if (next === market) return
+    setMarket(next)
     void putActiveMarket(next)
+  }
+
+  function onChangeSettings(next: AlertSettings) {
+    if (parseMarket(next.market) === 'corners') {
+      const half = next.cornerHalf === 'ft' ? 'ft' : 'ht'
+      setCornersByHalf((prev) => ({ ...prev, [half]: { ...next, cornerHalf: half } }))
+      return
+    }
+    setGoalsSettings({ ...next, market: 'goals' })
+  }
+
+  function onChangeNotify(next: AlertSettings) {
+    if (market === 'corners') {
+      setCornersByHalf((prev) => ({
+        ht: syncNotifyFlags(next, { ...prev.ht, cornerHalf: 'ht' }),
+        ft: syncNotifyFlags(next, { ...prev.ft, cornerHalf: 'ft' }),
+      }))
+      return
+    }
+    setGoalsSettings({ ...next, market: 'goals' })
+  }
+
+  function onChangeCorners(next: CornersByHalf) {
+    setCornersByHalf({
+      ht: { ...next.ht, market: 'corners', cornerHalf: 'ht' },
+      ft: { ...next.ft, market: 'corners', cornerHalf: 'ft' },
+    })
   }
 
   return (
@@ -86,14 +134,14 @@ export default function App() {
             <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
               {copy.title}
             </h1>
-            <MarketToggle market={settings.market} onChange={switchMarket} />
+            <MarketToggle market={market} onChange={switchMarket} />
           </div>
           <p className="mt-1 max-w-xl text-sm text-emerald-100/60">
             {copy.blurb}
           </p>
         </div>
         <div className="flex flex-col items-start gap-3 md:items-end">
-          <NotificationBar settings={settings} onChange={setSettings} compact />
+          <NotificationBar settings={settings} onChange={onChangeNotify} compact />
           <nav className="flex flex-wrap gap-2">
             {TABS.map((item) => {
               const Icon = item.icon
@@ -121,6 +169,7 @@ export default function App() {
       {tab === 'monitor' ? (
         <MonitorPage
           settings={settings}
+          cornersByHalf={cornersByHalf}
           date={date}
           onDate={setDate}
           focusAlertKey={focusAlertKey}
@@ -128,13 +177,28 @@ export default function App() {
         />
       ) : null}
       {tab === 'replay' ? (
-        <ReplayPage settings={settings} date={date} onDate={setDate} />
+        <ReplayPage
+          settings={settings}
+          cornersByHalf={cornersByHalf}
+          date={date}
+          onDate={setDate}
+        />
       ) : null}
       {tab === 'aprendizagem' ? (
-        <LearningPage settings={settings} onChange={setSettings} />
+        <LearningPage
+          settings={settings}
+          cornersByHalf={cornersByHalf}
+          onChange={onChangeSettings}
+          onChangeCorners={onChangeCorners}
+        />
       ) : null}
       {tab === 'definicoes' ? (
-        <SettingsPage settings={settings} onChange={setSettings} />
+        <SettingsPage
+          settings={settings}
+          cornersByHalf={cornersByHalf}
+          onChange={onChangeNotify}
+          onChangeCorners={onChangeCorners}
+        />
       ) : null}
     </div>
   )

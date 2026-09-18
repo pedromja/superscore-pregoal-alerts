@@ -67,5 +67,11 @@ export const vapid = ensureVapid()
 
 export function pollerSettings(overrides?: Partial<AlertSettings>): AlertSettings {
   const market = overrides?.market ?? 'goals'
-  return { ...defaultsFor(market), ...overrides, evaluationWindow: LEARN_WINDOW }
+  const defaults = defaultsFor(market, overrides?.cornerHalf)
+  return {
+    ...defaults,
+    ...overrides,
+    evaluationWindow:
+      market === 'corners' ? defaults.evaluationWindow : LEARN_WINDOW,
+  }
 }

@@ -1,12 +1,21 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseMarket } from '../src/lib/market.ts'
-import type { AlertSettings, Fixture, Market, MomentumPayload } from '../src/lib/types.ts'
+import type {
+  AlertSettings,
+  CornerHalf,
+  Fixture,
+  Market,
+  MomentumPayload,
+} from '../src/lib/types.ts'
+import { parseCornerHalf, parseCornerHalfOpt } from '../src/lib/windows.ts'
 import { DATA_DIR, MATCHES_DIR } from './config.ts'
 import type { GoalRecord, LoggedAlert, ParamVersion, PushSub, StoredMatch } from './types.ts'
 
+export type LearnScope = 'goals' | 'corners_ht' | 'corners_ft'
+
 const FILES: Record<
-  Market,
+  LearnScope,
   {
     alerts: string
     events: string
@@ -22,13 +31,28 @@ const FILES: Record<
     history: 'params_history.json',
     proposal: 'proposal.json',
   },
-  corners: {
-    alerts: 'alerts_corners.json',
-    events: 'corners.json',
-    params: 'params_corners.json',
-    history: 'params_history_corners.json',
-    proposal: 'proposal_corners.json',
+  corners_ht: {
+    alerts: 'alerts_corners_ht.json',
+    events: 'corners_ht.json',
+    params: 'params_corners_ht.json',
+    history: 'params_history_corners_ht.json',
+    proposal: 'proposal_corners_ht.json',
   },
+  corners_ft: {
+    alerts: 'alerts_corners_ft.json',
+    events: 'corners_ft.json',
+    params: 'params_corners_ft.json',
+    history: 'params_history_corners_ft.json',
+    proposal: 'proposal_corners_ft.json',
+  },
+}
+
+export function learnScope(
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): LearnScope {
+  if (parseMarket(market) !== 'corners') return 'goals'
+  return parseCornerHalf(half) === 'ft' ? 'corners_ft' : 'corners_ht'
 }
 
 function readJson<T>(file: string, fallback: T): T {
@@ -61,20 +85,34 @@ export function saveSubscriptions(items: PushSub[]): void {
   writeJson('subscriptions.json', items)
 }
 
-export function loadAlerts(market: Market = 'goals'): LoggedAlert[] {
-  return readJson(FILES[market].alerts, [])
+export function loadAlerts(
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): LoggedAlert[] {
+  return readJson(FILES[learnScope(market, half)].alerts, [])
 }
 
-export function saveAlerts(items: LoggedAlert[], market: Market = 'goals'): void {
-  writeJson(FILES[market].alerts, items)
+export function saveAlerts(
+  items: LoggedAlert[],
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): void {
+  writeJson(FILES[learnScope(market, half)].alerts, items)
 }
 
-export function loadGoals(market: Market = 'goals'): GoalRecord[] {
-  return readJson(FILES[market].events, [])
+export function loadGoals(
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): GoalRecord[] {
+  return readJson(FILES[learnScope(market, half)].events, [])
 }
 
-export function saveGoals(items: GoalRecord[], market: Market = 'goals'): void {
-  writeJson(FILES[market].events, items)
+export function saveGoals(
+  items: GoalRecord[],
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): void {
+  writeJson(FILES[learnScope(market, half)].events, items)
 }
 
 export function loadSent(): string[] {
@@ -93,28 +131,54 @@ export function savePrimed(items: string[]): void {
   writeJson('primed.json', items)
 }
 
-export function loadParams(market: Market = 'goals'): AlertSettings | null {
-  return readJson<AlertSettings | null>(FILES[market].params, null)
+export function loadParams(
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): AlertSettings | null {
+  return readJson<AlertSettings | null>(FILES[learnScope(market, half)].params, null)
 }
 
-export function saveParams(settings: AlertSettings, market: Market = 'goals'): void {
-  writeJson(FILES[market].params, { ...settings, market })
+export function saveParams(
+  settings: AlertSettings,
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): void {
+  const h = market === 'corners' ? parseCornerHalf(half ?? settings.cornerHalf) : undefined
+  writeJson(FILES[learnScope(market, h)].params, {
+    ...settings,
+    market,
+    cornerHalf: h,
+  })
 }
 
-export function loadHistory(market: Market = 'goals'): ParamVersion[] {
-  return readJson(FILES[market].history, [])
+export function loadHistory(
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): ParamVersion[] {
+  return readJson(FILES[learnScope(market, half)].history, [])
 }
 
-export function saveHistory(items: ParamVersion[], market: Market = 'goals'): void {
-  writeJson(FILES[market].history, items)
+export function saveHistory(
+  items: ParamVersion[],
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): void {
+  writeJson(FILES[learnScope(market, half)].history, items)
 }
 
-export function loadProposal(market: Market = 'goals'): ParamVersion | null {
-  return readJson<ParamVersion | null>(FILES[market].proposal, null)
+export function loadProposal(
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): ParamVersion | null {
+  return readJson<ParamVersion | null>(FILES[learnScope(market, half)].proposal, null)
 }
 
-export function saveProposal(item: ParamVersion | null, market: Market = 'goals'): void {
-  writeJson(FILES[market].proposal, item)
+export function saveProposal(
+  item: ParamVersion | null,
+  market: Market = 'goals',
+  half?: CornerHalf | null,
+): void {
+  writeJson(FILES[learnScope(market, half)].proposal, item)
 }
 
 export function saveMatch(match: StoredMatch): void {
@@ -149,40 +213,61 @@ export function listMatches(): StoredMatch[] {
 export function upsertAlerts(
   incoming: LoggedAlert[],
   market: Market = 'goals',
+  half?: CornerHalf | null,
 ): LoggedAlert[] {
-  const alerts = loadAlerts(market)
+  const h = market === 'corners' ? parseCornerHalf(half) : undefined
+  const alerts = loadAlerts(market, h)
   const byId = new Map(alerts.map((a) => [a.id, a]))
   for (const item of incoming) {
     const prev = byId.get(item.id)
     byId.set(
       item.id,
       prev
-        ? { ...item, ...prev, ...item, feedback: prev.feedback ?? item.feedback, market }
-        : { ...item, market },
+        ? {
+            ...item,
+            ...prev,
+            ...item,
+            feedback: prev.feedback ?? item.feedback,
+            market,
+            cornerHalf: h ?? item.cornerHalf,
+          }
+        : { ...item, market, cornerHalf: h ?? item.cornerHalf },
     )
   }
   const next = [...byId.values()]
-  saveAlerts(next, market)
+  saveAlerts(next, market, h)
   return next
 }
 
 export function upsertGoals(
   incoming: GoalRecord[],
   market: Market = 'goals',
+  half?: CornerHalf | null,
 ): void {
-  const goals = loadGoals(market)
+  const h = market === 'corners' ? parseCornerHalf(half) : undefined
+  const goals = loadGoals(market, h)
   const key = (g: GoalRecord) => `${g.fixtureId}:${g.period}:${g.min}:${g.side}`
   const byId = new Map(goals.map((g) => [key(g), g]))
   for (const item of incoming) {
-    byId.set(key(item), { ...byId.get(key(item)), ...item, market })
+    byId.set(key(item), {
+      ...byId.get(key(item)),
+      ...item,
+      market,
+      cornerHalf: h ?? item.cornerHalf,
+    })
   }
-  saveGoals([...byId.values()], market)
+  saveGoals([...byId.values()], market, h)
 }
 
-export function sentKey(market: Market, fixtureId: string, alertId: string): string {
-  return market === 'goals'
-    ? `${fixtureId}:${alertId}`
-    : `${market}:${fixtureId}:${alertId}`
+export function sentKey(
+  market: Market,
+  fixtureId: string,
+  alertId: string,
+  half?: CornerHalf | null,
+): string {
+  if (market === 'goals') return `${fixtureId}:${alertId}`
+  const h = parseCornerHalfOpt(half)
+  return h ? `corners:${h}:${fixtureId}:${alertId}` : `corners:${fixtureId}:${alertId}`
 }
 
 export function primedKey(market: Market, fixtureId: string): string {

@@ -92,6 +92,11 @@ export function AlertCard({
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-1">
+          {alert.cornerHalf ? (
+            <span className="rounded-full bg-emerald-800/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-100">
+              {alert.cornerHalf === 'ft' ? 'FT 85–90' : 'HT 35–45'}
+            </span>
+          ) : null}
           <RuleChip rule={alert.rule} coincident={alert.coincident} />
           <SideChip side={alert.side} />
         </div>
