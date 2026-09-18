@@ -318,6 +318,7 @@ export function upsertAlerts(
             ...item,
             feedback: prev.feedback ?? item.feedback,
             sentPush: Boolean(prev.sentPush || item.sentPush),
+            odds: item.odds ?? prev.odds,
             market,
             cornerHalf: h ?? item.cornerHalf,
           }
