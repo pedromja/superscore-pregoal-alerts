@@ -14,12 +14,13 @@
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist-server/index.mjs --packages=external --target=node20",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify",
+    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify && npm run test:sokkerpro",
     "test:robobet": "tsx scripts/verify-robobet-parser.ts",
     "test:windows": "tsx scripts/verify-corner-windows.ts",
     "test:overlay": "tsx scripts/verify-tip-overlay.ts",
     "test:poller": "tsx scripts/verify-poller-health.ts",
-    "test:notify": "tsx scripts/verify-notification-copy.ts"
+    "test:notify": "tsx scripts/verify-notification-copy.ts",
+    "test:sokkerpro": "tsx scripts/verify-sokkerpro.ts"
   },
   "engines": {
     "node": ">=20"

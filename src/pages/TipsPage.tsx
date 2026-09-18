@@ -168,7 +168,9 @@ export function TipsPage() {
           dos <span className="font-mono">params*.json</span>. Alertas e Web Push
           disparam pelas regras de sinal (Spike/Swing/Sustained) — a odd{' '}
           <strong>não</strong> os bloqueia. Observamos limite (mais-um / over
-          current±0,5) e asiático quando o SuperScore/Superbet os tem, e gravamos em{' '}
+          current±0,5) e asiático quando o SuperScore/Superbet os tem; se faltar,
+          usamos <strong>SokkerPro O/U</strong> (referência Over/Under pública, não
+          next-goal / next-canto) e por fim RoboBet Odd Ao Vivo. Grava-se em{' '}
           <span className="font-mono">data/odds_observations.json</span>. Tip/ROI
           anexa a odd se existir; sem odd o alerta continua. Regras de odd vêm
           mais tarde via aprendizagem + confirmação. Não se aplica o overlay de
