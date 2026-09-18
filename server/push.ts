@@ -48,7 +48,6 @@ export async function sendPushToAll(payload: {
   const errors: string[] = []
   if (!subs.length) {
     const reason = 'sem subscritores'
-    console.error('[push]', payload.alertKey, reason)
     return { sent: 0, removed: 0, attempted: 0, errors: [reason] }
   }
   let sent = 0

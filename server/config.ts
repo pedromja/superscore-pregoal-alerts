@@ -19,6 +19,22 @@ export const POLLER_REGION =
   process.env.POLLER_REGION || process.env.POLL_REGION || 'ro'
 export const POLLER_INTERVAL_MS = Number(process.env.POLLER_INTERVAL_MS || 45000)
 export const POLLER_ENABLED = process.env.POLLER_ENABLED !== '0'
+/** Live fixtures processed per tick (priority windows first, then a rotating fill). */
+export const POLLER_LIVE_LIMIT = Number(process.env.POLLER_LIVE_LIMIT || 24)
+export const POLLER_FINISHED_LIMIT = Number(process.env.POLLER_FINISHED_LIMIT || 6)
+/** Parallel fixture processors. Store writes still serialize. */
+export const POLLER_CONCURRENCY = Number(process.env.POLLER_CONCURRENCY || 5)
+/** One hung momentum fetch cannot freeze the rest of the tick. */
+export const POLLER_FIXTURE_TIMEOUT_MS = Number(
+  process.env.POLLER_FIXTURE_TIMEOUT_MS || 12_000,
+)
+/** If a tick never returns, clear inFlight so the next interval can run. */
+export const POLLER_TICK_WATCHDOG_MS = Number(
+  process.env.POLLER_TICK_WATCHDOG_MS || 80_000,
+)
+export const POLLER_JSON_BACKOFF_MAX_MS = Number(
+  process.env.POLLER_JSON_BACKOFF_MAX_MS || 10 * 60 * 1000,
+)
 /** Public SokkerPro O/U odds. Default ON; set `SOKKERPRO_ODDS=0` to disable. Soft-fail. */
 export const SOKKERPRO_ODDS = process.env.SOKKERPRO_ODDS !== '0'
 export const LEARN_WINDOW = Number(process.env.LEARN_WINDOW || 5)
