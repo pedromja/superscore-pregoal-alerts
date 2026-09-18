@@ -1,5 +1,6 @@
 import type {
   AlertSettings,
+  CornerHalf,
   Fixture,
   Market,
   MomentumPayload,
@@ -23,6 +24,7 @@ export type LoggedAlert = {
   side: Side
   ruleId: RuleId
   market?: Market
+  cornerHalf?: CornerHalf
   features: { v: number; delta1: number | null; sustained: number }
   thresholdsSnapshot: Partial<AlertSettings>
   ts: string
@@ -47,6 +49,7 @@ export type GoalRecord = {
   index: number
   side: Side
   market?: Market
+  cornerHalf?: CornerHalf
   hadPrealert: boolean | null
   leadMin: number | null
   hadPrealert5: boolean | null
@@ -73,6 +76,8 @@ export type DualMetrics = {
 }
 
 export type LearnSummary = {
+  market?: Market
+  half?: CornerHalf
   horizonShort: number
   horizonLongCap: number
   window: number

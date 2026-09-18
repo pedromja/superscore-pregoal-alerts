@@ -5,7 +5,7 @@ Painel web (PT-PT) que lê o **attacking momentum** SuperScore e dispara alertas
 O mercado activo escolhe-se no cabeçalho: **Golos | Cantos**. Golos é o default; cantos usam limiares treinados à parte e ficheiros de aprendizagem separados.
 
 Treino de referência (golos): 100 jogos, 737 golos (2026-09-08 → 2026-09-17, Europe/Lisbon).
-Treino de cantos: 95 jogos, 873 cantos (`type=14`), mesmas datas.
+Treino de cantos (janelas): 95 jogos, HT 89 cantos (35–45) e FT 52 cantos (85–90), mesmas datas. Fora destas janelas a app de cantos não avalia, não envia push e não grava amostras.
 
 ## Como correr
 
@@ -96,7 +96,7 @@ Golos sem pré-alerta no horizonte = misses (recall).
 
 **Recalcular** faz uma grelha leve em torno dos defaults (spike 70–90, swing 40–70, sustained 2–5 / 25–40). O score é **0,4×precisão(≤5 min) + 0,6×precisão(longo)**, com penalização se alertas/jogo > 12. A guarda automática (≥1pp precisão sem cair >3pp no recall) usa o **horizonte longo**.
 
-O histórico fica em `data/params_history.json` (golos) e `data/params_history_corners.json` (cantos). Os defaults de treino nunca são substituídos em silêncio. Alertas, eventos e parâmetros nunca se misturam entre mercados.
+O histórico fica em `data/params_history.json` (golos), `data/params_history_corners_ht.json` e `data/params_history_corners_ft.json`. Os defaults de treino nunca são substituídos em silêncio. Alertas, eventos e parâmetros nunca se misturam entre mercados nem entre HT e FT.
 
 Na Aprendizagem: **Importar amostras Celtic/Drava** para ter métricas imediatamente (no mercado activo).
 
@@ -172,15 +172,20 @@ Depois `curl -s http://127.0.0.1:8080/api/push/status`.
 
 Avaliação estrita `alert_minute < goal_minute`. Spike70 sozinho não é regra.
 
-### Cantos (`type=14`)
+### Cantos (`type=14`) — só janelas HT 35–45 / FT 85–90
 
-| Regra | Condição |
-|---|---|
-| **Primária** | `\|v\| ≥ 60` **e** (`\|Δ1\| ≥ 40` **ou** `\|v\| ≥ 25` × 3 min, mesmo lado) |
-| **Secundária** | `\|v\| ≥ 20` × 5 min, mesmo lado |
-| **Reserva** | `\|v\| ≥ 70` **e** (`\|Δ1\| ≥ 40` **ou** `\|v\| ≥ 25` × 3 min, mesmo lado) |
+`min` é o relógio absoluto do jogo em ambas as partes (a 2.ª começa em 46). Prolongamento (P1>45 / P2>90) fica fora das janelas.
 
-Não se reutiliza Spike80∧(Swing50∨Sustained3@30) para cantos. Avaliação estrita `alert_minute < corner_minute`.
+O minuto ao vivo escolhe o conjunto de parâmetros: 35–45 → HT; 85–90 → FT. Definições mostra as duas metades.
+
+| Janela | W | Primária | Secundária | Reserva |
+|---|---|---|---|---|
+| **HT 35–45** | 5 | Sustained \|v\|≥30 ×2 | Spike60 ∧ (Swing40 ∨ Sustained3@25) | Sustained \|v\|≥30 ×4 |
+| **FT 85–90** | 3 | Spike80 ∧ (Swing50 ∨ Sustained3@30) | Sustained \|v\|≥25 ×2 | Spike \|v\|≥85 |
+
+Aprendizagem: `alerts_corners_ht.json` / `alerts_corners_ft.json` (e params/history/proposal equivalentes). HIT exige `alert_minute < corner_minute` **e** canto na mesma janela. O horizonte curto do FT é 3 min (`hit5` na API continua a ser o horizonte curto).
+
+Golos não mudam.
 
 ## APIs SuperScore
 

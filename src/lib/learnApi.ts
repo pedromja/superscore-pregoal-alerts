@@ -1,4 +1,11 @@
-import type { AlertSettings, FeedAlert, Market, RuleId, Side } from './types'
+import type {
+  AlertSettings,
+  CornerHalf,
+  FeedAlert,
+  Market,
+  RuleId,
+  Side,
+} from './types'
 
 export type RuleMetrics = {
   precision: number | null
@@ -18,6 +25,8 @@ export type DualMetrics = {
 }
 
 export type LearnSummary = {
+  market?: Market
+  half?: CornerHalf
   horizonShort: number
   horizonLongCap: number
   window: number
@@ -51,6 +60,7 @@ export type LoggedAlert = {
   side: Side
   ruleId: RuleId
   market?: Market
+  cornerHalf?: CornerHalf
   features: { v: number; delta1: number | null; sustained: number }
   hit: boolean | null
   hit5: boolean | null
@@ -66,6 +76,7 @@ export type LoggedAlert = {
 
 export type LearnPayload = {
   market?: Market
+  half?: CornerHalf
   summary: LearnSummary
   settings: AlertSettings
   proposal: ParamVersion | null
@@ -74,25 +85,49 @@ export type LearnPayload = {
   autoAfter: number
 }
 
-function withMarket(path: string, market?: Market): string {
-  if (!market) return path
-  const sep = path.includes('?') ? '&' : '?'
-  return `${path}${sep}market=${encodeURIComponent(market)}`
+export type LearnCornersPayload = {
+  market: 'corners'
+  ht: LearnPayload
+  ft: LearnPayload
 }
 
-export async function fetchLearn(market?: Market): Promise<LearnPayload> {
-  const res = await fetch(withMarket('/api/learn/summary', market))
+function withQuery(
+  path: string,
+  params: { market?: Market; half?: CornerHalf },
+): string {
+  const search = new URLSearchParams()
+  if (params.market) search.set('market', params.market)
+  if (params.half) search.set('half', params.half)
+  const q = search.toString()
+  if (!q) return path
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}${q}`
+}
+
+export function isCornersLearn(
+  data: LearnPayload | LearnCornersPayload,
+): data is LearnCornersPayload {
+  return 'ht' in data && 'ft' in data
+}
+
+export async function fetchLearn(
+  market?: Market,
+  half?: CornerHalf,
+): Promise<LearnPayload | LearnCornersPayload> {
+  const res = await fetch(withQuery('/api/learn/summary', { market, half }))
   if (!res.ok) throw new Error('API de aprendizagem indisponível')
-  return (await res.json()) as LearnPayload
+  return (await res.json()) as LearnPayload | LearnCornersPayload
 }
 
 export async function postAlerts(
   alerts: FeedAlert[],
   market?: Market,
+  half?: CornerHalf,
 ): Promise<void> {
   if (!alerts.length) return
   const m = market ?? alerts[0]?.market
-  await fetch(withMarket('/api/learn/alerts', m), {
+  const h = half ?? alerts[0]?.cornerHalf
+  await fetch(withQuery('/api/learn/alerts', { market: m, half: h }), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(alerts),
@@ -103,20 +138,24 @@ export async function postFeedback(
   id: string,
   feedback: 'up' | 'down' | null,
   market?: Market,
+  half?: CornerHalf,
 ): Promise<void> {
-  const res = await fetch(withMarket('/api/learn/feedback', market), {
+  const res = await fetch(withQuery('/api/learn/feedback', { market, half }), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, feedback, market }),
+    body: JSON.stringify({ id, feedback, market, half }),
   })
   if (!res.ok) throw new Error('Feedback não gravado')
 }
 
-export async function recalculateLearn(market?: Market): Promise<ParamVersion> {
-  const res = await fetch(withMarket('/api/learn/recalculate', market), {
+export async function recalculateLearn(
+  market?: Market,
+  half?: CornerHalf,
+): Promise<ParamVersion> {
+  const res = await fetch(withQuery('/api/learn/recalculate', { market, half }), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason: 'manual', market }),
+    body: JSON.stringify({ reason: 'manual', market, half }),
   })
   if (!res.ok) throw new Error('Recálculo falhou')
   return (await res.json()) as ParamVersion
@@ -125,21 +164,25 @@ export async function recalculateLearn(market?: Market): Promise<ParamVersion> {
 export async function applyLearnProposal(
   id: string,
   market?: Market,
+  half?: CornerHalf,
 ): Promise<ParamVersion> {
-  const res = await fetch(withMarket('/api/learn/apply', market), {
+  const res = await fetch(withQuery('/api/learn/apply', { market, half }), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, market }),
+    body: JSON.stringify({ id, market, half }),
   })
   if (!res.ok) throw new Error('Não foi possível aplicar')
   return (await res.json()) as ParamVersion
 }
 
-export async function seedLearnDemos(market?: Market): Promise<void> {
-  const res = await fetch(withMarket('/api/learn/seed-demos', market), {
+export async function seedLearnDemos(
+  market?: Market,
+  half?: CornerHalf,
+): Promise<void> {
+  const res = await fetch(withQuery('/api/learn/seed-demos', { market, half }), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ market }),
+    body: JSON.stringify({ market, half }),
   })
   if (!res.ok) throw new Error('Falha a importar amostras')
 }

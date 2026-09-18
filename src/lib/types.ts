@@ -2,9 +2,21 @@ export type Side = 'home' | 'away'
 export type RuleId = 'primary' | 'secondary' | 'fallback'
 export type TabId = 'monitor' | 'replay' | 'definicoes' | 'aprendizagem'
 export type Market = 'goals' | 'corners'
+export type CornerHalf = 'ht' | 'ft'
+export type RuleKind =
+  | 'combo'
+  | 'comboFallback'
+  | 'sustained'
+  | 'sustainedFallback'
+  | 'spike'
+  | 'swing'
 
 export type AlertSettings = {
   market: Market
+  cornerHalf?: CornerHalf
+  primaryKind: RuleKind
+  secondaryKind: RuleKind
+  fallbackKind: RuleKind
   spikeThreshold: number
   swingComboThreshold: number
   swingSecondaryThreshold: number
@@ -12,6 +24,7 @@ export type AlertSettings = {
   sustainedComboMinutes: number
   sustainedFallbackMinutes: number
   fallbackSpikeThreshold: number
+  fallbackSustainedThreshold: number
   sustainedSecondaryThreshold: number
   sustainedSecondaryMinutes: number
   enablePrimary: boolean
@@ -22,6 +35,11 @@ export type AlertSettings = {
   notifyPrimary: boolean
   notifySecondary: boolean
   notifyFallback: boolean
+}
+
+export type CornersByHalf = {
+  ht: AlertSettings
+  ft: AlertSettings
 }
 
 export type RawTimelineRow = {
@@ -79,6 +97,7 @@ export type FiredAlert = {
   delta1: number | null
   sustainedLength: number
   signals: AlertSignals
+  cornerHalf?: CornerHalf
 }
 
 export type GoalEvent = {
@@ -155,6 +174,7 @@ export type FeedAlert = FiredAlert & {
   firedAt: string
   coincident: boolean
   market?: Market
+  cornerHalf?: CornerHalf
   goalsTally?: MatchTally
   cornersTally?: MatchTally
 }

@@ -1,7 +1,8 @@
-import { marketCopy, MARKET_EVENT_TYPE, parseMarket } from './market'
+import { marketCopy, MARKET_EVENT_TYPE, parseMarket, ruleLabels } from './market'
 import { formatSigned, sideLabel } from './format'
 import { RULE_SHORT } from './rules'
 import type {
+  CornerHalf,
   FeedAlert,
   Market,
   MatchTally,
@@ -93,7 +94,11 @@ export function alertNotificationCopy(
   return { title, body: bodyBits.join(' · ') }
 }
 
-export function sampleFeedAlert(market: Market = 'goals'): FeedAlert {
+export function sampleFeedAlert(
+  market: Market = 'goals',
+  half: CornerHalf = 'ht',
+): FeedAlert {
+  const labels = ruleLabels({ market, cornerHalf: market === 'corners' ? half : undefined })
   return {
     id: 'primary-1-38-0',
     fixtureId: 'demo-teste',
@@ -101,13 +106,11 @@ export function sampleFeedAlert(market: Market = 'goals'): FeedAlert {
     firedAt: new Date().toISOString(),
     coincident: false,
     market,
+    cornerHalf: market === 'corners' ? half : undefined,
     goalsTally: { home: 1, away: 0 },
     cornersTally: { home: 3, away: 2 },
     rule: 'primary',
-    ruleName:
-      market === 'corners'
-        ? 'Primária · Spike60 ∧ (Swing40 ∨ Sustained3@25)'
-        : 'Primária · Spike80 ∧ (Swing50 ∨ Sustained3)',
+    ruleName: labels.primary,
     min: 38,
     period: 1,
     index: 0,

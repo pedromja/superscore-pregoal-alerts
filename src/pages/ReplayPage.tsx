@@ -14,19 +14,24 @@ import { marketCopy, parseMarket } from '../lib/market'
 import { evaluateAlerts, evaluateReplay, RULE_SHORT } from '../lib/rules'
 import type {
   AlertSettings,
+  CornersByHalf,
   DemoMatch,
   Fixture,
   MomentumPayload,
 } from '../lib/types'
+import { CORNER_WINDOWS } from '../lib/windows'
 
 type Props = {
   settings: AlertSettings
+  cornersByHalf: CornersByHalf
   date: string
   onDate: (value: string) => void
 }
 
-export function ReplayPage({ settings, date, onDate }: Props) {
-  const copy = marketCopy(parseMarket(settings.market))
+export function ReplayPage({ settings, cornersByHalf, date, onDate }: Props) {
+  const market = parseMarket(settings.market)
+  const copy = marketCopy(market)
+  const byHalf = market === 'corners' ? cornersByHalf : undefined
   const [fixtureId, setFixtureId] = useState('')
   const [fixtures, setFixtures] = useState<Fixture[]>([])
   const [listError, setListError] = useState<string | null>(null)
@@ -102,15 +107,15 @@ export function ReplayPage({ settings, date, onDate }: Props) {
   }, [date])
 
   const full = useMemo(
-    () => (payload ? evaluateReplay(payload, settings) : null),
-    [payload, settings],
+    () => (payload ? evaluateReplay(payload, settings, byHalf) : null),
+    [payload, settings, byHalf],
   )
 
   const liveSlice = useMemo(() => {
     if (!payload || cursor === null) return full
-    const { points, alerts } = evaluateAlerts(payload, settings, cursor)
+    const { points, alerts } = evaluateAlerts(payload, settings, cursor, byHalf)
     return { ...full!, points, alerts }
-  }, [payload, settings, cursor, full])
+  }, [payload, settings, cursor, full, byHalf])
 
   useEffect(() => {
     if (!playing || !full) return
@@ -139,8 +144,10 @@ export function ReplayPage({ settings, date, onDate }: Props) {
           {copy.noun} é coincidente — não entra como sucesso. Só conta{' '}
           <span className="text-emerald-50">
             alert_minute &lt; {copy.noun}_minute
-          </span>{' '}
-          na janela de {settings.evaluationWindow} min.
+          </span>
+          {market === 'corners'
+            ? ` nas janelas ${CORNER_WINDOWS.ht.shortLabel} (W=${CORNER_WINDOWS.ht.shortHorizon}) e ${CORNER_WINDOWS.ft.shortLabel} (W=${CORNER_WINDOWS.ft.shortHorizon}).`
+            : ` na janela de ${settings.evaluationWindow} min.`}
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">

@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import express from 'express'
 import { alertNotificationCopy, sampleFeedAlert } from '../src/lib/tally.ts'
-import type { Market } from '../src/lib/types.ts'
+import type { CornerHalf, Market } from '../src/lib/types.ts'
+import { parseCornerHalfOpt } from '../src/lib/windows.ts'
 import {
   LEARN_AUTO_MIN_OUTCOMES,
   ROOT,
@@ -48,6 +49,29 @@ function marketFromReq(req: express.Request): Market {
   return resolveMarket(typeof q === 'string' ? q : bodyMarket)
 }
 
+function halfFromReq(req: express.Request): CornerHalf | undefined {
+  const q = req.query.half
+  const bodyHalf =
+    req.body && typeof req.body === 'object' && 'half' in req.body
+      ? (req.body as { half?: unknown }).half
+      : undefined
+  return parseCornerHalfOpt(typeof q === 'string' ? q : bodyHalf)
+}
+
+function learnPayload(market: Market, half?: CornerHalf) {
+  const settings = currentSettings(market, half)
+  return {
+    market,
+    half: settings.cornerHalf,
+    summary: computeMetrics(settings),
+    settings,
+    proposal: loadProposal(market, half),
+    history: loadHistory(market, half).slice(-12).reverse(),
+    recentAlerts: loadAlerts(market, half).slice(-40).reverse(),
+    autoAfter: LEARN_AUTO_MIN_OUTCOMES,
+  }
+}
+
 app.get('/api/push/vapidPublicKey', (_req, res) => {
   res.json({ publicKey: publicVapidKey() })
 })
@@ -88,7 +112,7 @@ app.get('/api/push/status', (_req, res) => {
 
 app.post('/api/push/test', async (req, res) => {
   const market = marketFromReq(req)
-  const sample = sampleFeedAlert(market)
+  const sample = sampleFeedAlert(market, halfFromReq(req) ?? 'ht')
   const copy = alertNotificationCopy(sample)
   const result = await sendPushToAll({
     title: copy.title,
@@ -105,7 +129,17 @@ app.get('/api/poller/status', (_req, res) => {
 })
 
 app.get('/api/learn/market', (_req, res) => {
-  res.json({ market: loadActiveMarket(), settings: currentSettings() })
+  const market = loadActiveMarket()
+  res.json({
+    market,
+    settings: currentSettings(market),
+    corners: market === 'corners'
+      ? {
+          ht: currentSettings('corners', 'ht'),
+          ft: currentSettings('corners', 'ft'),
+        }
+      : undefined,
+  })
 })
 
 app.put('/api/learn/market', (req, res) => {
@@ -126,32 +160,40 @@ app.post('/api/learn/market', (req, res) => {
 
 app.get('/api/learn/summary', (req, res) => {
   const market = marketFromReq(req)
-  const settings = currentSettings(market)
-  res.json({
-    market,
-    summary: computeMetrics(settings),
-    settings,
-    proposal: loadProposal(market),
-    history: loadHistory(market).slice(-12).reverse(),
-    recentAlerts: loadAlerts(market).slice(-40).reverse(),
-    autoAfter: LEARN_AUTO_MIN_OUTCOMES,
-  })
+  const half = halfFromReq(req)
+  if (market === 'corners' && !half) {
+    res.json({
+      market,
+      ht: learnPayload('corners', 'ht'),
+      ft: learnPayload('corners', 'ft'),
+    })
+    return
+  }
+  res.json(learnPayload(market, half))
 })
 
 app.post('/api/learn/alerts', (req, res) => {
   const market = marketFromReq(req)
+  const half = halfFromReq(req)
   const alerts = Array.isArray(req.body) ? req.body : req.body?.alerts
   if (!Array.isArray(alerts)) {
     res.status(400).json({ error: 'alerts[] em falta' })
     return
   }
-  const stored = ingestFeedAlerts(alerts, currentSettings(market), false, market)
-  res.json({ ok: true, n: stored.length, market })
+  const stored = ingestFeedAlerts(
+    alerts,
+    currentSettings(market, half),
+    false,
+    market,
+    half,
+  )
+  res.json({ ok: true, n: stored.length, market, half })
 })
 
 app.post('/api/learn/feedback', (req, res) => {
   try {
     const market = marketFromReq(req)
+    const half = halfFromReq(req)
     const { id, feedback } = req.body as {
       id?: string
       feedback?: 'up' | 'down' | null
@@ -160,7 +202,7 @@ app.post('/api/learn/feedback', (req, res) => {
       res.status(400).json({ error: 'id em falta' })
       return
     }
-    res.json(setFeedback(id, feedback ?? null, market))
+    res.json(setFeedback(id, feedback ?? null, market, half))
   } catch (err) {
     res.status(404).json({ error: err instanceof Error ? err.message : 'erro' })
   }
@@ -168,15 +210,21 @@ app.post('/api/learn/feedback', (req, res) => {
 
 app.post('/api/learn/recalculate', (req, res) => {
   const market = marketFromReq(req)
+  const half = halfFromReq(req)
   const reason = String((req.body as { reason?: string })?.reason || 'manual')
-  res.json(recalculate(reason, market))
+  try {
+    res.json(recalculate(reason, market, half))
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
+  }
 })
 
 app.post('/api/learn/apply', (req, res) => {
   try {
     const market = marketFromReq(req)
+    const half = halfFromReq(req)
     const id = String((req.body as { id?: string })?.id || 'latest')
-    res.json(applyProposal(id, 'manual', market))
+    res.json(applyProposal(id, 'manual', market, half))
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
   }
@@ -184,19 +232,41 @@ app.post('/api/learn/apply', (req, res) => {
 
 app.post('/api/learn/seed-demos', (req, res) => {
   const market = marketFromReq(req)
-  const seeded = seedDemos(market)
-  const proposal = recalculate('seed-demos', market)
+  const half = halfFromReq(req)
+  const seeded = seedDemos(market, half)
+  const proposals =
+    market === 'corners' && !half
+      ? {
+          ht: recalculate('seed-demos', market, 'ht'),
+          ft: recalculate('seed-demos', market, 'ft'),
+        }
+      : { latest: recalculate('seed-demos', market, half) }
   res.json({
     ...seeded,
     market,
-    proposal,
-    summary: computeMetrics(currentSettings(market)),
+    half,
+    proposals,
+    summary:
+      market === 'corners' && !half
+        ? {
+            ht: computeMetrics(currentSettings(market, 'ht')),
+            ft: computeMetrics(currentSettings(market, 'ft')),
+          }
+        : computeMetrics(currentSettings(market, half)),
   })
 })
 
 app.get('/api/learn/params', (req, res) => {
   const market = marketFromReq(req)
-  res.json(currentSettings(market))
+  const half = halfFromReq(req)
+  if (market === 'corners' && !half) {
+    res.json({
+      ht: currentSettings('corners', 'ht'),
+      ft: currentSettings('corners', 'ft'),
+    })
+    return
+  }
+  res.json(currentSettings(market, half))
 })
 
 app.use('/api/ss-fixtures', async (req, res) => {
