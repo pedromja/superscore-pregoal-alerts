@@ -461,8 +461,8 @@ async function main() {
     },
     publishedSensitivity: sensitivity,
     pairing: {
-      goals: pairingGoals,
-      corners: pairingCorners,
+      goals: pairingGoals ? { ...pairingGoals, paired: undefined } : null,
+      corners: pairingCorners ? { ...pairingCorners, paired: undefined } : null,
     },
     buckets,
     recommendation,

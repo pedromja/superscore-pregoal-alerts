@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-19T14:54:24.317Z",
+  "generatedAt": "2026-09-19T14:57:38.282Z",
   "lockedUntouched": true,
   "definitionsLocked": true,
   "dataset": {
@@ -9,24 +9,35 @@
       "region": "ro"
     },
     "localDumps": 0,
-    "matchedWithSokkerTimeline": 0,
-    "maxPerDay": 25,
-    "offline": true,
+    "matchedWithSokkerTimeline": 113,
+    "maxPerDay": 12,
+    "offline": false,
     "notes": [
-      "backtest-data/matches/ vazio (gitignored) — a amostra original de 880 jogos não está no repo",
-      "--offline sem dumps: só sensitivity + gap analysis"
+      "backtest-data/matches/ vazio (gitignored) \u2014 a amostra original de 880 jogos n\u00e3o est\u00e1 no repo",
+      "2026-09-08: SuperScore FT 200, emparelhados mini 12",
+      "2026-09-09: SuperScore FT 238, emparelhados mini 12",
+      "2026-09-10: SuperScore FT 136, emparelhados mini 12",
+      "2026-09-11: SuperScore FT 316, emparelhados mini 12",
+      "2026-09-12: SuperScore FT 1147, emparelhados mini 12",
+      "2026-09-13: SuperScore FT 830, emparelhados mini 12",
+      "2026-09-14: SuperScore FT 135, emparelhados mini 12",
+      "2026-09-15: SuperScore FT 182, emparelhados mini 12",
+      "2026-09-16: SuperScore FT 260, emparelhados mini 12",
+      "2026-09-17: SuperScore FT 125, emparelhados mini 12",
+      "2026-09-18: SuperScore FT 311, emparelhados mini 12",
+      "emparelhados com timeline SokkerPro: 113 / 115 dumps"
     ]
   },
   "availability": {
     "miniHasTimeline": false,
     "detailHasTimeline": true,
-    "miniNote": "offline: mini não tem timeline (documentado)",
-    "detailNote": "offline: /fixture/{id} timeline conhecido (type 14/16/126)",
-    "sampleFixtureId": null,
-    "cornersLive": "mini board não tem cantos — live continua SuperScore type=14 (still-suspect)",
+    "miniNote": "mini board: s\u00f3 marcador / is_goal / minuto \u2014 sem lista de golos ou cantos",
+    "detailNote": "/fixture/{id} timeline com 10 eventos (golos type 14/16, cantos 126)",
+    "sampleFixtureId": "19881952",
+    "cornersLive": "mini board n\u00e3o tem cantos \u2014 live continua SuperScore type=14 (still-suspect)",
     "cornersHistorical": "GET /fixture/{id} timeline type_id=126 tem minutos de canto",
     "goalsLive": "mini: scoresLocalTeam/Visitor + is_goal / is_goal_team + minute (PR #17)",
-    "goalsHistorical": "GET /fixture/{id} timeline type_id=14 (golo) e 16 (penálti)"
+    "goalsHistorical": "GET /fixture/{id} timeline type_id=14 (golo) e 16 (pen\u00e1lti)"
   },
   "publishedSensitivity": {
     "goals_ht": [
@@ -167,19 +178,308 @@
     ]
   },
   "pairing": {
-    "goals": null,
-    "corners": null
+    "goals": {
+      "unpairedSuperscore": 0,
+      "unpairedSokker": 31,
+      "medianOffset": 4,
+      "meanOffset": 4.636645962732919,
+      "lateShare": 0.8913043478260869,
+      "pairedCount": 322
+    },
+    "corners": {
+      "unpairedSuperscore": 0,
+      "unpairedSokker": 31,
+      "medianOffset": 0,
+      "meanOffset": 0.6178107606679035,
+      "lateShare": 0.461038961038961,
+      "pairedCount": 1078
+    }
   },
-  "buckets": [],
+  "buckets": [
+    {
+      "market": "goals",
+      "half": "ht",
+      "old": {
+        "matches": 113,
+        "events": 63,
+        "alerts": 171,
+        "alertsPerMatch": 1.5132743362831858,
+        "hits": 48,
+        "preferredHits": 19,
+        "eventsHit": 23,
+        "precision": 0.2807017543859649,
+        "precisionPreferred": 0.1111111111111111,
+        "recall": 0.36507936507936506,
+        "medianLead": 4,
+        "meanLead": 5.166666666666667,
+        "leadHist": {
+          "1": 17,
+          "2": 2,
+          "3": 2,
+          "4": 5,
+          "5": 3,
+          "6": 2,
+          "7": 4,
+          "8": 2,
+          "9": 1,
+          "10": 3,
+          "11": 2,
+          "12": 1,
+          "13": 1,
+          "14": 1,
+          "15": 2
+        },
+        "coincident": 0,
+        "leadLt1": 0
+      },
+      "neu": {
+        "matches": 113,
+        "events": 72,
+        "alerts": 171,
+        "alertsPerMatch": 1.5132743362831858,
+        "hits": 36,
+        "preferredHits": 8,
+        "eventsHit": 19,
+        "precision": 0.21052631578947367,
+        "precisionPreferred": 0.04678362573099415,
+        "recall": 0.2638888888888889,
+        "medianLead": 5,
+        "meanLead": 6.277777777777778,
+        "leadHist": {
+          "0": 12,
+          "1": 6,
+          "2": 2,
+          "3": 4,
+          "4": 3,
+          "5": 4,
+          "6": 1,
+          "7": 4,
+          "8": 1,
+          "9": 1,
+          "10": 3,
+          "11": 2,
+          "12": 1,
+          "13": 1,
+          "14": 1,
+          "15": 2
+        },
+        "coincident": 12,
+        "leadLt1": 12
+      },
+      "collapsed": {
+        "count": 12,
+        "shareOfOldHits": 0.25,
+        "shareOfAlerts": 0.07017543859649122
+      },
+      "medianLeadDelta": 1,
+      "precisionDelta": -0.07017543859649122,
+      "precisionPreferredDelta": -0.06432748538011696
+    },
+    {
+      "market": "goals",
+      "half": "ft",
+      "old": {
+        "matches": 113,
+        "events": 73,
+        "alerts": 172,
+        "alertsPerMatch": 1.5221238938053097,
+        "hits": 43,
+        "preferredHits": 23,
+        "eventsHit": 20,
+        "precision": 0.25,
+        "precisionPreferred": 0.13372093023255813,
+        "recall": 0.273972602739726,
+        "medianLead": 2,
+        "meanLead": 3.511627906976744,
+        "leadHist": {
+          "1": 20,
+          "2": 3,
+          "3": 4,
+          "4": 2,
+          "5": 1,
+          "6": 3,
+          "7": 2,
+          "8": 5,
+          "9": 2,
+          "10": 1
+        },
+        "coincident": 0,
+        "leadLt1": 0
+      },
+      "neu": {
+        "matches": 113,
+        "events": 78,
+        "alerts": 172,
+        "alertsPerMatch": 1.5221238938053097,
+        "hits": 29,
+        "preferredHits": 10,
+        "eventsHit": 15,
+        "precision": 0.1686046511627907,
+        "precisionPreferred": 0.05813953488372093,
+        "recall": 0.19230769230769232,
+        "medianLead": 4,
+        "meanLead": 4.551724137931035,
+        "leadHist": {
+          "0": 21,
+          "1": 7,
+          "2": 3,
+          "3": 3,
+          "4": 2,
+          "5": 1,
+          "6": 3,
+          "7": 4,
+          "8": 3,
+          "9": 3
+        },
+        "coincident": 21,
+        "leadLt1": 21
+      },
+      "collapsed": {
+        "count": 14,
+        "shareOfOldHits": 0.32558139534883723,
+        "shareOfAlerts": 0.08139534883720931
+      },
+      "medianLeadDelta": 2,
+      "precisionDelta": -0.08139534883720931,
+      "precisionPreferredDelta": -0.0755813953488372
+    },
+    {
+      "market": "corners",
+      "half": "ht",
+      "old": {
+        "matches": 113,
+        "events": 135,
+        "alerts": 425,
+        "alertsPerMatch": 3.7610619469026547,
+        "hits": 99,
+        "preferredHits": 47,
+        "eventsHit": 46,
+        "precision": 0.23294117647058823,
+        "precisionPreferred": 0.11058823529411765,
+        "recall": 0.34074074074074073,
+        "medianLead": 3,
+        "meanLead": 3.4343434343434343,
+        "leadHist": {
+          "1": 25,
+          "2": 22,
+          "3": 8,
+          "4": 14,
+          "5": 9,
+          "6": 7,
+          "7": 8,
+          "8": 6
+        },
+        "coincident": 0,
+        "leadLt1": 0
+      },
+      "neu": {
+        "matches": 113,
+        "events": 142,
+        "alerts": 425,
+        "alertsPerMatch": 3.7610619469026547,
+        "hits": 95,
+        "preferredHits": 38,
+        "eventsHit": 49,
+        "precision": 0.2235294117647059,
+        "precisionPreferred": 0.08941176470588236,
+        "recall": 0.34507042253521125,
+        "medianLead": 3,
+        "meanLead": 3.736842105263158,
+        "leadHist": {
+          "0": 32,
+          "1": 17,
+          "2": 21,
+          "3": 12,
+          "4": 14,
+          "5": 10,
+          "6": 6,
+          "7": 6,
+          "8": 5,
+          "9": 4
+        },
+        "coincident": 32,
+        "leadLt1": 32
+      },
+      "collapsed": {
+        "count": 5,
+        "shareOfOldHits": 0.050505050505050504,
+        "shareOfAlerts": 0.011764705882352941
+      },
+      "medianLeadDelta": 0,
+      "precisionDelta": -0.009411764705882342,
+      "precisionPreferredDelta": -0.021176470588235297
+    },
+    {
+      "market": "corners",
+      "half": "ft",
+      "old": {
+        "matches": 113,
+        "events": 62,
+        "alerts": 225,
+        "alertsPerMatch": 1.991150442477876,
+        "hits": 23,
+        "preferredHits": 16,
+        "eventsHit": 14,
+        "precision": 0.10222222222222223,
+        "precisionPreferred": 0.07111111111111111,
+        "recall": 0.22580645161290322,
+        "medianLead": 2,
+        "meanLead": 2.1739130434782608,
+        "leadHist": {
+          "1": 8,
+          "2": 8,
+          "3": 3,
+          "4": 3,
+          "5": 1
+        },
+        "coincident": 0,
+        "leadLt1": 0
+      },
+      "neu": {
+        "matches": 113,
+        "events": 65,
+        "alerts": 225,
+        "alertsPerMatch": 1.991150442477876,
+        "hits": 18,
+        "preferredHits": 15,
+        "eventsHit": 13,
+        "precision": 0.08,
+        "precisionPreferred": 0.06666666666666667,
+        "recall": 0.2,
+        "medianLead": 2,
+        "meanLead": 1.8888888888888888,
+        "leadHist": {
+          "0": 12,
+          "1": 6,
+          "2": 9,
+          "3": 2,
+          "4": 1
+        },
+        "coincident": 12,
+        "leadLt1": 12
+      },
+      "collapsed": {
+        "count": 5,
+        "shareOfOldHits": 0.21739130434782608,
+        "shareOfAlerts": 0.022222222222222223
+      },
+      "medianLeadDelta": 0,
+      "precisionDelta": -0.022222222222222227,
+      "precisionPreferredDelta": -0.004444444444444445
+    }
+  ],
   "recommendation": {
-    "action": "keep",
+    "action": "tighten-notify-suppress",
     "lockedUntouched": true,
-    "headlinePt": "Manter locked. Sem relógio SokkerPro histórico emparelhado não se pode corrigir o backtest — só o estudo prospectivo.",
+    "headlinePt": "Manter locked. Considerar apertar o suppress ao vivo (ex. MIN_NOTIFY_LEAD_MIN=2) \u2014 s\u00f3 com confirma\u00e7\u00e3o do Pedro. N\u00e3o propor novos limiares ainda.",
     "detailPt": [
-      "Janelas e limiares locked **não** foram alterados. A aprendizagem continua só a propor.",
-      "O gate ao vivo SokkerPro (PR #17) já barre Telegram quando o marcador rápido já bateu.",
-      "Cada alerta ao vivo já grava o snapshot SokkerPro (`is_goal` / marcador) para calibrar daqui para a frente.",
-      "Cantos: o mini board não tem cantos. Relógio de cantos ao vivo continua SuperScore type=14 (ainda suspeito)."
+      "Janelas e limiares locked **n\u00e3o** foram alterados. A aprendizagem continua s\u00f3 a propor.",
+      "O gate ao vivo SokkerPro (PR #17) j\u00e1 barre Telegram quando o marcador r\u00e1pido j\u00e1 bateu.",
+      "Offset mediano 4\u2032; 29% dos hits SuperScore deixam de ter lead\u22651 no rel\u00f3gio SokkerPro.",
+      "Isso invalida a leitura literal do backtest 18/set (prec@lead 1\u20132). Os params locked foram escolhidos nesse rel\u00f3gio \u2014 n\u00e3o os reescrever em sil\u00eancio.",
+      "O gate SokkerPro j\u00e1 reduz Telegram tardio. Um piso de 2\u2032 no notify (env) \u00e9 a alavanca mais segura, sem tocar nas janelas.",
+      "Novos params s\u00f3 depois do estudo prospectivo (log `is_goal` + transi\u00e7\u00f5es de marcador) e confirma\u00e7\u00e3o expl\u00edcita.",
+      "Cantos: pular revalida\u00e7\u00e3o ao vivo at\u00e9 haver feed de cantos mais r\u00e1pido. Hist\u00f3rico `/fixture/{id}` type=126 fica flagged still-suspect para o live."
     ]
   },
   "prospective": {
@@ -189,11 +489,11 @@
       "clockProbe"
     ],
     "design": [
-      "Cada tick do poller grava o marcador SokkerPro (cache-only) e detecta transições de score.",
+      "Cada tick do poller grava o marcador SokkerPro (cache-only) e detecta transi\u00e7\u00f5es de score.",
       "Cada alerta SuperScore guarda fastScore + clockProbe (is_goal, minuto, tally SS).",
-      "lead_spro = sokker_event_min − alert_min (transição ou is_goal). lead_ss continua o actual.",
-      "N=50 golos em janela com ambos os relógios: recalcular prec@≥1 / 1–2 / mediana e só então falar com Pedro de params.",
-      "Cantos: sem transição no mini. Ficam flagged still-suspect até haver feed de cantos mais rápido."
+      "lead_spro = sokker_event_min \u2212 alert_min (transi\u00e7\u00e3o ou is_goal). lead_ss continua o actual.",
+      "N=50 golos em janela com ambos os rel\u00f3gios: recalcular prec@\u22651 / 1\u20132 / mediana e s\u00f3 ent\u00e3o falar com Pedro de params.",
+      "Cantos: sem transi\u00e7\u00e3o no mini. Ficam flagged still-suspect at\u00e9 haver feed de cantos mais r\u00e1pido."
     ]
   }
 }
