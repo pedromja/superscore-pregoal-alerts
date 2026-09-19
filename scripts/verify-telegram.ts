@@ -10,13 +10,47 @@ import {
 import {
   escapeTelegramHtml,
   formatTelegramHtml,
+  formatTelegramOutcomeHtml,
   getTelegramStatus,
+  PENDING_RESOLVE_TEXT,
+  RESOLVE_NOW_LABEL,
   resetTelegramStatusForTests,
   resolveMonitorUrl,
+  resolveNowKeyboard,
   sendTelegramAlert,
   setTelegramFetchForTests,
+  telegramOutcomeIsHit,
 } from '../server/telegram.ts'
-import { loadSent, saveSent, sentKey } from '../server/store.ts'
+import {
+  decideResolveNow,
+  handleCallbackQuery,
+  setResolveFetchMomentumForTests,
+  settleDeadlineMin,
+} from '../server/telegramResolve.ts'
+import {
+  acceptTelegramWebhook,
+  telegramWebhookAuthorized,
+} from '../server/telegramUpdates.ts'
+import { telegramWebhookSecret } from '../server/config.ts'
+import { saveMatch } from '../server/store.ts'
+import {
+  enqueueAndFlushTelegramOutcomes,
+  resetTelegramOutcomesForTests,
+  waitForTelegramOutcomesForTests,
+} from '../server/telegramOutcomes.ts'
+import {
+  getTelegramMessage,
+  loadAlerts,
+  loadSent,
+  loadTelegramMessages,
+  saveAlerts,
+  saveSent,
+  saveTelegramMessages,
+  sentKey,
+  telegramOutcomeAlreadySent,
+  upsertAlerts,
+} from '../server/store.ts'
+import type { LoggedAlert } from '../server/types.ts'
 
 const fail: string[] = []
 
@@ -58,7 +92,10 @@ function testAlert(fixtureId: string, id: string): FeedAlert {
 const previousToken = process.env.TELEGRAM_BOT_TOKEN
 const previousChat = process.env.TELEGRAM_CHAT_ID
 const previousEnabled = process.env.TELEGRAM_ENABLED
+const previousWebhook = process.env.TELEGRAM_WEBHOOK_SECRET
 const previousSent = loadSent()
+const previousTelegramMap = loadTelegramMessages()
+const previousGoalAlerts = loadAlerts('goals')
 
 function restoreEnv() {
   if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN
@@ -67,6 +104,8 @@ function restoreEnv() {
   else process.env.TELEGRAM_CHAT_ID = previousChat
   if (previousEnabled === undefined) delete process.env.TELEGRAM_ENABLED
   else process.env.TELEGRAM_ENABLED = previousEnabled
+  if (previousWebhook === undefined) delete process.env.TELEGRAM_WEBHOOK_SECRET
+  else process.env.TELEGRAM_WEBHOOK_SECRET = previousWebhook
   resetTelegramStatusForTests()
 }
 
@@ -166,12 +205,21 @@ try {
     parse_mode?: string
     text?: string
     disable_web_page_preview?: boolean
+    reply_markup?: {
+      inline_keyboard?: { text?: string; callback_data?: string }[][]
+    }
   }
   expect(body.chat_id === '-1001234567890', `chat_id got ${body.chat_id}`)
   expect(body.parse_mode === 'HTML', `parse_mode got ${body.parse_mode}`)
   expect(body.disable_web_page_preview === true, 'preview disabled')
   expect(body.text?.includes('<b>Canto · Golos 1-0 · Cantos 5-3</b>') === true, 'html title')
   expect(body.text?.includes('Primária') === true, 'html rule')
+  const btn = body.reply_markup?.inline_keyboard?.[0]?.[0]
+  expect(btn?.text === RESOLVE_NOW_LABEL, `inline button, got ${btn?.text}`)
+  expect(
+    String(btn?.callback_data || '').startsWith('rn:'),
+    `callback_data prefix, got ${btn?.callback_data}`,
+  )
   const okStatus = getTelegramStatus()
   expect(okStatus.configured === true, 'status.configured after send')
   expect(okStatus.enabled === true, 'status.enabled after send')
@@ -304,12 +352,331 @@ try {
   })
   await waitForOddsAttachForTests()
   expect(unsetSent === 0, `unconfigured poller does not crash, sent ${unsetSent}`)
+
+  const green = formatTelegramOutcomeHtml({
+    hit5: true,
+    hitLong: false,
+    market: 'goals',
+    cornerHalf: 'ht',
+    matchLabel: 'Celtic vs Ferencváros',
+    minute: 38,
+  })
+  expect(telegramOutcomeIsHit({ hit5: true, hitLong: false }) === true, 'hit5 is a hit')
+  expect(telegramOutcomeIsHit({ hit5: false, hitLong: true }) === true, 'hitLong is a hit')
+  expect(telegramOutcomeIsHit({ hit5: false, hitLong: false }) === false, 'both false is a miss')
+  expect(green.includes('🟢 GREEN'), `green badge, got ${green}`)
+  expect(green.includes('Golo'), `green market Golo, got ${green}`)
+  expect(green.includes('HT'), `green half, got ${green}`)
+  expect(green.includes('Celtic vs Ferencváros'), `green match, got ${green}`)
+  expect(green.includes("38'"), `green minute, got ${green}`)
+  const red = formatTelegramOutcomeHtml({
+    hit5: false,
+    hitLong: false,
+    market: 'corners',
+    cornerHalf: 'ft',
+    matchLabel: 'Home FC vs Away FC',
+    minute: 84,
+  })
+  expect(red.includes('🔴 RED'), `red badge, got ${red}`)
+  expect(red.includes('Canto'), `red market Canto, got ${red}`)
+  expect(red.includes('FT'), `red half, got ${red}`)
+  expect(red.includes('Home FC vs Away FC'), `red match, got ${red}`)
+  expect(red.includes("84'"), `red minute, got ${red}`)
+
+  process.env.TELEGRAM_BOT_TOKEN = 'TEST_TOKEN_DO_NOT_USE'
+  process.env.TELEGRAM_CHAT_ID = '-1001234567890'
+  delete process.env.TELEGRAM_ENABLED
+  resetTelegramStatusForTests()
+  resetTelegramOutcomesForTests()
+
+  const outcomeCalls: { url: string; body: Record<string, unknown> }[] = []
+  setTelegramFetchForTests(async (input, init) => {
+    const url = String(input)
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+    outcomeCalls.push({ url, body })
+    return new Response(
+      JSON.stringify({ ok: true, result: { message_id: 4242 } }),
+      { status: 200 },
+    )
+  })
+
+  const persistKey = `tg-msgid-${Date.now()}:primary-1-38-0`
+  const persistSend = await sendTelegramAlert({
+    title: 'Golo · Golos 1-0 · Cantos 3-2',
+    body: "Home FC vs Away FC · 38' · Fora · v -61",
+    url: '/#/monitor?alert=persist',
+    alertKey: persistKey,
+    ruleLabel: 'Primária',
+  })
+  expect(persistSend.sent === 1, 'persist send counts')
+  expect(persistSend.messageId === 4242, `messageId returned, got ${persistSend.messageId}`)
+  expect(
+    getTelegramMessage(persistKey)?.messageId === 4242,
+    'message_id stored in telegram_messages.json',
+  )
+
+  const liveId = `tg-live-${Date.now()}`
+  const liveAlertId = 'primary-1-38-0'
+  const liveKey = `${liveId}:${liveAlertId}`
+  setPollerSendTelegramForTests(null)
+  setPollerSendPushForTests(null)
+  const liveSent = await processEvaluatedAlerts({
+    fixture: testFixture(liveId),
+    market: 'goals',
+    settings: defaultsFor('goals'),
+    byHalf: undefined,
+    fresh: [testAlert(liveId, liveAlertId)],
+    first: false,
+    finished: false,
+    payload: { timeline: [], events: [] },
+    events: [],
+    points: [{ period: 1, min: 38 }],
+  })
+  await waitForOddsAttachForTests()
+  await waitForTelegramOutcomesForTests()
+  expect(liveSent === 1, `live poller sent, got ${liveSent}`)
+  const storedLive = loadAlerts('goals').find((a) => a.id === liveKey)
+  expect(storedLive?.telegramMessageId === 4242, `alert telegramMessageId, got ${storedLive?.telegramMessageId}`)
+  expect(getTelegramMessage(liveKey)?.messageId === 4242, 'side map keyed by alertKey')
+
+  function outcomeSample(id: string, extra: Partial<LoggedAlert> = {}): LoggedAlert {
+    return {
+      id,
+      fixtureId: id.split(':')[0] ?? id,
+      matchLabel: 'Celtic vs Ferencváros',
+      minute: 38,
+      period: 1,
+      index: 0,
+      side: 'away',
+      ruleId: 'primary',
+      market: 'goals',
+      cornerHalf: 'ht',
+      features: { v: -61, delta1: -63, sustained: 1 },
+      thresholdsSnapshot: {},
+      ts: new Date().toISOString(),
+      coincident: false,
+      hit: true,
+      leadMin: 2,
+      hit5: true,
+      hitLong: true,
+      longDeadline: 45,
+      leadTime5: 2,
+      leadTimeLong: 2,
+      labeledAt: new Date().toISOString(),
+      feedback: null,
+      sentPush: true,
+      telegramMessageId: 77,
+      telegramOutcomeSentAt: null,
+      ...extra,
+    }
+  }
+
+  const onceId = `tg-once-${Date.now()}:primary-1-38-0`
+  upsertAlerts([outcomeSample(onceId)], 'goals', 'ht')
+  const beforeOnce = outcomeCalls.length
+  enqueueAndFlushTelegramOutcomes([outcomeSample(onceId)])
+  await waitForTelegramOutcomesForTests()
+  const afterOnce = outcomeCalls.length
+  expect(afterOnce === beforeOnce + 1, `outcome send once, delta ${afterOnce - beforeOnce}`)
+  const reply = outcomeCalls[afterOnce - 1]
+  expect(
+    String(reply?.url || '').endsWith('/sendMessage'),
+    `outcome uses sendMessage, got ${reply?.url}`,
+  )
+  expect(
+    reply?.body.reply_to_message_id === 77,
+    `reply_to_message_id, got ${reply?.body.reply_to_message_id}`,
+  )
+  expect(
+    String(reply?.body.text || '').includes('🟢 GREEN'),
+    `outcome text green, got ${reply?.body.text}`,
+  )
+  expect(telegramOutcomeAlreadySent(onceId) === true, 'telegramOutcomeSentAt claimed')
+
+  enqueueAndFlushTelegramOutcomes([outcomeSample(onceId)])
+  await waitForTelegramOutcomesForTests()
+  expect(outcomeCalls.length === afterOnce, 'already-sent outcome is not sent again')
+
+  const skipId = `tg-skip-${Date.now()}:primary-1-38-0`
+  upsertAlerts(
+    [
+      outcomeSample(skipId, {
+        telegramOutcomeSentAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ],
+    'goals',
+    'ht',
+  )
+  const beforeSkip = outcomeCalls.length
+  enqueueAndFlushTelegramOutcomes([
+    outcomeSample(skipId, {
+      telegramOutcomeSentAt: '2026-01-01T00:00:00.000Z',
+    }),
+  ])
+  await waitForTelegramOutcomesForTests()
+  expect(outcomeCalls.length === beforeSkip, 'pre-marked outcome is skipped')
+
+  const kb = resolveNowKeyboard('fix:primary-1-38-0')
+  expect(kb.inline_keyboard[0][0].text === RESOLVE_NOW_LABEL, 'keyboard label')
+  expect(
+    decideResolveNow(
+      { hit5: true, hitLong: false, longDeadline: 45, leadTime5: 2, leadTimeLong: null },
+      { min: 40, period: 1 },
+      false,
+      { min: 38, period: 1 },
+      42,
+    ) === 'green',
+    'event in horizon is green',
+  )
+  expect(
+    decideResolveNow(
+      { hit5: false, hitLong: false, longDeadline: 45, leadTime5: null, leadTimeLong: null },
+      { min: 40, period: 1 },
+      false,
+      { min: 38, period: 1 },
+      42,
+    ) === 'pending',
+    'no event before deadline is pending (no false red)',
+  )
+  expect(
+    decideResolveNow(
+      { hit5: false, hitLong: false, longDeadline: 45, leadTime5: null, leadTimeLong: null },
+      { min: 43, period: 1 },
+      false,
+      { min: 38, period: 1 },
+      42,
+    ) === 'red',
+    'past settle deadline is red',
+  )
+  expect(
+    decideResolveNow(
+      { hit5: false, hitLong: false, longDeadline: 45, leadTime5: null, leadTimeLong: null },
+      { min: 40, period: 1 },
+      true,
+      { min: 38, period: 1 },
+      42,
+    ) === 'red',
+    'finished match without event is red',
+  )
+  expect(settleDeadlineMin(38, 1, 42) === 42, 'HT cap wins over +15')
+
+  process.env.TELEGRAM_WEBHOOK_SECRET = 'test-webhook-secret'
+  expect(telegramWebhookAuthorized('test-webhook-secret') === true, 'webhook secret ok')
+  expect(telegramWebhookAuthorized('nope') === false, 'webhook secret rejects')
+  expect(telegramWebhookSecret() === 'test-webhook-secret', 'explicit webhook secret')
+  expect(acceptTelegramWebhook('nope', {}) === false, 'bad secret rejected')
+  expect(
+    acceptTelegramWebhook('test-webhook-secret', { update_id: 1 }) === true,
+    'good secret accepted and returns immediately',
+  )
+
+  setResolveFetchMomentumForTests(async () => {
+    throw new Error('use stored match')
+  })
+
+  function resolveFixtureMatch(
+    fixtureId: string,
+    opts: { clockMin: number; goalMin?: number; finished?: boolean },
+  ) {
+    const timeline = []
+    for (let min = 20; min <= opts.clockMin; min += 1) {
+      timeline.push({ min, period: 1, value: { value: -50 } })
+    }
+    saveMatch({
+      fixture: testFixture(fixtureId),
+      payload: {
+        timeline,
+        events:
+          opts.goalMin != null
+            ? [{ type: 4, side: 2, min: opts.goalMin, period: 1 }]
+            : [],
+      },
+      finished: Boolean(opts.finished),
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  const pendingFix = `tg-pending-${Date.now()}`
+  const pendingKey = `${pendingFix}:primary-1-38-0`
+  upsertAlerts(
+    [outcomeSample(pendingKey, { hit: null, hit5: null, hitLong: null, labeledAt: null })],
+    'goals',
+    'ht',
+  )
+  resolveFixtureMatch(pendingFix, { clockMin: 40 })
+  const beforePending = outcomeCalls.length
+  const pendingCb = await handleCallbackQuery({
+    id: 'cb-pending',
+    data: `rn:${pendingKey}`,
+    message: { message_id: 77, chat: { id: '-1001234567890' } },
+  })
+  await waitForTelegramOutcomesForTests()
+  expect(pendingCb.kind === 'pending', `pending kind, got ${pendingCb.kind}`)
+  const pendingMsg = outcomeCalls.slice(beforePending).find((c) =>
+    String(c.body.text || '').includes(PENDING_RESOLVE_TEXT),
+  )
+  expect(Boolean(pendingMsg), 'pending replies ainda sem resolução')
+  expect(!telegramOutcomeAlreadySent(pendingKey), 'pending must not mark settled')
+
+  const unknownCb = await handleCallbackQuery({
+    id: 'cb-unknown',
+    data: `rn:${pendingKey}`,
+    message: { message_id: 77, chat: { id: '999' } },
+  })
+  expect(unknownCb.kind === 'ignored', `unknown chat ignored, got ${unknownCb.kind}`)
+
+  const greenFix = `tg-green-${Date.now()}`
+  const greenKey = `${greenFix}:primary-1-38-0`
+  upsertAlerts(
+    [outcomeSample(greenKey, { hit: null, hit5: null, hitLong: null, labeledAt: null })],
+    'goals',
+    'ht',
+  )
+  resolveFixtureMatch(greenFix, { clockMin: 41, goalMin: 40 })
+  const beforeGreen = outcomeCalls.length
+  const greenCb = await handleCallbackQuery({
+    id: 'cb-green',
+    data: `rn:${greenKey}`,
+    message: { message_id: 77, chat: { id: '-1001234567890' } },
+  })
+  await waitForTelegramOutcomesForTests()
+  expect(greenCb.kind === 'green', `green kind, got ${greenCb.kind}`)
+  expect(telegramOutcomeAlreadySent(greenKey) === true, 'green marks outcome sent')
+  const greenMsg = outcomeCalls.slice(beforeGreen).some((c) =>
+    String(c.body.text || '').includes('🟢 GREEN'),
+  )
+  expect(greenMsg, 'green reply includes 🟢 GREEN')
+
+  const alreadyCb = await handleCallbackQuery({
+    id: 'cb-already',
+    data: `rn:${greenKey}`,
+    message: { message_id: 77, chat: { id: '-1001234567890' } },
+  })
+  expect(alreadyCb.kind === 'already', `already kind, got ${alreadyCb.kind}`)
+
+  delete process.env.TELEGRAM_BOT_TOKEN
+  delete process.env.TELEGRAM_CHAT_ID
+  resetTelegramStatusForTests()
+  const quietId = `tg-quiet-${Date.now()}:primary-1-38-0`
+  upsertAlerts([outcomeSample(quietId)], 'goals', 'ht')
+  const beforeQuiet = outcomeCalls.length
+  enqueueAndFlushTelegramOutcomes([outcomeSample(quietId)])
+  await waitForTelegramOutcomesForTests()
+  expect(outcomeCalls.length === beforeQuiet, 'unconfigured outcome skips quietly')
+  expect(
+    !telegramOutcomeAlreadySent(quietId),
+    'unconfigured skip must not claim telegramOutcomeSentAt',
+  )
 } finally {
   setTelegramFetchForTests(null)
   setPollerSendTelegramForTests(null)
   setPollerSendPushForTests(null)
+  setResolveFetchMomentumForTests(null)
+  resetTelegramOutcomesForTests()
   restoreEnv()
   saveSent(previousSent)
+  saveTelegramMessages(previousTelegramMap)
+  saveAlerts(previousGoalAlerts, 'goals')
 }
 
 if (fail.length) {
@@ -319,4 +686,4 @@ if (fail.length) {
 }
 
 console.log('ok')
-console.log('telegram: skip when unconfigured, HTML format, Bot API mock, poller first-channel')
+console.log('telegram: skip when unconfigured, HTML format, Bot API mock, poller first-channel, outcome GREEN/RED once, Resolver agora')

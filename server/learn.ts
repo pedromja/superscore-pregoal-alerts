@@ -39,6 +39,12 @@ import {
 } from '../src/lib/windows.ts'
 import { LEARN_AUTO_APPLY, LEARN_AUTO_MIN_OUTCOMES, LEARN_WINDOW, ROOT } from './config.ts'
 import {
+  enqueueAndFlushTelegramOutcomes,
+  enqueueSettledTelegramOutcomes,
+  scheduleTelegramOutcomeFlush,
+  alertOutcomeNewlySettled,
+} from './telegramOutcomes.ts'
+import {
   listMatches,
   loadActiveMarket,
   loadAlerts,
@@ -173,6 +179,8 @@ export function toLoggedAlert(
     labeledAt: null,
     feedback: null,
     sentPush,
+    telegramMessageId: undefined,
+    telegramOutcomeSentAt: null,
     odds: alert.odds,
   }
 }
@@ -182,12 +190,14 @@ export function labelMatch(
   window = LEARN_WINDOW,
   market?: Market,
   half?: CornerHalf | null,
+  opts: { flushTelegramOutcomes?: boolean } = {},
 ): void {
   const m = market ?? loadActiveMarket()
   if (!parseCornerHalfOpt(half)) {
     for (const h of m === 'corners' ? CORNER_HALVES : GOAL_HALVES) {
-      labelMatch(match, window, m, h)
+      labelMatch(match, window, m, h, { flushTelegramOutcomes: false })
     }
+    if (opts.flushTelegramOutcomes !== false) scheduleTelegramOutcomeFlush()
     return
   }
   const settings = currentSettings(m, half)
@@ -206,7 +216,10 @@ export function labelMatch(
     ),
   }))
 
-  const alerts = loadAlerts(m, settings.cornerHalf).map((alert) => {
+  const previous = loadAlerts(m, settings.cornerHalf)
+  const prevById = new Map(previous.map((a) => [a.id, a]))
+  const settled: LoggedAlert[] = []
+  const alerts = previous.map((alert) => {
     if (alert.fixtureId !== match.fixture.id) return alert
     const out = outcomeForAlert(
       {
@@ -219,7 +232,7 @@ export function labelMatch(
       points,
       horizon,
     )
-    return {
+    const next: LoggedAlert = {
       ...alert,
       market: m,
       cornerHalf: settings.cornerHalf,
@@ -232,8 +245,14 @@ export function labelMatch(
       leadTimeLong: out.leadTimeLong,
       labeledAt: new Date().toISOString(),
     }
+    if (alertOutcomeNewlySettled(prevById.get(alert.id), next)) {
+      settled.push(next)
+    }
+    return next
   })
   saveAlerts(alerts, m, settings.cornerHalf)
+  enqueueSettledTelegramOutcomes(settled)
+  if (opts.flushTelegramOutcomes !== false) scheduleTelegramOutcomeFlush()
 
   const records: GoalRecord[] = goals.map((goal) => {
     const short = goalHadPrealert(goal, firedLite, points, 'short', horizon)
@@ -584,6 +603,7 @@ export function recalculate(
         : 'Proposta fora da guarda conservadora: confirme na UI antes de aplicar. As regras base não mudam sem essa confirmação.',
   }
   saveProposal(proposal, m, base.cornerHalf)
+  enqueueAndFlushTelegramOutcomes(loadAlerts(m, base.cornerHalf))
 
   if (LEARN_AUTO_APPLY && proposal.autoEligible) {
     const labeled = loadAlerts(m, base.cornerHalf).filter(
@@ -720,7 +740,14 @@ export function ingestFeedAlerts(
         sentPush,
       ),
     )
-    stored.push(...upsertAlerts(logged, m, h))
+    const prev = loadAlerts(m, h)
+    const prevById = new Map(prev.map((a) => [a.id, a]))
+    const next = upsertAlerts(logged, m, h)
+    stored.push(...next)
+    const newly = next.filter((alert) =>
+      alertOutcomeNewlySettled(prevById.get(alert.id), alert),
+    )
+    enqueueSettledTelegramOutcomes(newly)
   }
   return stored
 }

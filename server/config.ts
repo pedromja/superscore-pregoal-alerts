@@ -71,6 +71,22 @@ export function webPushEnabled(): boolean {
 
 export const TELEGRAM_TIMEOUT_MS = Number(process.env.TELEGRAM_TIMEOUT_MS || 9000)
 
+/** `webhook` (default) or `poll`. `off` skips inbound callback handling. */
+export function telegramUpdatesMode(): 'webhook' | 'poll' | 'off' {
+  const raw = (process.env.TELEGRAM_UPDATES || 'webhook').trim().toLowerCase()
+  if (raw === 'poll' || raw === 'longpoll') return 'poll'
+  if (raw === '0' || raw === 'off' || raw === 'none') return 'off'
+  return 'webhook'
+}
+
+export function telegramWebhookSecret(): string {
+  const explicit = (process.env.TELEGRAM_WEBHOOK_SECRET || '').trim()
+  if (explicit) return explicit
+  const token = telegramBotToken()
+  if (!token) return ''
+  return `ss${token.replace(/[^A-Za-z0-9_-]/g, '').slice(-24)}wh`
+}
+
 function resolvePublicAppUrl(): string {
   const raw = (
     process.env.PUBLIC_URL ||

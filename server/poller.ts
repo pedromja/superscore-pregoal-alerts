@@ -26,6 +26,10 @@ import {
 } from './config.ts'
 import { currentSettings, ingestFeedAlerts, labelMatch } from './learn.ts'
 import {
+  resetTelegramOutcomesForTests,
+  scheduleTelegramOutcomeFlush,
+} from './telegramOutcomes.ts'
+import {
   JsonBackoff,
   TimeoutError,
   mapLimit,
@@ -51,6 +55,7 @@ import {
   loadSent,
   loadSubscriptions,
   markAlertPushed,
+  markAlertTelegramMessage,
   markSent,
   primedKey,
   primeFixture,
@@ -207,6 +212,7 @@ export function resetPollerRuntimeForTests(): void {
   status.webPushEnabled = webPushEnabled()
   status.telegram = getTelegramStatus()
   sendTelegram = sendTelegramAlert
+  resetTelegramOutcomesForTests()
 }
 
 export type FixtureTickError = {
@@ -285,6 +291,14 @@ async function notifyFreshAlerts(
     })
     if (telegramResult.sent > 0) {
       notifiedOk = true
+      if (telegramResult.messageId != null) {
+        markAlertTelegramMessage(
+          alertKey,
+          telegramResult.messageId,
+          market,
+          alert.cornerHalf,
+        )
+      }
     } else if (!telegramResult.skipped) {
       console.error(
         '[poller] telegram não enviado',
@@ -395,6 +409,8 @@ export async function processEvaluatedAlerts(
         },
         undefined,
         market,
+        undefined,
+        { flushTelegramOutcomes: false },
       )
     }
     const clock = points.at(-1)
@@ -419,6 +435,7 @@ export async function processEvaluatedAlerts(
         }),
       )
     }
+    scheduleTelegramOutcomeFlush()
     return 0
   }
 
@@ -433,6 +450,8 @@ export async function processEvaluatedAlerts(
       },
       undefined,
       market,
+      undefined,
+      { flushTelegramOutcomes: false },
     )
   }
 
@@ -455,6 +474,7 @@ export async function processEvaluatedAlerts(
     byHalf,
     fresh,
   )
+  scheduleTelegramOutcomeFlush()
   if (fresh.length) {
     scheduleOddsAttach(() =>
       attachOddsAndEnrich({
