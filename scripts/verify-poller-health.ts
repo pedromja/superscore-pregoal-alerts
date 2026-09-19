@@ -1,19 +1,28 @@
+import { POLLER_INTERVAL_MS } from '../server/config.ts'
 import {
   getPollerStatus,
   lastErrorAfterFixtureFailures,
+  processEvaluatedAlerts,
   resetPollerRuntimeForTests,
   setPollerDepsForTests,
   setPollerLimitsForTests,
+  setPollerSendTelegramForTests,
   tick,
 } from '../server/poller.ts'
 import { sendPushToAll } from '../server/push.ts'
 import {
   JsonBackoff,
+  POLLER_CONCURRENCY_DEFAULT,
+  POLLER_INTERVAL_MS_DEFAULT,
+  POLLER_LIVE_LIMIT_DEFAULT,
   clockFromElapsed,
+  flattenLiveTargets,
   selectLiveTargets,
   withTimeout,
   TimeoutError,
 } from '../server/pollerHealth.ts'
+import { defaultsFor } from '../src/lib/market.ts'
+import { sampleFeedAlert } from '../src/lib/tally.ts'
 import {
   isRoutineJsonError,
   parseUpstreamJson,
@@ -338,6 +347,18 @@ check(clockFromElapsed(32 * 60)?.period === 1, 'clock 32:00 → period 1')
 check(clockFromElapsed(82 * 60)?.min === 82, 'clock 82:00 → min 82')
 check(clockFromElapsed(82 * 60)?.period === 2, 'clock 82:00 → period 2')
 
+check(POLLER_INTERVAL_MS_DEFAULT === 15_000, 'interval default constant is 15s')
+check(POLLER_LIVE_LIMIT_DEFAULT === 32, 'live-limit default is 32')
+check(POLLER_CONCURRENCY_DEFAULT === 8, 'concurrency default is 8')
+check(
+  POLLER_INTERVAL_MS ===
+    Number(process.env.POLLER_INTERVAL_MS || POLLER_INTERVAL_MS_DEFAULT),
+  `POLLER_INTERVAL_MS env wins or defaults to 15s, got ${POLLER_INTERVAL_MS}`,
+)
+if (!process.env.POLLER_INTERVAL_MS) {
+  check(POLLER_INTERVAL_MS === 15_000, 'unset env → interval 15000')
+}
+
 {
   const lastOkAt = new Map<string, number>()
   const now = 1_000_000
@@ -347,6 +368,7 @@ check(clockFromElapsed(82 * 60)?.period === 2, 'clock 82:00 → period 2')
     liveFixture('mid', 55 * 60),
     liveFixture('ft-window', 84 * 60),
     liveFixture('late-first', 40 * 60),
+    liveFixture('stoppage', 91 * 60),
   ]
   const corners = selectLiveTargets({
     live,
@@ -357,10 +379,20 @@ check(clockFromElapsed(82 * 60)?.period === 2, 'clock 82:00 → period 2')
     lastOkAt,
     isBackedOff: () => false,
   })
+  const cornerIn = corners.inWindow.map((f) => f.id)
   check(
-    corners.map((f) => f.id).join(',') === 'ft-window,ht-window',
-    `corners priority windows first, got ${corners.map((f) => f.id)}`,
+    cornerIn.includes('ft-window') &&
+      cornerIn.includes('ht-window') &&
+      cornerIn.includes('late-first'),
+    `in-window corners always selected even when > LIVE_LIMIT, got ${cornerIn}`,
   )
+  check(
+    !cornerIn.includes('early') && !cornerIn.includes('mid') && !cornerIn.includes('stoppage'),
+    `out-of-window / 91' not treated as in-window, got ${cornerIn}`,
+  )
+  check(corners.fill.length === 0, 'no fill slots when in-window already exceeds limit')
+  check(corners.inWindow[0]?.id === 'ft-window', `late FT corner first, got ${cornerIn}`)
+
   const goals = selectLiveTargets({
     live,
     market: 'goals',
@@ -370,24 +402,35 @@ check(clockFromElapsed(82 * 60)?.period === 2, 'clock 82:00 → period 2')
     lastOkAt,
     isBackedOff: () => false,
   })
+  const goalIn = goals.inWindow.map((f) => f.id)
   check(
-    goals[0]?.id === 'ft-window',
-    `goals prefers late 2nd-half pressure, got ${goals.map((f) => f.id)}`,
+    goalIn.includes('ft-window') &&
+      goalIn.includes('ht-window') &&
+      goalIn.includes('late-first'),
+    `in-window goals always selected even when > LIVE_LIMIT, got ${goalIn}`,
   )
-  const skipped = selectLiveTargets({
-    live,
-    market: 'corners',
-    limit: 10,
-    now,
-    tickIndex: 0,
-    lastOkAt,
-    isBackedOff: (id) => id === 'ht-window',
-  })
+  check(goals.inWindow[0]?.id === 'ft-window', `late FT goal first, got ${goalIn}`)
+  check(!goalIn.includes('stoppage'), "91' is not an in-window goal fixture")
+
+  const skipped = flattenLiveTargets(
+    selectLiveTargets({
+      live,
+      market: 'corners',
+      limit: 10,
+      now,
+      tickIndex: 0,
+      lastOkAt,
+      isBackedOff: (id) => id === 'ht-window',
+    }),
+  )
   check(
     !skipped.some((f) => f.id === 'ht-window'),
     'backed-off window game is not selected',
   )
-  const many = Array.from({ length: 30 }, (_, i) => liveFixture(`g${String(i).padStart(2, '0')}`, 12 * 60))
+
+  const many = Array.from({ length: 30 }, (_, i) =>
+    liveFixture(`g${String(i).padStart(2, '0')}`, 12 * 60),
+  )
   const rot0 = selectLiveTargets({
     live: many,
     market: 'goals',
@@ -396,7 +439,7 @@ check(clockFromElapsed(82 * 60)?.period === 2, 'clock 82:00 → period 2')
     tickIndex: 0,
     lastOkAt,
     isBackedOff: () => false,
-  }).map((f) => f.id)
+  })
   const rot1 = selectLiveTargets({
     live: many,
     market: 'goals',
@@ -405,9 +448,35 @@ check(clockFromElapsed(82 * 60)?.period === 2, 'clock 82:00 → period 2')
     tickIndex: 1,
     lastOkAt,
     isBackedOff: () => false,
-  }).map((f) => f.id)
-  check(rot0.length === 5, 'fill limit 5')
-  check(rot0.join(',') !== rot1.join(','), `rotation should move fill set ${rot0} vs ${rot1}`)
+  })
+  check(rot0.inWindow.length === 0, 'early clocks are fill, not in-window')
+  check(rot0.fill.length === 5, 'out-of-window fill respects LIVE_LIMIT')
+  check(
+    rot0.fill.map((f) => f.id).join(',') !== rot1.fill.map((f) => f.id).join(','),
+    `rotation should move fill set ${rot0.fill.map((f) => f.id)} vs ${rot1.fill.map((f) => f.id)}`,
+  )
+
+  const mixed = [
+    liveFixture('win-a', 85 * 60),
+    liveFixture('win-b', 83 * 60),
+    liveFixture('win-c', 36 * 60),
+    ...Array.from({ length: 20 }, (_, i) => liveFixture(`fill-${String(i).padStart(2, '0')}`, 12 * 60)),
+  ]
+  const overLimit = selectLiveTargets({
+    live: mixed,
+    market: 'goals',
+    limit: 4,
+    now,
+    tickIndex: 0,
+    lastOkAt,
+    isBackedOff: () => false,
+  })
+  check(overLimit.inWindow.length === 3, `all 3 in-window kept, got ${overLimit.inWindow.length}`)
+  check(overLimit.fill.length === 1, `remaining 1 fill slot, got ${overLimit.fill.length}`)
+  check(
+    overLimit.inWindow.every((f) => f.id.startsWith('win-')),
+    'in-window ids only',
+  )
 }
 
 {
@@ -463,9 +532,49 @@ try {
   check(processed.length === 30, `widened live coverage, processed ${processed.length}`)
   check(covered.liveWatched === 30, `liveWatched 30, got ${covered.liveWatched}`)
   check(covered.liveProcessed === 30, `liveProcessed 30, got ${covered.liveProcessed}`)
+  check(covered.intervalMs === POLLER_INTERVAL_MS, `status.intervalMs, got ${covered.intervalMs}`)
+  check(covered.inWindowThisTick === 0, `early clocks → 0 in-window, got ${covered.inWindowThisTick}`)
   check(covered.tickInFlight === false, 'coverage tick not in flight')
   check(typeof covered.lastTickDurationMs === 'number', 'lastTickDurationMs set')
   check(covered.lastTickAt != null, 'lastTickAt advances after healthy tick')
+
+  resetPollerRuntimeForTests()
+  setPollerLimitsForTests({
+    fixtureTimeoutMs: 200,
+    tickWatchdogMs: 2_000,
+    liveLimit: 4,
+    finishedLimit: 0,
+    concurrency: 1,
+    inWindowConcurrency: 4,
+  })
+  const order: string[] = []
+  setPollerDepsForTests({
+    fetchFixtures: async () => [
+      liveFixture('fill-slow', 12 * 60),
+      liveFixture('ht-window', 36 * 60),
+      liveFixture('ft-window', 85 * 60),
+      liveFixture('fill-early', 10 * 60),
+    ],
+    processFixture: async (fixture) => {
+      order.push(`start:${fixture.id}`)
+      if (fixture.id === 'fill-slow') await delay(40)
+      order.push(`end:${fixture.id}`)
+      return 0
+    },
+    warmup: async () => null,
+  })
+  await tick()
+  const afterOrder = getPollerStatus()
+  check(afterOrder.inWindowThisTick === 2, `inWindowThisTick 2, got ${afterOrder.inWindowThisTick}`)
+  const firstFillStart = order.findIndex((e) => e.startsWith('start:fill-'))
+  const lastWindowEnd = Math.max(
+    order.lastIndexOf('end:ht-window'),
+    order.lastIndexOf('end:ft-window'),
+  )
+  check(
+    lastWindowEnd >= 0 && firstFillStart > lastWindowEnd,
+    `in-window finishes before fill starts, order ${order.join(',')}`,
+  )
 
   resetPollerRuntimeForTests()
   setPollerLimitsForTests({
@@ -623,10 +732,81 @@ try {
   saveProposal(previousGoalsProposal, 'goals')
 }
 
+{
+  resetPollerRuntimeForTests()
+  let telegramCalls = 0
+  setPollerSendTelegramForTests(async () => {
+    telegramCalls += 1
+    return { sent: 1, skipped: false }
+  })
+  const payload = { timeline: [], events: [] }
+  const stoppageId = `ban-91-${Date.now()}`
+  const stoppageSent = await processEvaluatedAlerts({
+    fixture: liveFixture(stoppageId, 91 * 60),
+    market: 'goals',
+    settings: defaultsFor('goals'),
+    byHalf: undefined,
+    fresh: [
+      {
+        ...sampleFeedAlert('goals'),
+        id: 'primary-2-91-0',
+        fixtureId: stoppageId,
+        matchLabel: 'Stoppage vs Test',
+        min: 91,
+        period: 2,
+        coincident: false,
+        market: 'goals',
+        firedAt: new Date().toISOString(),
+      },
+    ],
+    first: false,
+    finished: false,
+    payload,
+    events: [],
+    points: [{ period: 2, min: 91 }],
+  })
+  check(stoppageSent === 0, `91' must not telegram, got ${stoppageSent}`)
+  check(telegramCalls === 0, `91' must not call sendTelegram, got ${telegramCalls}`)
+
+  const liveId = `hint-${Date.now()}`
+  const hintSent = await processEvaluatedAlerts({
+    fixture: liveFixture(liveId, 85 * 60),
+    market: 'goals',
+    settings: defaultsFor('goals'),
+    byHalf: undefined,
+    fresh: [
+      {
+        ...sampleFeedAlert('goals'),
+        id: 'primary-2-85-0',
+        fixtureId: liveId,
+        matchLabel: 'Hint vs Test',
+        min: 85,
+        period: 2,
+        coincident: false,
+        market: 'goals',
+        firedAt: new Date().toISOString(),
+      },
+    ],
+    first: false,
+    finished: false,
+    payload,
+    events: [],
+    points: [{ period: 2, min: 85 }],
+  })
+  const hint = getPollerStatus().lastAlertLatencyHint
+  check(hintSent === 1, `in-window alert telegram, got ${hintSent}`)
+  check(hint?.clockMin === 85, `latency hint clockMin 85, got ${hint?.clockMin}`)
+  check(hint?.period === 2, `latency hint period 2, got ${hint?.period}`)
+  check(typeof hint?.sentAt === 'string' && hint.sentAt.length > 0, 'latency hint sentAt')
+  check(hint?.fixtureId === liveId, 'latency hint fixtureId')
+  setPollerSendTelegramForTests(null)
+  resetPollerRuntimeForTests()
+}
+
 if (fail.length) {
   console.error('FAIL', fail)
   process.exit(1)
 }
 console.log(
-  'OK: truncated JSON is scoped, lastError clears on partial success, sentPush persists after push, watchdog/fixture timeout/empty-json backoff',
+  'OK: truncated JSON is scoped, lastError clears on partial success, sentPush persists after push, watchdog/fixture timeout/empty-json backoff, in-window always selected',
 )

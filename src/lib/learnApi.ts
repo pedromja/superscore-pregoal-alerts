@@ -209,6 +209,15 @@ export async function fetchPollerStatus(): Promise<{
   lastTickAt: string | null
   lastError: string | null
   liveWatched: number
+  inWindowThisTick?: number
+  lastAlertLatencyHint?: {
+    clockMin: number
+    period: number
+    sentAt: string
+    tickLagMs: number
+    matchLabel: string
+    fixtureId: string
+  } | null
   alertsSent: number
   tickInFlight?: boolean
   lastTickDurationMs?: number | null
@@ -239,6 +248,15 @@ export async function fetchPollerStatus(): Promise<{
       lastTickAt: string | null
       lastError: string | null
       liveWatched: number
+      inWindowThisTick?: number
+      lastAlertLatencyHint?: {
+        clockMin: number
+        period: number
+        sentAt: string
+        tickLagMs: number
+        matchLabel: string
+        fixtureId: string
+      } | null
       alertsSent: number
       tickInFlight?: boolean
       lastTickDurationMs?: number | null

@@ -10,6 +10,7 @@ import {
   goalHalfOf,
   inCornerWindow,
   inGoalsWindow,
+  inAnyActiveMarketWindow,
   inMarketClockWindow,
   isStoppageClock,
 } from '../src/lib/windows.ts'
@@ -170,6 +171,11 @@ expect(isStoppageClock(46, 1), '46\' P1 is stoppage')
 expect(!isStoppageClock(45, 1), '45\' P1 is not stoppage')
 expect(!isStoppageClock(90, 2), '90\' P2 is not stoppage')
 expect(isStoppageClock(91, 2), '91\' P2 is stoppage')
+expect(inAnyActiveMarketWindow(85, 2), '85\' is in goals and/or corners')
+expect(inAnyActiveMarketWindow(36, 1), '36\' is in goals and/or corners')
+expect(inAnyActiveMarketWindow(75, 2), '75\' goals FT is in-window even if corners is not')
+expect(!inAnyActiveMarketWindow(91, 2), '91\' is never an active market window')
+expect(!inAnyActiveMarketWindow(12, 1), '12\' is outside both locked windows')
 expect(!inGoalsWindow(96, 2), '96\' goals window rejected')
 expect(!inCornerWindow(96, 2), '96\' corners window rejected')
 expect(!inMarketClockWindow('goals', 96, 2), '96\' goals clock rejected')

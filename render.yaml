@@ -19,7 +19,7 @@ services:
       - key: POLLER_ENABLED
         value: "1"
       - key: POLLER_INTERVAL_MS
-        value: "45000"
+        value: "15000"
       - key: LEARN_WINDOW
         value: "5"
       - key: LEARN_AUTO_MIN_OUTCOMES

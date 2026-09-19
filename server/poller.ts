@@ -18,6 +18,7 @@ import {
   POLLER_FINISHED_LIMIT,
   POLLER_FIXTURE_TIMEOUT_MS,
   POLLER_INTERVAL_MS,
+  POLLER_IN_WINDOW_CONCURRENCY,
   POLLER_JSON_BACKOFF_MAX_MS,
   POLLER_LIVE_LIMIT,
   POLLER_REGION,
@@ -79,6 +80,8 @@ const status: PollerStatus = {
   lastTickAt: null,
   lastError: null,
   liveWatched: 0,
+  inWindowThisTick: 0,
+  lastAlertLatencyHint: null,
   alertsSent: 0,
   tickInFlight: false,
   lastTickDurationMs: null,
@@ -100,9 +103,11 @@ let tickWatchdogMs = POLLER_TICK_WATCHDOG_MS
 let liveLimit = POLLER_LIVE_LIMIT
 let finishedLimit = POLLER_FINISHED_LIMIT
 let concurrency = POLLER_CONCURRENCY
+let inWindowConcurrency = POLLER_IN_WINDOW_CONCURRENCY
 const jsonBackoff = new JsonBackoff(POLLER_INTERVAL_MS, POLLER_JSON_BACKOFF_MAX_MS)
 const lastMomentumOkAt = new Map<string, number>()
 let storeTail = Promise.resolve()
+let currentTickStarted = 0
 
 type SendPushFn = typeof sendPushToAll
 type SendTelegramFn = typeof sendTelegramAlert
@@ -172,6 +177,7 @@ export function setPollerLimitsForTests(
     liveLimit?: number
     finishedLimit?: number
     concurrency?: number
+    inWindowConcurrency?: number
   } | null,
 ): void {
   fixtureTimeoutMs = opts?.fixtureTimeoutMs ?? POLLER_FIXTURE_TIMEOUT_MS
@@ -179,6 +185,7 @@ export function setPollerLimitsForTests(
   liveLimit = opts?.liveLimit ?? POLLER_LIVE_LIMIT
   finishedLimit = opts?.finishedLimit ?? POLLER_FINISHED_LIMIT
   concurrency = opts?.concurrency ?? POLLER_CONCURRENCY
+  inWindowConcurrency = opts?.inWindowConcurrency ?? POLLER_IN_WINDOW_CONCURRENCY
 }
 
 export function resetPollerRuntimeForTests(): void {
@@ -196,12 +203,16 @@ export function resetPollerRuntimeForTests(): void {
   liveLimit = POLLER_LIVE_LIMIT
   finishedLimit = POLLER_FINISHED_LIMIT
   concurrency = POLLER_CONCURRENCY
+  inWindowConcurrency = POLLER_IN_WINDOW_CONCURRENCY
+  currentTickStarted = 0
   processFixtureFn = processFixture
   fetchFixturesFn = defaultFetchFixtures
   warmupFn = warmupSokkerProBoard
   status.lastTickAt = null
   status.lastError = null
   status.liveWatched = 0
+  status.inWindowThisTick = 0
+  status.lastAlertLatencyHint = null
   status.alertsSent = 0
   status.tickInFlight = false
   status.lastTickDurationMs = null
@@ -258,15 +269,14 @@ function scheduleOddsAttach(work: () => Promise<void>): void {
   pendingOddsAttach.add(run)
 }
 
-async function notifyFreshAlerts(
+function claimFreshAlerts(
   fixture: Fixture,
   market: ReturnType<typeof loadActiveMarket>,
   settings: ReturnType<typeof currentSettings>,
   byHalf: CornersByHalf | undefined,
   fresh: FeedAlert[],
-): Promise<{ sent: number; notified: FeedAlert[] }> {
-  let sent = 0
-  const notified: FeedAlert[] = []
+): FeedAlert[] {
+  const claimed: FeedAlert[] = []
   for (const alert of fresh) {
     if (alert.coincident) continue
     // Stoppage (P1>45 / P2>90) and out-of-window: no push. Yeovil 96' arrived
@@ -277,10 +287,39 @@ async function notifyFreshAlerts(
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     if (loadSent().includes(key)) continue
     if (!markSent(key)) continue
-    notified.push(alert)
+    claimed.push(alert)
+  }
+  return claimed
+}
+
+function recordAlertLatency(fixture: Fixture, alert: FeedAlert): void {
+  const sentAt = new Date().toISOString()
+  const tickLagMs = currentTickStarted ? Date.now() - currentTickStarted : 0
+  status.lastAlertLatencyHint = {
+    clockMin: alert.min,
+    period: alert.period,
+    sentAt,
+    tickLagMs,
+    matchLabel: alert.matchLabel,
+    fixtureId: fixture.id,
+  }
+  console.info(
+    `[poller] telegram clock=${alert.min}' P${alert.period} sentAt=${sentAt} tickLagMs=${tickLagMs} ${alert.matchLabel}`,
+  )
+}
+
+async function dispatchClaimedAlerts(
+  fixture: Fixture,
+  market: ReturnType<typeof loadActiveMarket>,
+  claimed: FeedAlert[],
+): Promise<{ sent: number; notified: FeedAlert[] }> {
+  let sent = 0
+  const notified: FeedAlert[] = []
+  for (const alert of claimed) {
     const copy = alertNotificationCopy(alert)
     const alertKey = `${fixture.id}:${alert.id}`
     const monitorUrl = `/#/monitor?alert=${encodeURIComponent(alertKey)}`
+    const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     let notifiedOk = false
     const telegramResult: TelegramSendResult = await sendTelegram({
       title: copy.title,
@@ -291,13 +330,16 @@ async function notifyFreshAlerts(
     })
     if (telegramResult.sent > 0) {
       notifiedOk = true
+      recordAlertLatency(fixture, alert)
       if (telegramResult.messageId != null) {
-        markAlertTelegramMessage(
-          alertKey,
-          telegramResult.messageId,
-          market,
-          alert.cornerHalf,
-        )
+        await withStoreLock(() => {
+          markAlertTelegramMessage(
+            alertKey,
+            telegramResult.messageId,
+            market,
+            alert.cornerHalf,
+          )
+        })
       }
     } else if (!telegramResult.skipped) {
       console.error(
@@ -325,7 +367,10 @@ async function notifyFreshAlerts(
       }
     }
     if (notifiedOk) {
-      markAlertPushed(alertKey, market, alert.cornerHalf)
+      await withStoreLock(() => {
+        markAlertPushed(alertKey, market, alert.cornerHalf)
+      })
+      notified.push(alert)
       sent += 1
     }
   }
@@ -395,11 +440,57 @@ export async function processEvaluatedAlerts(
   )
 
   if (first) {
-    for (const alert of fresh) {
-      markSent(sentKey(market, fixture.id, alert.id, alert.cornerHalf))
+    await withStoreLock(() => {
+      for (const alert of fresh) {
+        markSent(sentKey(market, fixture.id, alert.id, alert.cornerHalf))
+      }
+      if (finished) {
+        ingestFeedAlerts(fresh, settings, false, market)
+        labelMatch(
+          {
+            fixture,
+            payload,
+            finished,
+            updatedAt: new Date().toISOString(),
+          },
+          undefined,
+          market,
+          undefined,
+          { flushTelegramOutcomes: false },
+        )
+      }
+      const clock = points.at(-1)
+      settleTipsForMatch({
+        fixture,
+        events,
+        points,
+        market,
+        finished,
+        clockMin: clock?.min,
+        clockPeriod: clock?.period,
+      })
+    })
+    if (fresh.length) {
+      scheduleOddsAttach(() =>
+        attachOddsAndEnrich({
+          fixture,
+          market,
+          settings,
+          alerts: fresh,
+          tipAlerts: [],
+          ingest: finished,
+        }),
+      )
     }
+    scheduleTelegramOutcomeFlush()
+    return 0
+  }
+
+  // Claim sent-keys + ingest under the store lock; Telegram is outside so one
+  // fixture's HTTP cannot block the next in-window evaluate.
+  const claimed = await withStoreLock(() => {
+    ingestFeedAlerts(fresh, settings, false, market)
     if (finished) {
-      ingestFeedAlerts(fresh, settings, false, market)
       labelMatch(
         {
           fixture,
@@ -423,57 +514,10 @@ export async function processEvaluatedAlerts(
       clockMin: clock?.min,
       clockPeriod: clock?.period,
     })
-    if (fresh.length) {
-      scheduleOddsAttach(() =>
-        attachOddsAndEnrich({
-          fixture,
-          market,
-          settings,
-          alerts: fresh,
-          tipAlerts: [],
-          ingest: finished,
-        }),
-      )
-    }
-    scheduleTelegramOutcomeFlush()
-    return 0
-  }
-
-  ingestFeedAlerts(fresh, settings, false, market)
-  if (finished) {
-    labelMatch(
-      {
-        fixture,
-        payload,
-        finished,
-        updatedAt: new Date().toISOString(),
-      },
-      undefined,
-      market,
-      undefined,
-      { flushTelegramOutcomes: false },
-    )
-  }
-
-  const clock = points.at(-1)
-  settleTipsForMatch({
-    fixture,
-    events,
-    points,
-    market,
-    finished,
-    clockMin: clock?.min,
-    clockPeriod: clock?.period,
+    return claimFreshAlerts(fixture, market, settings, byHalf, fresh)
   })
 
-  // 1) notify / mark sent / ingest (already done)  2) void odds attach — never await before telegram
-  const { sent, notified } = await notifyFreshAlerts(
-    fixture,
-    market,
-    settings,
-    byHalf,
-    fresh,
-  )
+  const { sent, notified } = await dispatchClaimedAlerts(fixture, market, claimed)
   scheduleTelegramOutcomeFlush()
   if (fresh.length) {
     scheduleOddsAttach(() =>
@@ -498,58 +542,60 @@ async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<n
   lastMomentumOkAt.set(fixture.id, Date.now())
   jsonBackoff.noteSuccess(fixture.id)
   const finished = fixture.state === 2 || fixture.status >= 100
-  return withStoreLock(async () => {
+
+  const market = loadActiveMarket()
+  const settings = currentSettings(market)
+  const byHalf = halvesBundle(market)
+  const { points, alerts: rawAlerts } = evaluateAlerts(
+    payload,
+    settings,
+    undefined,
+    byHalf,
+  )
+  const alerts = rawAlerts.filter((alert) =>
+    inMarketClockWindow(market, alert.min, alert.period),
+  )
+  const events = extractMarketEvents(payload, points, market)
+  const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
+  const primedId = primedKey(market, fixture.id)
+
+  const first = await withStoreLock(() => {
     saveMatch({
       fixture,
       payload,
       finished,
       updatedAt: new Date().toISOString(),
     })
+    const isFirst = !isPrimed(primedId)
+    if (isFirst) primeFixture(primedId)
+    return isFirst
+  })
 
-    const market = loadActiveMarket()
-    const settings = currentSettings(market)
-    const byHalf = halvesBundle(market)
-    const { points, alerts: rawAlerts } = evaluateAlerts(
+  const fresh: FeedAlert[] = alerts.map((alert) =>
+    withMatchTallies(
+      {
+        ...alert,
+        fixtureId: fixture.id,
+        matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+        firedAt: new Date().toISOString(),
+        coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+        market,
+      },
       payload,
-      settings,
-      undefined,
-      byHalf,
-    )
-    const alerts = rawAlerts.filter((alert) =>
-      inMarketClockWindow(market, alert.min, alert.period),
-    )
-    const events = extractMarketEvents(payload, points, market)
-    const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
-    const primedId = primedKey(market, fixture.id)
-    const first = !isPrimed(primedId)
-    if (first) primeFixture(primedId)
+    ),
+  )
 
-    const fresh: FeedAlert[] = alerts.map((alert) =>
-      withMatchTallies(
-        {
-          ...alert,
-          fixtureId: fixture.id,
-          matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-          firedAt: new Date().toISOString(),
-          coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
-          market,
-        },
-        payload,
-      ),
-    )
-
-    return processEvaluatedAlerts({
-      fixture,
-      market,
-      settings,
-      byHalf,
-      fresh,
-      first,
-      finished,
-      payload,
-      events,
-      points,
-    })
+  return processEvaluatedAlerts({
+    fixture,
+    market,
+    settings,
+    byHalf,
+    fresh,
+    first,
+    finished,
+    payload,
+    events,
+    points,
   })
 }
 
@@ -618,6 +664,7 @@ export async function tick(): Promise<void> {
   inFlight = true
   status.tickInFlight = true
   const started = Date.now()
+  currentTickStarted = started
   tickAbort = new AbortController()
   const signal = tickAbort.signal
   armWatchdog(gen)
@@ -639,7 +686,7 @@ export async function tick(): Promise<void> {
     const now = Date.now()
     const live = fixtures.filter((f) => f.state === 1)
     jsonBackoff.prune(new Set(fixtures.map((f) => f.id)))
-    const liveTargets = selectLiveTargets({
+    const { inWindow, fill } = selectLiveTargets({
       live,
       market: loadActiveMarket(),
       limit: liveLimit,
@@ -652,9 +699,11 @@ export async function tick(): Promise<void> {
       .filter((f) => f.state === 2 || f.status >= 100)
       .filter((f) => !jsonBackoff.isBlocked(f.id, now))
       .slice(0, finishedLimit)
-    const targets = [...liveTargets, ...recentDone]
+    const restTargets = [...fill, ...recentDone]
+    const targets = [...inWindow, ...restTargets]
     tickIndex += 1
     status.liveWatched = live.length
+    status.inWindowThisTick = inWindow.length
     status.liveProcessed = 0
     status.pushSubscribers = loadSubscriptions().length
     status.webPushEnabled = webPushEnabled()
@@ -667,10 +716,8 @@ export async function tick(): Promise<void> {
     // Prefetch SokkerPro mini in parallel; do not block evaluate/push on board/preodds HTTP.
     void warmupFn()
     const tickErrors: FixtureTickError[] = []
-    const sentParts = await mapLimit(
-      targets,
-      concurrency,
-      async (fixture) => {
+    const runTargets = async (batch: Fixture[], workerLimit: number) =>
+      mapLimit(batch, workerLimit, async (fixture) => {
         if (signal.aborted) return 0
         try {
           const n = await processFixtureTimed(fixture, signal)
@@ -698,10 +745,12 @@ export async function tick(): Promise<void> {
           status.liveProcessed += 1
           return 0
         }
-      },
-    )
+      })
+    // In-window first, higher concurrency; Telegram fires inside each evaluate.
+    const inWindowSent = await runTargets(inWindow, inWindowConcurrency)
+    const restSent = await runTargets(restTargets, concurrency)
     if (tickGen !== gen) return
-    const sent = sentParts.reduce((sum, n) => sum + n, 0)
+    const sent = [...inWindowSent, ...restSent].reduce((sum, n) => sum + n, 0)
     status.alertsSent += sent
     status.lastTickAt = new Date().toISOString()
     status.lastError = lastErrorAfterFixtureFailures(tickErrors, targets.length)
