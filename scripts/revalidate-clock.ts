@@ -32,6 +32,7 @@ import {
   type SokkerFixtureDetail,
 } from '../src/lib/sokkerTimeline.ts'
 import type { Fixture, Market, MomentumPayload } from '../src/lib/types.ts'
+import { inCornerWindow, inGoalsWindow, isStoppageClock } from '../src/lib/windows.ts'
 import { DEFINITIONS_LOCKED } from '../src/lib/lock.ts'
 import { fetchSokkerProBoard, fetchSokkerProFixtureDetail } from '../server/sokkerpro.ts'
 
@@ -327,11 +328,20 @@ async function collectMatched(
 
 function pairingForMarket(rows: MatchedRow[], market: Market): ClockPairing {
   const kind = market === 'corners' ? 'corner' : 'goal'
+  const inWindow = market === 'corners' ? inCornerWindow : inGoalsWindow
   const ss: ReturnType<typeof rawSuperscoreEvents> = []
   const sp: ReturnType<typeof sokkerEventsAsGoals> = []
   for (const row of rows) {
-    ss.push(...rawSuperscoreEvents(row.dump.payload, market))
-    sp.push(...sokkerEventsAsGoals(row.detail, kind, row.swapped))
+    ss.push(
+      ...rawSuperscoreEvents(row.dump.payload, market).filter(
+        (event) => !isStoppageClock(event.min, event.period) && inWindow(event.min, event.period),
+      ),
+    )
+    sp.push(
+      ...sokkerEventsAsGoals(row.detail, kind, row.swapped).filter(
+        (event) => !isStoppageClock(event.min, event.period) && inWindow(event.min, event.period),
+      ),
+    )
   }
   return pairEventClocks(ss, sp)
 }
@@ -520,7 +530,7 @@ async function main() {
   lines.push(`- Jogos com timeline SokkerPro: **${rows.length}**.`)
   if (pairingGoals) {
     lines.push(
-      `- Offset golo (SS − SP), emparelhado por lado+ordem: mediano **${pairingGoals.medianOffset ?? '—'}′**, média ${fmtN(pairingGoals.meanOffset)}, ${fmtPct(pairingGoals.lateShare)} com SS ≥1′ mais tarde. Por emparelhar: SS ${pairingGoals.unpairedSuperscore} / SP ${pairingGoals.unpairedSokker}.`,
+      `- Offset golo **dentro das janelas locked** (SS − SP, lado+ordem): mediano **${pairingGoals.medianOffset ?? '—'}′**, média ${fmtN(pairingGoals.meanOffset)}, ${fmtPct(pairingGoals.lateShare)} com SS ≥1′ mais tarde. Por emparelhar: SS ${pairingGoals.unpairedSuperscore} / SP ${pairingGoals.unpairedSokker}. Contagens diferentes = pairing imperfeito; as tabelas por balde é que importam.`,
     )
   }
   if (pairingCorners) {
