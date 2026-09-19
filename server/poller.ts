@@ -82,6 +82,7 @@ import {
   getFastScore,
   warmupSokkerProBoard,
 } from './sokkerpro.ts'
+import { observeSokkerClock, probeForAlert } from './sokkerClockLog.ts'
 import type { PollerStatus } from './types.ts'
 
 const status: PollerStatus = {
@@ -703,8 +704,14 @@ async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<n
     return isFirst
   })
 
-  const fresh: FeedAlert[] = alerts.map((alert) =>
-    withMatchTallies(
+  const fast = getFastScoreFn(fixture)
+  try {
+    observeSokkerClock({ fixture, fast, payload })
+  } catch {
+    /* clock log is best-effort; never break evaluate/notify */
+  }
+  const fresh: FeedAlert[] = alerts.map((alert) => {
+    const tallied = withMatchTallies(
       {
         ...alert,
         fixtureId: fixture.id,
@@ -712,10 +719,15 @@ async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<n
         firedAt: new Date().toISOString(),
         coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
         market,
+        fastScore: fast,
       },
       payload,
-    ),
-  )
+    )
+    return {
+      ...tallied,
+      clockProbe: probeForAlert(tallied, fast, market),
+    }
+  })
 
   return processEvaluatedAlerts({
     fixture,

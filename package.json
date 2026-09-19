@@ -14,7 +14,7 @@
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist-server/index.mjs --packages=external --target=node20",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify && npm run test:sokkerpro && npm run test:delivery && npm run test:lock && npm run test:telegram && npm run test:notify-lead && npm run test:fast-score",
+    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify && npm run test:sokkerpro && npm run test:delivery && npm run test:lock && npm run test:telegram && npm run test:notify-lead && npm run test:fast-score && npm run test:clock",
     "test:fast-score": "tsx scripts/verify-fast-score.ts",
     "test:notify-lead": "tsx scripts/verify-notify-lead.ts",
     "test:telegram": "tsx scripts/verify-telegram.ts",
@@ -25,7 +25,9 @@
     "test:notify": "tsx scripts/verify-notification-copy.ts",
     "test:sokkerpro": "tsx scripts/verify-sokkerpro.ts",
     "test:delivery": "tsx scripts/verify-odds-delivery.ts",
-    "test:lock": "tsx scripts/verify-lock-lead.ts"
+    "test:lock": "tsx scripts/verify-lock-lead.ts",
+    "test:clock": "tsx scripts/verify-clock-revalidate.ts",
+    "revalidate:clock": "tsx scripts/revalidate-clock.ts"
   },
   "engines": {
     "node": ">=20"

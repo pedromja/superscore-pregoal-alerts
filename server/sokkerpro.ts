@@ -1,5 +1,9 @@
 import { fastScoreFromBoard, type FastScore } from '../src/lib/fastScore.ts'
 import {
+  parseSokkerFixtureDetail,
+  type SokkerFixtureDetail,
+} from '../src/lib/sokkerTimeline.ts'
+import {
   collectOddsMap,
   flattenMiniFixtures,
   matchSokkerProFixture,
@@ -20,6 +24,8 @@ const BOARD_TIMEOUT_MS = Number(process.env.SOKKERPRO_BOARD_TIMEOUT_MS || 25_000
 const PREODDS_TIMEOUT_MS = Number(
   process.env.SOKKERPRO_PREODDS_TIMEOUT_MS || process.env.SOKKERPRO_TIMEOUT_MS || 8_000,
 )
+const DETAIL_TIMEOUT_MS = Number(process.env.SOKKERPRO_DETAIL_TIMEOUT_MS || 12_000)
+const DETAIL_CACHE_MS = Number(process.env.SOKKERPRO_DETAIL_CACHE_MS || 10 * 60_000)
 const BOARD_CACHE_MS = Number(
   process.env.SOKKERPRO_BOARD_CACHE_MS || SOKKERPRO_BOARD_CACHE_MS,
 )
@@ -31,6 +37,7 @@ type CacheEntry<T> = { ts: number; value: T }
 const boardCache = new Map<string, CacheEntry<SokkerProFixture[] | null>>()
 const oddsCache = new Map<string, CacheEntry<Record<string, string> | null>>()
 const matchCache = new Map<string, CacheEntry<SokkerProMatchOdds | null>>()
+const detailCache = new Map<string, CacheEntry<SokkerFixtureDetail | null>>()
 const boardInflight = new Map<string, Promise<SokkerProFixture[] | null>>()
 
 let boardFailLoggedThisTick = false
@@ -88,6 +95,7 @@ export function resetSokkerProStateForTests(): void {
   boardCache.clear()
   oddsCache.clear()
   matchCache.clear()
+  detailCache.clear()
   boardInflight.clear()
   boardFailLoggedThisTick = false
   nowFn = () => new Date()
@@ -231,6 +239,26 @@ export async function fetchSokkerProBoard(dateKey: string): Promise<SokkerProFix
   })
   boardInflight.set(dateKey, request)
   return request
+}
+
+/**
+ * Historical event clock. **Not** on the notify path — `/fixture/{id}` is a
+ * second HTTP and the mini board already has the live score.
+ * Mini has no timeline; this is the only public SokkerPro goal/corner minute list.
+ */
+export async function fetchSokkerProFixtureDetail(
+  fixtureId: string,
+): Promise<SokkerFixtureDetail | null> {
+  const hit = cached(detailCache, fixtureId, DETAIL_CACHE_MS)
+  if (hit !== undefined) return hit
+  const raw = await fetchJson(`${BASE}/fixture/${encodeURIComponent(fixtureId)}`, DETAIL_TIMEOUT_MS, 'preodds')
+  if (!raw) return store(detailCache, fixtureId, null)
+  try {
+    return store(detailCache, fixtureId, parseSokkerFixtureDetail(raw))
+  } catch (err) {
+    console.warn('[sokkerpro] fixture detail', err instanceof Error ? err.message : err)
+    return store(detailCache, fixtureId, null)
+  }
 }
 
 export async function fetchSokkerProPreodds(

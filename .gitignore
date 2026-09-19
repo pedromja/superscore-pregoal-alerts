@@ -22,6 +22,8 @@ data/matches/
 # Backtest dumps (report is in docs/ + backtest-data/BACKTEST.md)
 backtest-data/matches/
 backtest-data/manifest.json
+backtest-data/sokkerpro-boards/
+backtest-data/sokkerpro-details/
 
 # Editor directories and files
 .vscode/*

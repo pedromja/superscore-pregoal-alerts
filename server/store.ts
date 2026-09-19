@@ -309,6 +309,7 @@ export const LEARN_RESET_KEPT = [
   'tips.json / robobet_tips.json / odds_observations.json',
   'matches/*.json (arquivo de momentum)',
   'telegram_messages.json (message_id + outcome sent — anti re-envio GREEN/RED)',
+  'sokker_clock.json (estudo prospectivo do relógio SokkerPro)',
 ] as const
 
 function scopesForReset(market: ResetLearnMarket): LearnScope[] {
@@ -397,6 +398,8 @@ export function upsertAlerts(
             leadTimeLong: item.leadTimeLong ?? prev.leadTimeLong,
             longDeadline: item.longDeadline ?? prev.longDeadline,
             odds: item.odds ?? prev.odds,
+            fastScore: item.fastScore ?? prev.fastScore,
+            clockProbe: item.clockProbe ?? prev.clockProbe,
             market,
             cornerHalf: h ?? item.cornerHalf,
           }

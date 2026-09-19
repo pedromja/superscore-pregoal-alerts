@@ -120,6 +120,17 @@ Se o board não estiver quente ou o jogo não emparelhar, **não bloqueia** — 
 
 Contador no health: `suppressedAlreadyHit` (+ `lastAlreadyHitReason`). Janelas e limiares locked **não mudam**. Web Push continua dormente.
 
+### Relógio de eventos (revalidação SuperScore vs SokkerPro)
+
+Os dumps de treino etiquetam golos/cantos pelos eventos de momentum SuperScore (`type=4` / `type=14`). Ao vivo esses marcadores atrasam — precisão@lead do backtest 18/set é **suspeito de enviesamento optimista**.
+
+- Momentum SuperScore continua a disparar alertas. O relógio de verdade dos **golos** é SokkerPro sempre que existir.
+- Mini board: só marcador + `is_goal` (sem lista histórica, **sem cantos**).
+- Histórico: `GET /fixture/{id}` traz `timeline` — SokkerPro usa ids **diferentes** (golo `14`, penálti `16`, canto `126`). Não misturar com SuperScore.
+- Script: `npm run revalidate:clock` → `docs/clock-revalidation.md`. **Não** desbloqueia janelas/limiares.
+- Prospectivo: cada alerta grava `fastScore` / `clockProbe`; o poller anexa transições de marcador em `data/sokker_clock.json`.
+- Cantos ao vivo ficam **still-suspect** até haver feed de cantos mais rápido.
+
 ### Variáveis no Railway
 
 No serviço `web` → Variables (nunca no git):
@@ -199,7 +210,7 @@ No Safari “normal” não há Push.
 
 ## Aprendizagem
 
-Cada alerta no servidor: `{id, fixtureId, matchLabel, minute, side, ruleId, features, thresholdsSnapshot, ts, hit5, hitLong, longDeadline, leadTime5, leadTimeLong}`.
+Cada alerta no servidor: `{id, fixtureId, matchLabel, minute, side, ruleId, features, thresholdsSnapshot, ts, hit5, hitLong, longDeadline, leadTime5, leadTimeLong, fastScore?, clockProbe?}`. `hit*` continua a ser o relógio SuperScore; `fastScore`/`clockProbe` são o snapshot SokkerPro para o estudo prospectivo.
 
 Dois horizontes (golo do mesmo lado, estritamente depois do alerta):
 

@@ -1,0 +1,199 @@
+{
+  "generatedAt": "2026-09-19T14:54:24.317Z",
+  "lockedUntouched": true,
+  "definitionsLocked": true,
+  "dataset": {
+    "trainingWindow": {
+      "from": "2026-09-08",
+      "to": "2026-09-18",
+      "region": "ro"
+    },
+    "localDumps": 0,
+    "matchedWithSokkerTimeline": 0,
+    "maxPerDay": 25,
+    "offline": true,
+    "notes": [
+      "backtest-data/matches/ vazio (gitignored) — a amostra original de 880 jogos não está no repo",
+      "--offline sem dumps: só sensitivity + gap analysis"
+    ]
+  },
+  "availability": {
+    "miniHasTimeline": false,
+    "detailHasTimeline": true,
+    "miniNote": "offline: mini não tem timeline (documentado)",
+    "detailNote": "offline: /fixture/{id} timeline conhecido (type 14/16/126)",
+    "sampleFixtureId": null,
+    "cornersLive": "mini board não tem cantos — live continua SuperScore type=14 (still-suspect)",
+    "cornersHistorical": "GET /fixture/{id} timeline type_id=126 tem minutos de canto",
+    "goalsLive": "mini: scoresLocalTeam/Visitor + is_goal / is_goal_team + minute (PR #17)",
+    "goalsHistorical": "GET /fixture/{id} timeline type_id=14 (golo) e 16 (penálti)"
+  },
+  "publishedSensitivity": {
+    "goals_ht": [
+      {
+        "delayMin": 1,
+        "alerts": 2177,
+        "oldHits": 768,
+        "newHits": 385,
+        "oldPrecision": 0.35277905374368396,
+        "newPrecision": 0.17684887459807075,
+        "oldPreferred": 450,
+        "newPreferred": 112,
+        "oldPrecisionPreferred": 0.20670647680293983,
+        "newPrecisionPreferred": 0.05144694533762058,
+        "collapsed": 383,
+        "collapsedShare": 0.4986979166666667,
+        "medianLeadOld": 2,
+        "medianLeadNew": 4
+      },
+      {
+        "delayMin": 2,
+        "alerts": 2177,
+        "oldHits": 768,
+        "newHits": 318,
+        "oldPrecision": 0.35277905374368396,
+        "newPrecision": 0.14607257694074413,
+        "oldPreferred": 450,
+        "newPreferred": 100,
+        "oldPrecisionPreferred": 0.20670647680293983,
+        "newPrecisionPreferred": 0.045934772622875514,
+        "collapsed": 450,
+        "collapsedShare": 0.5859375,
+        "medianLeadOld": 2,
+        "medianLeadNew": 4
+      }
+    ],
+    "goals_ft": [
+      {
+        "delayMin": 1,
+        "alerts": 2124,
+        "oldHits": 795,
+        "newHits": 446,
+        "oldPrecision": 0.3742937853107345,
+        "newPrecision": 0.20998116760828625,
+        "oldPreferred": 421,
+        "newPreferred": 125,
+        "oldPrecisionPreferred": 0.19821092278719396,
+        "newPrecisionPreferred": 0.05885122410546139,
+        "collapsed": 349,
+        "collapsedShare": 0.4389937106918239,
+        "medianLeadOld": 2,
+        "medianLeadNew": 5
+      },
+      {
+        "delayMin": 2,
+        "alerts": 2124,
+        "oldHits": 795,
+        "newHits": 374,
+        "oldPrecision": 0.3742937853107345,
+        "newPrecision": 0.1760828625235405,
+        "oldPreferred": 421,
+        "newPreferred": 101,
+        "oldPrecisionPreferred": 0.19821092278719396,
+        "newPrecisionPreferred": 0.0475517890772128,
+        "collapsed": 421,
+        "collapsedShare": 0.529559748427673,
+        "medianLeadOld": 2,
+        "medianLeadNew": 5
+      }
+    ],
+    "corners_ht": [
+      {
+        "delayMin": 1,
+        "alerts": 4418,
+        "oldHits": 995,
+        "newHits": 754,
+        "oldPrecision": 0.22521502942507923,
+        "newPrecision": 0.1706654594839294,
+        "oldPreferred": 403,
+        "newPreferred": 305,
+        "oldPrecisionPreferred": 0.09121774558623812,
+        "newPrecisionPreferred": 0.06903576278859212,
+        "collapsed": 241,
+        "collapsedShare": 0.2422110552763819,
+        "medianLeadOld": 3,
+        "medianLeadNew": 3
+      },
+      {
+        "delayMin": 2,
+        "alerts": 4418,
+        "oldHits": 995,
+        "newHits": 592,
+        "oldPrecision": 0.22521502942507923,
+        "newPrecision": 0.1339972838388411,
+        "oldPreferred": 403,
+        "newPreferred": 267,
+        "oldPrecisionPreferred": 0.09121774558623812,
+        "newPrecisionPreferred": 0.06043458578542327,
+        "collapsed": 403,
+        "collapsedShare": 0.4050251256281407,
+        "medianLeadOld": 3,
+        "medianLeadNew": 3
+      }
+    ],
+    "corners_ft": [
+      {
+        "delayMin": 1,
+        "alerts": 2106,
+        "oldHits": 278,
+        "newHits": 175,
+        "oldPrecision": 0.13200379867046533,
+        "newPrecision": 0.08309591642924977,
+        "oldPreferred": 179,
+        "newPreferred": 122,
+        "oldPrecisionPreferred": 0.08499525166191833,
+        "newPrecisionPreferred": 0.057929724596391265,
+        "collapsed": 103,
+        "collapsedShare": 0.37050359712230213,
+        "medianLeadOld": 2,
+        "medianLeadNew": 2
+      },
+      {
+        "delayMin": 2,
+        "alerts": 2106,
+        "oldHits": 278,
+        "newHits": 99,
+        "oldPrecision": 0.13200379867046533,
+        "newPrecision": 0.04700854700854701,
+        "oldPreferred": 179,
+        "newPreferred": 81,
+        "oldPrecisionPreferred": 0.08499525166191833,
+        "newPrecisionPreferred": 0.038461538461538464,
+        "collapsed": 179,
+        "collapsedShare": 0.6438848920863309,
+        "medianLeadOld": 2,
+        "medianLeadNew": 2
+      }
+    ]
+  },
+  "pairing": {
+    "goals": null,
+    "corners": null
+  },
+  "buckets": [],
+  "recommendation": {
+    "action": "keep",
+    "lockedUntouched": true,
+    "headlinePt": "Manter locked. Sem relógio SokkerPro histórico emparelhado não se pode corrigir o backtest — só o estudo prospectivo.",
+    "detailPt": [
+      "Janelas e limiares locked **não** foram alterados. A aprendizagem continua só a propor.",
+      "O gate ao vivo SokkerPro (PR #17) já barre Telegram quando o marcador rápido já bateu.",
+      "Cada alerta ao vivo já grava o snapshot SokkerPro (`is_goal` / marcador) para calibrar daqui para a frente.",
+      "Cantos: o mini board não tem cantos. Relógio de cantos ao vivo continua SuperScore type=14 (ainda suspeito)."
+    ]
+  },
+  "prospective": {
+    "logFile": "data/sokker_clock.json",
+    "alertFields": [
+      "fastScore",
+      "clockProbe"
+    ],
+    "design": [
+      "Cada tick do poller grava o marcador SokkerPro (cache-only) e detecta transições de score.",
+      "Cada alerta SuperScore guarda fastScore + clockProbe (is_goal, minuto, tally SS).",
+      "lead_spro = sokker_event_min − alert_min (transição ou is_goal). lead_ss continua o actual.",
+      "N=50 golos em janela com ambos os relógios: recalcular prec@≥1 / 1–2 / mediana e só então falar com Pedro de params.",
+      "Cantos: sem transição no mini. Ficam flagged still-suspect até haver feed de cantos mais rápido."
+    ]
+  }
+}

@@ -1,3 +1,5 @@
+import type { AlertClockProbe } from './clockProbe'
+import type { FastScore } from './fastScore'
 import type { OddsObservation } from './oddsObserve'
 
 export type Side = 'home' | 'away'
@@ -184,4 +186,7 @@ export type FeedAlert = FiredAlert & {
   goalsTally?: MatchTally
   cornersTally?: MatchTally
   odds?: OddsObservation
+  /** SokkerPro live score at fire time (prospective clock study). */
+  fastScore?: FastScore | null
+  clockProbe?: AlertClockProbe
 }

@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "data": {
+    "fixtureId": "sp-demo-1",
+    "localTeamName": "Drava Ptuj",
+    "visitorTeamName": "NK Bistrica",
+    "localTeamId": "111",
+    "visitorTeamId": "222",
+    "scoresLocalTeam": "1",
+    "scoresVisitorTeam": "4",
+    "last_goal_timestamp": "1789728000",
+    "last_goal_side": "fora",
+    "timeline": "[{\"type_id\":14,\"minute\":6,\"extra_minute\":null,\"minute_total\":6,\"addition\":\"1st Goal\",\"result\":\"0-1\",\"participant_id\":222},{\"type_id\":126,\"minute\":7,\"addition\":\"1st Corner\",\"participant_id\":222},{\"type_id\":14,\"minute\":13,\"minute_total\":13,\"addition\":\"2nd Goal\",\"result\":\"0-2\",\"participant_id\":222},{\"type_id\":14,\"minute\":31,\"minute_total\":31,\"addition\":\"3rd Goal\",\"result\":\"0-3\",\"participant_id\":222},{\"type_id\":16,\"minute\":33,\"minute_total\":33,\"addition\":\"1st Penalty\",\"result\":\"0-4\",\"participant_id\":222},{\"type_id\":14,\"minute\":45,\"extra_minute\":1,\"minute_total\":46,\"addition\":\"5th Goal\",\"result\":\"0-5\",\"participant_id\":222},{\"type_id\":18,\"minute\":46,\"addition\":\"1st Substitution\",\"participant_id\":111},{\"type_id\":14,\"minute\":74,\"minute_total\":74,\"addition\":\"6th Goal\",\"result\":\"0-6\",\"participant_id\":222},{\"type_id\":14,\"minute\":80,\"minute_total\":80,\"addition\":\"7th Goal\",\"result\":\"1-6\",\"participant_id\":111},{\"type_id\":126,\"minute\":83,\"addition\":\"2nd Corner\",\"participant_id\":111}]"
+  }
+}

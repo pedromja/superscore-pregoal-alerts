@@ -1,3 +1,5 @@
+import type { AlertClockProbe } from '../src/lib/clockProbe.ts'
+import type { FastScore } from '../src/lib/fastScore.ts'
 import type { OddsObservation } from '../src/lib/oddsObserve.ts'
 import type {
   AlertSettings,
@@ -45,6 +47,9 @@ export type LoggedAlert = {
   /** ISO timestamp after the GREEN/RED outcome notice was sent (idempotency). */
   telegramOutcomeSentAt?: string | null
   odds?: OddsObservation
+  /** SokkerPro score / is_goal at fire time. Missing on historical SuperScore-only alerts. */
+  fastScore?: FastScore | null
+  clockProbe?: AlertClockProbe
 }
 
 export type GoalRecord = {

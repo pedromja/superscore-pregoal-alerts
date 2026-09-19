@@ -182,6 +182,8 @@ export function toLoggedAlert(
     telegramMessageId: undefined,
     telegramOutcomeSentAt: null,
     odds: alert.odds,
+    fastScore: alert.fastScore ?? null,
+    clockProbe: alert.clockProbe,
   }
 }
 
