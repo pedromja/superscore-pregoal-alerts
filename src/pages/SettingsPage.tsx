@@ -1,4 +1,5 @@
 import { NotificationBar } from '../components/NotificationBar'
+import { TelegramStatusNote } from '../components/TelegramStatusNote'
 import {
   TRAINING,
   TRAINING_CORNERS_FT,
@@ -36,6 +37,7 @@ export function SettingsPage({
 
   return (
     <div className="space-y-4">
+      <TelegramStatusNote />
       <NotificationBar settings={settings} onChange={onChange} />
       {DEFINITIONS_LOCKED ? (
         <section className="rounded-2xl border border-amber-400/40 bg-amber-950/20 p-4">

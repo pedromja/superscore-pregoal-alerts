@@ -6,7 +6,7 @@ O mercado activo escolhe-se no cabeçalho: **Golos | Cantos**. Golos é o defaul
 
 ## Odds observadas (não filtram alertas)
 
-Alertas e Web Push disparam **só** pelas regras de sinal (Spike / Swing / Sustained). **A odd não limita a emissão nem o push.** Sem odd ≠ alerta silenciado.
+Alertas e avisos Telegram disparam **só** pelas regras de sinal (Spike / Swing / Sustained). **A odd não limita a emissão nem o aviso.** Sem odd ≠ alerta silenciado.
 
 Em cada alerta o poller **observa e regista**:
 
@@ -17,7 +17,7 @@ Em cada alerta o poller **observa e regista**:
 
 Fica no alerta (`odds`) e no log durável `data/odds_observations.json`, chave `market|half|league`, com timestamp, linha, preços e fonte.
 
-Tip/ROI **anexa** a odd quando existe (stake 1u). Missing odd não cria tip, mas o alerta/push saem na mesma.
+Tip/ROI **anexa** a odd quando existe (stake 1u). Missing odd não cria tip, mas o alerta/Telegram saem na mesma.
 
 Isto é um **overlay futuro** em `data/tip_overlay.json`, **separado** de `params*.json`. **Não** se aplica o overlay de backtest (golos minOdd≥3 / cantos OFF). `requireOdd` / `minOdd` / `maxOdd` por bucket existem para a aprendizagem propor mais tarde — **nunca** entram em vigor sem confirmação explícita na UI/API.
 
@@ -28,7 +28,7 @@ Fontes SuperScore (não 1X2):
 1. **SuperScore (primário)** — o protobuf `OddsApiModel` em `GET /v2/public/stats/offer/market/item?match_id=&app_market=&app_variant=superscore` só traz 1X2 (`name` 1/X/2: `uuid`, `outcome_id`, `price`). Isso **não** é a odd da tip. O `event_id` desse modelo (o mesmo das `odds[]` no fixture) abre os mercados que a UI SuperScore mostra nos tabs de odds, via Superbet offer: `GET https://production-superbet-offer-{ro|pl|br}.freetls.fastly.net/v3/{locale}/events?events={event_id}&includeOnly=fixture,markets,superbets` (SSE em `/v3/subscription/...`). Daí extraímos **Over current+0,5** em Total goluri / Prima repriză - Total goluri, ou Total cornere / Prima repriză - Total cornere. Não se usa 1X2 (`Final`).
 2. **SokkerPro O/U (a seguir)** — API pública m2, **sem login**. Não é mercado next-goal / next-canto; é referência Over/Under. Golos: Over `total actual + 0,5` (`BET365_GOLS_OVER_2_5`, valor `1.90#0` → `1.90`). Cantos: Over `total actual + 0,5` ou a linha **CANTO** inteira mais próxima acima (`BET365_CANTO_OVER_9`). O `preodds` vem como lista de snapshots (`created_at`); usamos o mais recente. Prefere `*_LIVE` quando existir. O mini board (~1 MB) tem timeout 25s e cache ~90s, partilhado por todos os jogos do tick; ontem só se hoje carregou e o jogo não estiver lá. Timeouts/404 falham em silêncio (um warn por tick no mini) e o poller continua. `source: sokkerpro` / rótulo `SokkerPro O/U`.
 3. **RoboBet Telegram (último fallback de observação)** — linha `Odd Ao Vivo:` (vírgula ou ponto). **Nunca** `Pre-jogo:` nem `Ao Vivo:` (1X2).
-4. Sem odd nas três fontes → o alerta e o push **saem na mesma**; só não há linha de tip/ROI.
+4. Sem odd nas três fontes → o alerta e o Telegram **saem na mesma**; só não há linha de tip/ROI.
 
 Não há scrapers de casas. A API HTTP inplay do RoboBet também só tem 1X2 — ignora-se.
 
@@ -72,7 +72,7 @@ Isto sobe **dois** processos:
 | Vite (UI + proxy) | `http://127.0.0.1:43173` |
 | API Node (Push + poller + aprendizagem) | `http://127.0.0.1:43174` |
 
-O Vite encaminha `/api/push`, `/api/learn`, `/api/poller`, `/api/robobet` e `/api/tips` para o sidecar.
+O Vite encaminha `/api/push`, `/api/telegram`, `/api/learn`, `/api/poller`, `/api/robobet` e `/api/tips` para o sidecar.
 
 ```bash
 npm run build     # Vite UI + bundle do servidor em dist-server/
@@ -87,11 +87,52 @@ npm start         # produção: um processo Node (UI + API + poller) em 0.0.0.0:
 2. **Tips / ROI** — tips abertas e liquidadas, ROI por tipo×parte, acompanhamento por liga.
 3. **Replay / treino** — amostras Celtic / Drava ou jogo por ID.
 4. **Aprendizagem** — precisão/recall, proposta de limiares, histórico, importar amostras.
-5. **Definições** — limiares, regras, notificações locais e **Ativar notificações remotas**.
+5. **Definições** — limiares, regras, estado só-leitura do Telegram, notificações locais (Web Push dormente).
 
-## Web Push (app fechada)
+## Telegram (avisos ao vivo)
 
-O poller no servidor (intervalo default 45s, região `ro`) vigia até **24 jogos ao vivo** por tick (prioridade: janelas de cantos HT 32–42 / FT 82–87, ou pressão tardia em golos; o resto roda) com **5 em paralelo** e timeout por jogo. Corre as regras do **mercado activo** e faz `webpush.sendNotification` **sem filtro de odd**. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia push. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**; a `tag` distingue `pregoal:` vs `precantos:`. A prioridade da regra (Primária / Secundária / Reserva) fica no cartão da app, não no título do push. Health: `GET /api/poller/status` (`tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`).
+O canal principal é um **bot Telegram**. Quando o poller dispara um alerta Golo/Canto, envia `sendMessage` para o chat configurado (mesmo título/corpo do antigo push, mais o rótulo da regra e um link para o monitor). Web Push fica **desligado** por defeito (`WEB_PUSH_ENABLED` não é `1`); o código de push permanece no repo mas não corre.
+
+Deduplica pelo mesmo `sent.json` / `alertKey` de antes — o mesmo alerta não sai duas vezes. Timeouts ~9s; falhas de rede/API são logadas e o tick continua. Sem `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` o poller corre na mesma e simplesmente não envia.
+
+Health: `GET /api/telegram/status` (`configured`, `enabled`, `lastSendAt`, `lastError` — **sem secrets**). O mesmo bloco entra em `GET /api/poller/status`.
+
+### Variáveis no Railway
+
+No serviço `web` → Variables (nunca no git):
+
+| Variável | Obrigatória | Notas |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | sim, para enviar | Token do [@BotFather](https://t.me/BotFather). **Não commitar.** |
+| `TELEGRAM_CHAT_ID` | sim, para enviar | Id do chat/grupo/canal (grupos são negativos, ex. `-100…`) |
+| `TELEGRAM_ENABLED` | não | Default **ligado** quando token+chat existem. `0` desliga |
+| `PUBLIC_URL` | não | Origem do link «Abrir no monitor». Default `https://web-production-837b3.up.railway.app` |
+| `WEB_PUSH_ENABLED` | não | Default **desligado**. `1` reactive o Web Push (só se houver subscritores) |
+
+Dashboard: Project → serviço `web` → **Variables** → Raw Editor ou Add. Depois Redeploy. Alternativa CLI (com o projecto ligado):
+
+```bash
+railway variables --set "TELEGRAM_BOT_TOKEN=…" --set "TELEGRAM_CHAT_ID=…" --service web
+```
+
+### Como obter o chat id
+
+1. No Telegram, abrir [@BotFather](https://t.me/BotFather) → `/newbot` (ou um bot já vosso) → copiar o token.
+2. Abrir o bot e enviar `/start`. Para um **grupo**: adicionar o bot, dar permissão para mensagens, e enviar uma mensagem no grupo.
+3. No browser (substituir `<token>`):
+
+```
+https://api.telegram.org/bot<token>/getUpdates
+```
+
+4. No JSON, ler `message.chat.id` (utilizador) ou `message.chat.id` do grupo (normalmente `-100…`). Esse valor é `TELEGRAM_CHAT_ID`.
+5. Apagar o token da barra de endereço / histórico. Não o colar no README nem em commits.
+
+Smoke local sem token: `npm test` (o script `scripts/verify-telegram.ts` faz mock do Bot API). Com token só em `.env` local: `POST /api/telegram/test` ou esperar um alerta ao vivo.
+
+## Web Push (dormente)
+
+O poller no servidor (intervalo default 45s, região `ro`) vigia até **24 jogos ao vivo** por tick (prioridade: janelas de cantos HT 32–42 / FT 82–87, ou pressão tardia em golos; o resto roda) com **5 em paralelo** e timeout por jogo. Corre as regras do **mercado activo** e envia **Telegram primeiro** **sem filtro de odd**. Web Push só corre se `WEB_PUSH_ENABLED=1` **e** existirem subscritores. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia aviso. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**. A prioridade da regra (Primária / Secundária / Reserva) vai no cartão da app e, no Telegram, numa linha extra. Health: `GET /api/poller/status` (`tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`, `telegram`).
 
 ### Gerar VAPID
 
@@ -163,7 +204,13 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | Variável | Default | Notas |
 |---|---|---|
 | `PORT` | `8080` em produção / `43174` em local | Railway e Render injectam automaticamente |
-| `VAPID_PUBLIC_KEY` | — | Obrigatório em produção estável |
+| `TELEGRAM_BOT_TOKEN` | — | Canal principal. **Não commitar.** Sem isto o poller corre e não envia |
+| `TELEGRAM_CHAT_ID` | — | Chat/grupo/canal de destino |
+| `TELEGRAM_ENABLED` | on se token+chat | `0` desliga o bot mesmo com credenciais |
+| `TELEGRAM_TIMEOUT_MS` | `9000` | Timeout do `sendMessage` |
+| `PUBLIC_URL` | URL Railway de produção | Link «Abrir no monitor» nas mensagens |
+| `WEB_PUSH_ENABLED` | off | `1` reactive Web Push (dormente) |
+| `VAPID_PUBLIC_KEY` | — | Só se reactivar Web Push |
 | `VAPID_PRIVATE_KEY` | — | Nunca expor no cliente |
 | `VAPID_SUBJECT` | `mailto:dev@localhost` | Use `mailto:` com um email vosso |
 | `POLLER_REGION` | `ro` | Região SuperScore. Alias: `POLL_REGION` |
@@ -185,15 +232,15 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `SOKKERPRO_M2_URL` | `https://m2.sokkerpro.com` | Base pública; sem credenciais |
 | `NODE_ENV` | `production` | No Docker já vai definido |
 
-Health check: `GET /api/push/status` (JSON `{ subscribers, hasVapid }`).
+Health check: `GET /api/push/status` (JSON `{ subscribers, hasVapid }`). Telegram: `GET /api/telegram/status` (`configured`, `enabled`, `lastSendAt`, `lastError`).
 
 ### Railway
 
 1. Criar projecto em [railway.app](https://railway.app) → New → GitHub/Origin repo.
 2. O `railway.toml` escolhe o `Dockerfile` e health check `/api/push/status`.
-3. Variables → colar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, e opcionalmente `POLLER_REGION=ro`. `SOKKERPRO_ODDS` default ON (`0` desliga).
-4. Deploy. Railway define `PORT`. O URL público (`*.up.railway.app`) é HTTPS — no telemóvel: Definições → **Ativar notificações remotas**.
-5. Opcional: volume persistente montado em `/app/data` para subscriptions e histórico sobreviverem a redeploys.
+3. Variables → colar `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` (ver secção Telegram). Opcional: `PUBLIC_URL`, `POLLER_REGION=ro`. `SOKKERPRO_ODDS` default ON (`0` desliga). VAPID só se quiserem `WEB_PUSH_ENABLED=1`.
+4. Deploy. Railway define `PORT`. Os avisos saem no Telegram; o URL público (`*.up.railway.app`) serve o monitor e o link das mensagens.
+5. Opcional: volume persistente montado em `/app/data` para sent-keys, histórico e (se reactivarem) subscriptions sobreviverem a redeploys.
 
 Sem Docker (Nixpacks): Build `npm ci && npm run build`, Start `npm start`. O `Dockerfile` é o caminho recomendado.
 
