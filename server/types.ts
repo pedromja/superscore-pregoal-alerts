@@ -122,6 +122,15 @@ export type PollerFixtureError = {
   at: string
 }
 
+export type AlertLatencyHint = {
+  clockMin: number
+  period: number
+  sentAt: string
+  tickLagMs: number
+  matchLabel: string
+  fixtureId: string
+}
+
 export type PollerStatus = {
   enabled: boolean
   region: string
@@ -129,6 +138,8 @@ export type PollerStatus = {
   lastTickAt: string | null
   lastError: string | null
   liveWatched: number
+  inWindowThisTick: number
+  lastAlertLatencyHint: AlertLatencyHint | null
   alertsSent: number
   tickInFlight: boolean
   lastTickDurationMs: number | null

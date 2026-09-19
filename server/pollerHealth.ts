@@ -1,9 +1,17 @@
 import type { Fixture, Market } from '../src/lib/types.ts'
-import { inCornerWindow } from '../src/lib/windows.ts'
+import {
+  inAnyActiveMarketWindow,
+  inCornerWindow,
+  inGoalsWindow,
+} from '../src/lib/windows.ts'
 
-export const POLLER_LIVE_LIMIT_DEFAULT = 24
+/** Defaults match Railway production (env still wins). */
+export const POLLER_INTERVAL_MS_DEFAULT = 15_000
+export const POLLER_LIVE_LIMIT_DEFAULT = 32
 export const POLLER_FINISHED_LIMIT_DEFAULT = 6
-export const POLLER_CONCURRENCY_DEFAULT = 5
+export const POLLER_CONCURRENCY_DEFAULT = 8
+/** In-window live fixtures get a larger worker pool than the rotating fill. */
+export const POLLER_IN_WINDOW_CONCURRENCY_DEFAULT = 12
 export const POLLER_FIXTURE_TIMEOUT_MS_DEFAULT = 12_000
 export const POLLER_TICK_WATCHDOG_MS_DEFAULT = 80_000
 export const POLLER_JSON_BACKOFF_MAX_MS_DEFAULT = 10 * 60 * 1000
@@ -82,6 +90,12 @@ export function approachingCornerWindow(min: number, period: number): boolean {
   return false
 }
 
+export function fixtureInAnyMarketWindow(fixture: Fixture): boolean {
+  const clock = clockFromElapsed(fixture.liveElapsedSeconds)
+  if (!clock) return false
+  return inAnyActiveMarketWindow(clock.min, clock.period)
+}
+
 export function fixturePriorityScore(
   fixture: Fixture,
   market: Market,
@@ -91,13 +105,15 @@ export function fixturePriorityScore(
   const clock = clockFromElapsed(fixture.liveElapsedSeconds)
   let score = 0
   if (clock) {
-    if (market === 'corners') {
-      if (inCornerWindow(clock.min, clock.period)) score += WINDOW_PRIORITY
-      else if (approachingCornerWindow(clock.min, clock.period)) score += 400
-    } else {
-      if (clock.period === 2 && clock.min >= 80) score += 900
-      else if (clock.period === 2 && clock.min >= 70) score += 700
-      else if (clock.period === 1 && clock.min >= 35) score += 600
+    if (inAnyActiveMarketWindow(clock.min, clock.period)) {
+      score += WINDOW_PRIORITY
+      // Late FT corner (82–87) is the narrowest window — scan first.
+      if (inCornerWindow(clock.min, clock.period) && clock.period === 2) score += 200
+      else if (inGoalsWindow(clock.min, clock.period) && clock.period === 2) score += 150
+      else if (inCornerWindow(clock.min, clock.period)) score += 80
+      else score += 50
+    } else if (market === 'corners' && approachingCornerWindow(clock.min, clock.period)) {
+      score += 400
     }
   }
   const lastOk = lastOkAt.get(fixture.id)
@@ -106,6 +122,15 @@ export function fixturePriorityScore(
   return score
 }
 
+export type LiveTargetSelection = {
+  inWindow: Fixture[]
+  fill: Fixture[]
+}
+
+/**
+ * Every in-window live fixture is kept (goals and/or corners for that minute).
+ * LIVE_LIMIT only caps the rotating out-of-window fill.
+ */
 export function selectLiveTargets(args: {
   live: Fixture[]
   market: Market
@@ -114,9 +139,8 @@ export function selectLiveTargets(args: {
   tickIndex: number
   lastOkAt: Map<string, number>
   isBackedOff: (id: string) => boolean
-}): Fixture[] {
+}): LiveTargetSelection {
   const { live, market, limit, now, tickIndex, lastOkAt, isBackedOff } = args
-  if (limit <= 0) return []
   const eligible = live.filter((f) => !isBackedOff(f.id))
   const ranked = eligible
     .map((fixture) => ({
@@ -125,11 +149,19 @@ export function selectLiveTargets(args: {
     }))
     .sort((a, b) => b.score - a.score || a.fixture.id.localeCompare(b.fixture.id))
 
-  const priority = ranked.filter((row) => row.score >= WINDOW_PRIORITY).map((row) => row.fixture)
-  const rest = ranked.filter((row) => row.score < WINDOW_PRIORITY).map((row) => row.fixture)
-  if (priority.length >= limit) return priority.slice(0, limit)
-  const fill = rotateSlice(rest, tickIndex * (limit - priority.length), limit - priority.length)
-  return [...priority, ...fill]
+  const inWindow = ranked
+    .filter((row) => fixtureInAnyMarketWindow(row.fixture))
+    .map((row) => row.fixture)
+  const rest = ranked
+    .filter((row) => !fixtureInAnyMarketWindow(row.fixture))
+    .map((row) => row.fixture)
+  const fillSlots = limit > inWindow.length ? limit - inWindow.length : 0
+  const fill = rotateSlice(rest, tickIndex * Math.max(fillSlots, 1), fillSlots)
+  return { inWindow, fill }
+}
+
+export function flattenLiveTargets(selection: LiveTargetSelection): Fixture[] {
+  return [...selection.inWindow, ...selection.fill]
 }
 
 export class JsonBackoff {

@@ -5,6 +5,12 @@ import { config as loadEnv } from 'dotenv'
 import webpush from 'web-push'
 import { defaultsFor } from '../src/lib/market.ts'
 import type { AlertSettings } from '../src/lib/types.ts'
+import {
+  POLLER_CONCURRENCY_DEFAULT,
+  POLLER_IN_WINDOW_CONCURRENCY_DEFAULT,
+  POLLER_INTERVAL_MS_DEFAULT,
+  POLLER_LIVE_LIMIT_DEFAULT,
+} from './pollerHealth.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 loadEnv({ path: join(root, '.env') })
@@ -17,13 +23,23 @@ export const MATCHES_DIR = join(DATA_DIR, 'matches')
 export const SERVER_PORT = Number(process.env.PORT || 43174)
 export const POLLER_REGION =
   process.env.POLLER_REGION || process.env.POLL_REGION || 'ro'
-export const POLLER_INTERVAL_MS = Number(process.env.POLLER_INTERVAL_MS || 45000)
+export const POLLER_INTERVAL_MS = Number(
+  process.env.POLLER_INTERVAL_MS || POLLER_INTERVAL_MS_DEFAULT,
+)
 export const POLLER_ENABLED = process.env.POLLER_ENABLED !== '0'
-/** Live fixtures processed per tick (priority windows first, then a rotating fill). */
-export const POLLER_LIVE_LIMIT = Number(process.env.POLLER_LIVE_LIMIT || 24)
+/** Live fill cap after every in-window fixture is already included. Env overrides default. */
+export const POLLER_LIVE_LIMIT = Number(
+  process.env.POLLER_LIVE_LIMIT || POLLER_LIVE_LIMIT_DEFAULT,
+)
 export const POLLER_FINISHED_LIMIT = Number(process.env.POLLER_FINISHED_LIMIT || 6)
-/** Parallel fixture processors. Store writes still serialize. */
-export const POLLER_CONCURRENCY = Number(process.env.POLLER_CONCURRENCY || 5)
+/** Parallel processors for the rotating fill / finished tail. */
+export const POLLER_CONCURRENCY = Number(
+  process.env.POLLER_CONCURRENCY || POLLER_CONCURRENCY_DEFAULT,
+)
+/** Parallel processors for in-window live fixtures (higher than fill). */
+export const POLLER_IN_WINDOW_CONCURRENCY = Number(
+  process.env.POLLER_IN_WINDOW_CONCURRENCY || POLLER_IN_WINDOW_CONCURRENCY_DEFAULT,
+)
 /** One hung momentum fetch cannot freeze the rest of the tick. */
 export const POLLER_FIXTURE_TIMEOUT_MS = Number(
   process.env.POLLER_FIXTURE_TIMEOUT_MS || 12_000,

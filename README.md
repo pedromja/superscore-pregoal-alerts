@@ -138,7 +138,7 @@ Smoke local sem token: `npm test` (o script `scripts/verify-telegram.ts` faz moc
 
 ## Web Push (dormente)
 
-O poller no servidor (intervalo default 45s, região `ro`) vigia até **24 jogos ao vivo** por tick (prioridade: janelas de cantos HT 32–42 / FT 82–87, ou pressão tardia em golos; o resto roda) com **5 em paralelo** e timeout por jogo. Corre as regras do **mercado activo** e envia **Telegram primeiro** **sem filtro de odd**. Web Push só corre se `WEB_PUSH_ENABLED=1` **e** existirem subscritores. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia aviso. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**. A prioridade da regra (Primária / Secundária / Reserva) vai no cartão da app e, no Telegram, numa linha extra. Health: `GET /api/poller/status` (`tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`, `telegram`).
+O poller no servidor (intervalo default **15s**, região `ro`) inclui **todos** os jogos ao vivo que estejam numa janela activa (Golos HT 20–42 / FT 70–90 e/ou Cantos HT 32–42 / FT 82–87) **antes** de qualquer rotação. O `POLLER_LIVE_LIMIT` (default **32**) só limita o fill fora de janela. Jogos em janela correm **primeiro**, com concorrência mais alta (`POLLER_IN_WINDOW_CONCURRENCY`, default **12**); o resto usa `POLLER_CONCURRENCY` (default **8**). Telegram sai assim que o evaluate de cada jogo encontra um alerta — não espera pelo batch nem pelo attach de odds. Timeout por jogo. Corre as regras do **mercado activo** e envia **Telegram primeiro** **sem filtro de odd**. Web Push só corre se `WEB_PUSH_ENABLED=1` **e** existirem subscritores. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia aviso. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**. A prioridade da regra (Primária / Secundária / Reserva) vai no cartão da app e, no Telegram, numa linha extra. Health: `GET /api/poller/status` (`intervalMs`, `inWindowThisTick`, `lastAlertLatencyHint`, `tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`, `telegram`).
 
 ### Gerar VAPID
 
@@ -221,9 +221,10 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `VAPID_SUBJECT` | `mailto:dev@localhost` | Use `mailto:` com um email vosso |
 | `POLLER_REGION` | `ro` | Região SuperScore. Alias: `POLL_REGION` |
 | `POLLER_ENABLED` | `1` | `0` desliga o poller |
-| `POLLER_INTERVAL_MS` | `45000` | Intervalo entre ticks |
-| `POLLER_LIVE_LIMIT` | `24` | Jogos ao vivo por tick (janelas primeiro, depois rotação) |
-| `POLLER_CONCURRENCY` | `5` | Fixture processors em paralelo (writes ao disco serializam) |
+| `POLLER_INTERVAL_MS` | `15000` | Intervalo entre ticks. Env ganha sempre (Railway já usa 15000) |
+| `POLLER_LIVE_LIMIT` | `32` | Cap do fill **fora de janela**. Jogos em janela entram todos, mesmo acima deste número |
+| `POLLER_CONCURRENCY` | `8` | Processors em paralelo para o fill / jogos acabados |
+| `POLLER_IN_WINDOW_CONCURRENCY` | `12` | Processors em paralelo para jogos **dentro** de uma janela activa |
 | `POLLER_FIXTURE_TIMEOUT_MS` | `12000` | Timeout por jogo — um momentum preso não congela o tick |
 | `POLLER_TICK_WATCHDOG_MS` | `80000` | Se o tick não regressar, liberta `inFlight` para o intervalo seguinte |
 | `POLLER_JSON_BACKOFF_MAX_MS` | `600000` | Tecto do backoff após JSON vazio/truncado repetido |

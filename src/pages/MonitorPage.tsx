@@ -121,7 +121,7 @@ export function MonitorPage({
         : '—'
       setPollerLine(
         status.enabled
-          ? `Servidor: ${status.liveWatched} ao vivo · tick ${last} · ${status.alertsSent} avisos`
+          ? `Servidor: ${status.liveWatched} ao vivo · ${status.inWindowThisTick ?? 0} em janela · tick ${last} · ${status.alertsSent} avisos`
           : 'Poller do servidor desligado',
       )
     }

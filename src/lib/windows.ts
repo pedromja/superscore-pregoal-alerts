@@ -191,3 +191,13 @@ export function inMarketClockWindow(
     ? inCornerWindow(min, period)
     : inGoalsWindow(min, period)
 }
+
+/**
+ * Fixture selection: a live clock is in an active market window if it sits
+ * in goals and/or corners for that minute. Stoppage (P1>45 / P2>90) is never
+ * in-window — do not widen past 90.
+ */
+export function inAnyActiveMarketWindow(min: number, period: number): boolean {
+  if (isStoppageClock(min, period)) return false
+  return inGoalsWindow(min, period) || inCornerWindow(min, period)
+}
