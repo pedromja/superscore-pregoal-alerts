@@ -85,6 +85,8 @@ const board = flattenMiniFixtures({
 check(board.length === 2, `flatten board ${board.length}`)
 const matched = matchSokkerProFixture(board, 'Porto', 'Benfica')
 check(matched?.fixtureId === '4242', `fuzzy fixture match got ${matched?.fixtureId}`)
+check(matched?.scoresLocalTeam === 0 && matched?.scoresVisitorTeam === 0, 'missing scores default 0')
+check(matched?.isGoal === null && matched?.isGoalTeam === null, 'missing is_goal is null')
 
 const nestedOdds = collectOddsMap({
   data: {

@@ -26,7 +26,7 @@ Isto é um **overlay futuro** em `data/tip_overlay.json`, **separado** de `param
 Fontes SuperScore (não 1X2):
 
 1. **SuperScore (primário)** — o protobuf `OddsApiModel` em `GET /v2/public/stats/offer/market/item?match_id=&app_market=&app_variant=superscore` só traz 1X2 (`name` 1/X/2: `uuid`, `outcome_id`, `price`). Isso **não** é a odd da tip. O `event_id` desse modelo (o mesmo das `odds[]` no fixture) abre os mercados que a UI SuperScore mostra nos tabs de odds, via Superbet offer: `GET https://production-superbet-offer-{ro|pl|br}.freetls.fastly.net/v3/{locale}/events?events={event_id}&includeOnly=fixture,markets,superbets` (SSE em `/v3/subscription/...`). Daí extraímos **Over current+0,5** em Total goluri / Prima repriză - Total goluri, ou Total cornere / Prima repriză - Total cornere. Não se usa 1X2 (`Final`).
-2. **SokkerPro O/U (a seguir)** — API pública m2, **sem login**. Não é mercado next-goal / next-canto; é referência Over/Under. Golos: Over `total actual + 0,5` (`BET365_GOLS_OVER_2_5`, valor `1.90#0` → `1.90`). Cantos: Over `total actual + 0,5` ou a linha **CANTO** inteira mais próxima acima (`BET365_CANTO_OVER_9`). O `preodds` vem como lista de snapshots (`created_at`); usamos o mais recente. Prefere `*_LIVE` quando existir. O mini board (~1 MB) tem timeout 25s e cache ~90s, partilhado por todos os jogos do tick; ontem só se hoje carregou e o jogo não estiver lá. Timeouts/404 falham em silêncio (um warn por tick no mini) e o poller continua. `source: sokkerpro` / rótulo `SokkerPro O/U`.
+2. **SokkerPro O/U (a seguir)** — API pública m2, **sem login**. Não é mercado next-goal / next-canto; é referência Over/Under. Golos: Over `total actual + 0,5` (`BET365_GOLS_OVER_2_5`, valor `1.90#0` → `1.90`). Cantos: Over `total actual + 0,5` ou a linha **CANTO** inteira mais próxima acima (`BET365_CANTO_OVER_9`). O `preodds` vem como lista de snapshots (`created_at`); usamos o mais recente. Prefere `*_LIVE` quando existir. O mini board (~1 MB) tem timeout 25s e cache ~90s, partilhado por todos os jogos do tick; ontem só se hoje carregou e o jogo não estiver lá. Timeouts/404 falham em silêncio (um warn por tick no mini) e o poller continua. `source: sokkerpro` / rótulo `SokkerPro O/U`. O mesmo mini board (já quente no caminho de odds) é o **marcador rápido** que barre o Telegram quando o golo já bateu — ver abaixo.
 3. **RoboBet Telegram (último fallback de observação)** — linha `Odd Ao Vivo:` (vírgula ou ponto). **Nunca** `Pre-jogo:` nem `Ao Vivo:` (1X2).
 4. Sem odd nas três fontes → o alerta e o Telegram **saem na mesma**; só não há linha de tip/ROI.
 
@@ -101,6 +101,25 @@ Cada aviso leva um botão **Resolver agora**. O clique reavalia o alerta contra 
 
 Health: `GET /api/telegram/status` (`configured`, `enabled`, `lastSendAt`, `lastError` — **sem secrets**). O mesmo bloco entra em `GET /api/poller/status`.
 
+### Gate «já bateu» (SokkerPro + tally SuperScore)
+
+O momentum SuperScore (`type=4` golos / `type=14` cantos) chega atrasado. Antes do `sendMessage`, **depois** do suppress de lead &lt;1′ / coincidente, o poller consulta o mini board SokkerPro **só em memória** (`getFastScore` — sem HTTP no caminho crítico; board já aquecido para as odds).
+
+**Emparelhamento:** `team1`/`team2` SuperScore ↔ `localTeamName`/`visitorTeamName` (Jaccard, mesmo que o de odds). Se houver dois jogos com o mesmo nome, o `dateSeconds` vs `startingAtTimestamp` desempata. Casa/fora trocados invertem o marcador e o `is_goal_team`.
+
+**Golos — SokkerPro é a fonte rápida**
+
+| Motivo | Quando |
+|---|---|
+| `already-hit-fast-score` | Total SokkerPro (`scoresLocalTeam`+`scoresVisitorTeam`) **já maior** que o tally SuperScore no texto do alerta / eventos extraídos |
+| `already-hit-is-goal` | `is_goal` preenchido (golo acabou de sair) **e** não se consegue provar lead ≥1′ no relógio SokkerPro (`minute` − `alert.min`). Sem minuto → suprime (menos sinais tardios) |
+
+Se o board não estiver quente ou o jogo não emparelhar, **não bloqueia** — o alerta sai.
+
+**Cantos — o mini board não tem cantos.** Mantém-se o suppress SuperScore `type=14` (mesmo minuto / lead &lt;1). Extra: se o tally de cantos no **último** snapshot de momentum (reuso do payload, ou um re-read curto opcional `FAST_CORNER_REFETCH_MS`) já subiu vs o tally à hora do alerta → `already-hit-corner-tally`. Cantos continuam a depender dos eventos SuperScore.
+
+Contador no health: `suppressedAlreadyHit` (+ `lastAlreadyHitReason`). Janelas e limiares locked **não mudam**. Web Push continua dormente.
+
 ### Variáveis no Railway
 
 No serviço `web` → Variables (nunca no git):
@@ -138,7 +157,7 @@ Smoke local sem token: `npm test` (o script `scripts/verify-telegram.ts` faz moc
 
 ## Web Push (dormente)
 
-O poller no servidor (intervalo default **15s**, região `ro`) inclui **todos** os jogos ao vivo que estejam numa janela activa (Golos HT 20–42 / FT 70–90 e/ou Cantos HT 32–42 / FT 82–87) **antes** de qualquer rotação. O `POLLER_LIVE_LIMIT` (default **32**) só limita o fill fora de janela. Jogos em janela correm **primeiro**, com concorrência mais alta (`POLLER_IN_WINDOW_CONCURRENCY`, default **12**); o resto usa `POLLER_CONCURRENCY` (default **8**). Telegram sai assim que o evaluate de cada jogo encontra um alerta — não espera pelo batch nem pelo attach de odds. Timeout por jogo. Corre as regras do **mercado activo** e envia **Telegram primeiro** **sem filtro de odd**. Web Push só corre se `WEB_PUSH_ENABLED=1` **e** existirem subscritores. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia aviso. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**. A prioridade da regra (Primária / Secundária / Reserva) vai no cartão da app e, no Telegram, numa linha extra. Health: `GET /api/poller/status` (`intervalMs`, `inWindowThisTick`, `lastAlertLatencyHint`, `tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`, `telegram`).
+O poller no servidor (intervalo default **15s**, região `ro`) inclui **todos** os jogos ao vivo que estejam numa janela activa (Golos HT 20–42 / FT 70–90 e/ou Cantos HT 32–42 / FT 82–87) **antes** de qualquer rotação. O `POLLER_LIVE_LIMIT` (default **32**) só limita o fill fora de janela. Jogos em janela correm **primeiro**, com concorrência mais alta (`POLLER_IN_WINDOW_CONCURRENCY`, default **12**); o resto usa `POLLER_CONCURRENCY` (default **8**). Telegram sai assim que o evaluate de cada jogo encontra um alerta — não espera pelo batch nem pelo attach de odds. Timeout por jogo. Corre as regras do **mercado activo** e envia **Telegram primeiro** **sem filtro de odd**. Web Push só corre se `WEB_PUSH_ENABLED=1` **e** existirem subscritores. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia aviso. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**. A prioridade da regra (Primária / Secundária / Reserva) vai no cartão da app e, no Telegram, numa linha extra. Health: `GET /api/poller/status` (`intervalMs`, `inWindowThisTick`, `lastAlertLatencyHint`, `tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`, `suppressedAlreadyHit`, `telegram`).
 
 ### Gerar VAPID
 
@@ -233,6 +252,9 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `LEARN_AUTO_MIN_OUTCOMES` | `50` | Limiar informativo de elegibilidade (não aplica sozinho) |
 | `DATA_DIR` | `data` | Subscriptions, alertas, histórico, `tip_overlay.json` |
 | `SOKKERPRO_ODDS` | `1` | `0` desliga o fallback SokkerPro. Timeouts/404 não partem o poller |
+| `SOKKERPRO_LIVE_SCORE` | `1` | `0` desliga o gate de marcador rápido no Telegram (golos). Board em falta = fall through |
+| `FAST_CORNER_REFETCH_MS` | `800` | Re-read opcional de eventos SuperScore para cantos. `0` = só o payload do evaluate |
+| `SOKKERPRO_LIVE_STALE_MS` | `180000` | Idade máxima do mini em cache para o gate (não dispara HTTP) |
 | `SOKKERPRO_BOARD_TIMEOUT_MS` | `25000` | Timeout do mini board (~1 MB). Não herda o antigo 6s |
 | `SOKKERPRO_PREODDS_TIMEOUT_MS` | `8000` | Timeout por fixture `/preodds`. Alias: `SOKKERPRO_TIMEOUT_MS` |
 | `SOKKERPRO_BOARD_CACHE_MS` | `90000` | Cache in-memory do mini de hoje, partilhado no tick |
@@ -245,7 +267,7 @@ Health check: `GET /api/push/status` (JSON `{ subscribers, hasVapid }`). Telegra
 
 1. Criar projecto em [railway.app](https://railway.app) → New → GitHub/Origin repo.
 2. O `railway.toml` escolhe o `Dockerfile` e health check `/api/push/status`.
-3. Variables → colar `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` (ver secção Telegram). Opcional: `PUBLIC_URL`, `POLLER_REGION=ro`. `SOKKERPRO_ODDS` default ON (`0` desliga). VAPID só se quiserem `WEB_PUSH_ENABLED=1`.
+3. Variables → colar `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` (ver secção Telegram). Opcional: `PUBLIC_URL`, `POLLER_REGION=ro`. `SOKKERPRO_ODDS` e `SOKKERPRO_LIVE_SCORE` default ON (`0` desliga). VAPID só se quiserem `WEB_PUSH_ENABLED=1`.
 4. Deploy. Railway define `PORT`. Os avisos saem no Telegram; o URL público (`*.up.railway.app`) serve o monitor e o link das mensagens.
 5. Opcional: volume persistente montado em `/app/data` para sent-keys, histórico e (se reactivarem) subscriptions sobreviverem a redeploys.
 

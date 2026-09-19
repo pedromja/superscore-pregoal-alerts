@@ -54,6 +54,15 @@ export const POLLER_JSON_BACKOFF_MAX_MS = Number(
 )
 /** Public SokkerPro O/U odds. Default ON; set `SOKKERPRO_ODDS=0` to disable. Soft-fail. */
 export const SOKKERPRO_ODDS = process.env.SOKKERPRO_ODDS !== '0'
+/**
+ * SokkerPro mini board as a fast live-score gate before Telegram (golos).
+ * Default ON. `0` falls through (SuperScore-only). Soft-fail; never blocks the tick.
+ */
+export const SOKKERPRO_LIVE_SCORE = process.env.SOKKERPRO_LIVE_SCORE !== '0'
+/** Optional extra SuperScore events re-read for cantos. 0 = reuse evaluate payload. */
+export const FAST_CORNER_REFETCH_MS = Number(
+  process.env.FAST_CORNER_REFETCH_MS || 800,
+)
 export const LEARN_WINDOW = Number(process.env.LEARN_WINDOW || 5)
 export const LEARN_AUTO_MIN_OUTCOMES = Number(
   process.env.LEARN_AUTO_MIN_OUTCOMES || 50,

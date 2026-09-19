@@ -1,0 +1,126 @@
+{
+  "success": true,
+  "data": {
+    "dateKey": "fixtures_sample:2026-09-19:utc",
+    "fixtures_total": 10,
+    "sortedCategorizedFixtures": [
+      {
+        "leagueName": "Saved mini-board sample",
+        "fixtures": [
+          {
+            "is_goal": "",
+            "is_goal_team": "",
+            "fixtureId": "19882016",
+            "status": "NS",
+            "minute": "",
+            "startingAtTimestamp": "1789815600",
+            "startingAtDateTime": "\"2026-09-19 11:00:00\"",
+            "startingAtDate": "2026-09-19",
+            "scoresLocalTeam": "",
+            "scoresVisitorTeam": "",
+            "localTeamName": "Kenya U20",
+            "visitorTeamName": "South Sudan U20"
+          },
+          {
+            "is_goal": "",
+            "is_goal_team": "",
+            "fixtureId": "19881495",
+            "status": "2nd",
+            "minute": "73",
+            "startingAtTimestamp": "1789822800",
+            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
+            "startingAtDate": "2026-09-19",
+            "scoresLocalTeam": "0",
+            "scoresVisitorTeam": "1",
+            "localTeamName": "Sudan U20",
+            "visitorTeamName": "Uganda U20"
+          },
+          {
+            "is_goal": "",
+            "is_goal_team": "",
+            "fixtureId": "19881964",
+            "status": "2nd",
+            "minute": "75",
+            "startingAtTimestamp": "1789822800",
+            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
+            "startingAtDate": "2026-09-19",
+            "scoresLocalTeam": "4",
+            "scoresVisitorTeam": "0",
+            "localTeamName": "Angola U20",
+            "visitorTeamName": "Swaziland U20"
+          },
+          {
+            "is_goal": "1789828478",
+            "is_goal_team": "away",
+            "fixtureId": "19736218",
+            "status": "2nd",
+            "minute": "79",
+            "startingAtTimestamp": "1789822800",
+            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
+            "startingAtDate": "2026-09-19",
+            "scoresLocalTeam": "4",
+            "scoresVisitorTeam": "1",
+            "localTeamName": "Slovan Liberec W",
+            "visitorTeamName": "Viktoria Plzeň W"
+          },
+          {
+            "is_goal": "1789828480",
+            "is_goal_team": "home",
+            "fixtureId": "19787721",
+            "status": "1st",
+            "minute": "29",
+            "startingAtTimestamp": "1789826400",
+            "startingAtDateTime": "\"2026-09-19 14:00:00\"",
+            "startingAtDate": "2026-09-19",
+            "scoresLocalTeam": "1",
+            "scoresVisitorTeam": "0",
+            "localTeamName": "Welwyn Garden City",
+            "visitorTeamName": "Stotfold FC"
+          },
+          {
+            "is_goal": "",
+            "is_goal_team": "",
+            "fixtureId": "4242-live",
+            "status": "2nd",
+            "minute": "67",
+            "startingAtTimestamp": "1789822800",
+            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
+            "startingAtDate": "2026-09-19",
+            "scoresLocalTeam": "1",
+            "scoresVisitorTeam": "0",
+            "localTeamName": "FC Porto",
+            "visitorTeamName": "SL Benfica"
+          },
+          {
+            "is_goal": "",
+            "is_goal_team": "",
+            "fixtureId": "4242-later",
+            "status": "NS",
+            "minute": "",
+            "startingAtTimestamp": "1789909200",
+            "startingAtDateTime": "\"2026-09-20 13:00:00\"",
+            "startingAtDate": "2026-09-20",
+            "scoresLocalTeam": "",
+            "scoresVisitorTeam": "",
+            "localTeamName": "FC Porto",
+            "visitorTeamName": "SL Benfica"
+          },
+          {
+            "is_goal": "",
+            "is_goal_team": "",
+            "fixtureId": "swap-1",
+            "status": "1st",
+            "minute": "38",
+            "startingAtTimestamp": "1789822800",
+            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
+            "startingAtDate": "2026-09-19",
+            "scoresLocalTeam": "0",
+            "scoresVisitorTeam": "2",
+            "localTeamName": "Ferencváros",
+            "visitorTeamName": "Celtic"
+          }
+        ]
+      }
+    ]
+  }
+}

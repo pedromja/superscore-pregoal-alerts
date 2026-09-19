@@ -1,4 +1,4 @@
-import { fixtureMatchesQuote, TEAM_MATCH_MIN } from './tips'
+import { fixtureMatchesQuote, teamNameScore, TEAM_MATCH_MIN } from './tips'
 import type { CornerHalf, Market } from './types'
 
 /**
@@ -46,6 +46,8 @@ export type SokkerProPick = {
   underKey: string | null
 }
 
+export type SokkerProGoalTeam = 'home' | 'away'
+
 export type SokkerProFixture = {
   fixtureId: string
   localTeamName: string
@@ -53,7 +55,22 @@ export type SokkerProFixture = {
   status: string
   minute: number | null
   odds: Record<string, string>
+  scoresLocalTeam: number | null
+  scoresVisitorTeam: number | null
+  /** Non-empty unix-timestamp string when SokkerPro just flagged a goal. */
+  isGoal: string | null
+  isGoalTeam: SokkerProGoalTeam | null
+  startingAtTimestamp: number | null
 }
+
+export type SokkerProNameMatch = {
+  fixture: SokkerProFixture
+  swapped: boolean
+  nameScore: number
+}
+
+/** Prefer kickoff within this window when two name matches exist. */
+export const SOKKERPRO_KICKOFF_WINDOW_S = 6 * 3600
 
 const KEY_RE =
   /^([A-Z0-9]+)_((?:GOLS)|(?:CANTOS?))(?:_(HT|1T|1ST|FT|2T))?_(OVER|UNDER)_(\d+(?:[._]\d+)?)(_LIVE)?$/i
@@ -197,6 +214,33 @@ function readFixtureId(row: Record<string, unknown>): string | null {
   return id || null
 }
 
+function parseClockNumber(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const raw = typeof value === 'string' ? value.replace(/"/g, '').trim() : value
+  if (raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
+/** Mini board uses "" / "0" / "4". Missing or blank is 0; unparsable stays null. */
+export function parseSokkerProScore(value: unknown): number | null {
+  if (value == null || value === '') return 0
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+export function parseSokkerProIsGoal(value: unknown): string | null {
+  const s = str(value).trim()
+  return s ? s : null
+}
+
+export function parseSokkerProIsGoalTeam(value: unknown): SokkerProGoalTeam | null {
+  const s = str(value).trim().toLowerCase()
+  if (s === 'home' || s === 'local' || s === '1') return 'home'
+  if (s === 'away' || s === 'visitor' || s === '2') return 'away'
+  return null
+}
+
 export function normalizeSokkerProFixture(raw: unknown): SokkerProFixture | null {
   const row = asRecord(raw)
   if (!row) return null
@@ -211,11 +255,17 @@ export function normalizeSokkerProFixture(raw: unknown): SokkerProFixture | null
     localTeamName,
     visitorTeamName,
     status: str(row.status ?? row.state),
-    minute: (() => {
-      const n = Number(row.minute ?? row.min)
-      return Number.isFinite(n) ? n : null
-    })(),
+    minute: parseClockNumber(row.minute ?? row.min),
     odds: collectOddsMap(row),
+    scoresLocalTeam: parseSokkerProScore(row.scoresLocalTeam ?? row.localScore ?? row.homeScore),
+    scoresVisitorTeam: parseSokkerProScore(
+      row.scoresVisitorTeam ?? row.visitorScore ?? row.awayScore,
+    ),
+    isGoal: parseSokkerProIsGoal(row.is_goal ?? row.isGoal),
+    isGoalTeam: parseSokkerProIsGoalTeam(row.is_goal_team ?? row.isGoalTeam),
+    startingAtTimestamp: parseClockNumber(
+      row.startingAtTimestamp ?? row.starting_at_timestamp ?? row.startingAt,
+    ),
   }
 }
 
@@ -250,30 +300,108 @@ function statusLiveScore(status: string): number {
   return 1
 }
 
+function kickoffDeltaS(
+  fixture: SokkerProFixture,
+  kickoffSeconds?: number | null,
+): number {
+  if (
+    kickoffSeconds == null ||
+    !Number.isFinite(kickoffSeconds) ||
+    fixture.startingAtTimestamp == null
+  ) {
+    return Number.POSITIVE_INFINITY
+  }
+  return Math.abs(fixture.startingAtTimestamp - kickoffSeconds)
+}
+
+/**
+ * SuperScore team1/team2 → SokkerPro row. Name Jaccard first; kickoff
+ * (`dateSeconds` vs `startingAtTimestamp`) breaks ties / same-name doubles.
+ */
+export function matchSokkerProFixtureOriented(
+  fixtures: SokkerProFixture[],
+  home: string,
+  away: string,
+  kickoffSeconds?: number | null,
+): SokkerProNameMatch | null {
+  let best: {
+    match: SokkerProNameMatch
+    live: number
+    kickoff: number
+  } | null = null
+  for (const fixture of fixtures) {
+    const direct =
+      (teamNameScore(home, fixture.localTeamName) +
+        teamNameScore(away, fixture.visitorTeamName)) /
+      2
+    const swappedScore =
+      (teamNameScore(home, fixture.visitorTeamName) +
+        teamNameScore(away, fixture.localTeamName)) /
+      2
+    const nameScore = Math.max(direct, swappedScore)
+    if (nameScore < TEAM_MATCH_MIN) continue
+    const live = statusLiveScore(fixture.status)
+    const kickoff = kickoffDeltaS(fixture, kickoffSeconds)
+    const candidate = {
+      match: {
+        fixture,
+        swapped: swappedScore > direct,
+        nameScore,
+      },
+      live,
+      kickoff,
+    }
+    if (!best) {
+      best = candidate
+      continue
+    }
+    if (nameScore > best.match.nameScore + 1e-6) {
+      best = candidate
+      continue
+    }
+    if (nameScore + 1e-6 < best.match.nameScore) continue
+    const kickoffKnown =
+      Number.isFinite(kickoff) && Number.isFinite(best.kickoff)
+    if (kickoffKnown && kickoff + 30 < best.kickoff) {
+      best = candidate
+      continue
+    }
+    if (kickoffKnown && best.kickoff + 30 < kickoff) continue
+    if (live > best.live) best = candidate
+  }
+  return best?.match ?? null
+}
+
 export function matchSokkerProFixture(
   fixtures: SokkerProFixture[],
   home: string,
   away: string,
+  kickoffSeconds?: number | null,
 ): SokkerProFixture | null {
-  let best: { fixture: SokkerProFixture; score: number; live: number } | null = null
-  for (const fixture of fixtures) {
-    const score = fixtureMatchesQuote(
-      home,
-      away,
-      fixture.localTeamName,
-      fixture.visitorTeamName,
-    )
-    if (score < TEAM_MATCH_MIN) continue
-    const live = statusLiveScore(fixture.status)
-    if (
-      !best ||
-      score > best.score ||
-      (score === best.score && live > best.live)
-    ) {
-      best = { fixture, score, live }
+  if (kickoffSeconds == null) {
+    let best: { fixture: SokkerProFixture; score: number; live: number } | null =
+      null
+    for (const fixture of fixtures) {
+      const score = fixtureMatchesQuote(
+        home,
+        away,
+        fixture.localTeamName,
+        fixture.visitorTeamName,
+      )
+      if (score < TEAM_MATCH_MIN) continue
+      const live = statusLiveScore(fixture.status)
+      if (
+        !best ||
+        score > best.score ||
+        (score === best.score && live > best.live)
+      ) {
+        best = { fixture, score, live }
+      }
     }
+    return best?.fixture ?? null
   }
-  return best?.fixture ?? null
+  return matchSokkerProFixtureOriented(fixtures, home, away, kickoffSeconds)
+    ?.fixture ?? null
 }
 
 type RankedQuote = SokkerProParsedKey & { odd: number }

@@ -231,6 +231,8 @@ export async function fetchPollerStatus(): Promise<{
   liveProcessed?: number
   pushSubscribers?: number
   webPushEnabled?: boolean
+  suppressedAlreadyHit?: number
+  lastAlreadyHitReason?: string | null
   telegram?: {
     configured: boolean
     enabled: boolean
@@ -270,6 +272,8 @@ export async function fetchPollerStatus(): Promise<{
       liveProcessed?: number
       pushSubscribers?: number
       webPushEnabled?: boolean
+      suppressedAlreadyHit?: number
+      lastAlreadyHitReason?: string | null
       telegram?: {
         configured: boolean
         enabled: boolean
