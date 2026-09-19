@@ -132,4 +132,11 @@ export type PollerStatus = {
   lastFixtureError: PollerFixtureError | null
   liveProcessed: number
   pushSubscribers: number
+  webPushEnabled: boolean
+  telegram: {
+    configured: boolean
+    enabled: boolean
+    lastSendAt: string | null
+    lastError: string | null
+  }
 }

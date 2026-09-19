@@ -5,6 +5,7 @@ import type { FeedAlert, Fixture } from '../src/lib/types.ts'
 import {
   processEvaluatedAlerts,
   setPollerSendPushForTests,
+  setPollerSendTelegramForTests,
   waitForOddsAttachForTests,
 } from '../server/poller.ts'
 import {
@@ -96,16 +97,21 @@ const fresh = [testAlert(fixtureId, alertId)]
 const settings = defaultsFor('goals')
 const payload = { timeline: [], events: [] }
 
+let notifyCount = 0
 let pushCount = 0
 let oddsResolved = false
-let pushBeforeOdds = false
+let notifyBeforeOdds = false
 
 try {
-  setPollerSendPushForTests(async () => {
-    pushCount += 1
-    pushBeforeOdds = !oddsResolved
+  setPollerSendTelegramForTests(async () => {
+    notifyCount += 1
+    notifyBeforeOdds = !oddsResolved
     const openTips = loadTips().filter((t) => t.fixtureId === fixtureId)
     check(openTips.length === 0, 'tip must not open before odds resolve')
+    return { sent: 1, skipped: false }
+  })
+  setPollerSendPushForTests(async () => {
+    pushCount += 1
     return { sent: 1, removed: 0, attempted: 1, errors: [] }
   })
   setAttachOddsForTests(async (args) => {
@@ -130,9 +136,10 @@ try {
     points: [{ period: 1, min: 38 }],
   })
 
-  check(sent === 1, `first push sent count, got ${sent}`)
-  check(pushCount === 1, `push once before odds, got ${pushCount}`)
-  check(pushBeforeOdds, 'push must not wait for SuperScore/SokkerPro HTTP')
+  check(sent === 1, `first telegram sent count, got ${sent}`)
+  check(notifyCount === 1, `telegram once before odds, got ${notifyCount}`)
+  check(pushCount === 0, `web push stays dormant, got ${pushCount}`)
+  check(notifyBeforeOdds, 'telegram must not wait for SuperScore/SokkerPro HTTP')
   check(!oddsResolved, 'processEvaluatedAlerts must return before odds attach finishes')
   check(
     loadTips().filter((t) => t.fixtureId === fixtureId).length === 0,
@@ -145,7 +152,8 @@ try {
 
   await waitForOddsAttachForTests()
   check(oddsResolved, 'odds attach eventually runs')
-  check(pushCount === 1, `async odds must not push again, got ${pushCount}`)
+  check(notifyCount === 1, `async odds must not telegram again, got ${notifyCount}`)
+  check(pushCount === 0, `async odds must not enable push, got ${pushCount}`)
   const stored = loadAlerts('goals').find((a) => a.id === loggedId)
   check(stored?.odds?.source === 'superscore', 'stored alert gets odds after attach')
   const tip = loadTips().find((t) => t.fixtureId === fixtureId && t.alertId === alertId)
@@ -167,7 +175,7 @@ try {
   })
   await waitForOddsAttachForTests()
   check(sentAgain === 0, `second tick must not send, got ${sentAgain}`)
-  check(pushCount === 1, `sent keys dedupe async enrich, got ${pushCount}`)
+  check(notifyCount === 1, `sent keys dedupe async enrich, got ${notifyCount}`)
   check(
     loadTips().filter((t) => t.fixtureId === fixtureId && t.alertId === alertId).length === 1,
     'async enrich must not duplicate tips',
@@ -175,7 +183,7 @@ try {
 
   const primedId = `odds-sep-prime-${Date.now()}`
   const primedAlert = testAlert(primedId, alertId)
-  const primedPushesBefore = pushCount
+  const primedNotifiesBefore = notifyCount
   const primedSent = await processEvaluatedAlerts({
     fixture: testFixture(primedId),
     market: 'goals',
@@ -189,8 +197,8 @@ try {
     points: [{ period: 1, min: 38 }],
   })
   await waitForOddsAttachForTests()
-  check(primedSent === 0, 'first/prime tick does not push')
-  check(pushCount === primedPushesBefore, 'first/prime tick must not call sendPush')
+  check(primedSent === 0, 'first/prime tick does not telegram')
+  check(notifyCount === primedNotifiesBefore, 'first/prime tick must not call sendTelegram')
   check(
     loadTips().filter((t) => t.fixtureId === primedId).length === 0,
     'primed alerts do not open tips',
@@ -203,7 +211,7 @@ try {
     min: 96,
     period: 2,
   }
-  const lateBefore = pushCount
+  const lateBefore = notifyCount
   const lateSent = await processEvaluatedAlerts({
     fixture: testFixture(lateId),
     market: 'goals',
@@ -217,9 +225,10 @@ try {
     points: [{ period: 2, min: 96 }],
   })
   await waitForOddsAttachForTests()
-  check(lateSent === 0, `96' stoppage must not push, got ${lateSent}`)
-  check(pushCount === lateBefore, '96\' stoppage must not call sendPush')
+  check(lateSent === 0, `96' stoppage must not telegram, got ${lateSent}`)
+  check(notifyCount === lateBefore, '96\' stoppage must not call sendTelegram')
 } finally {
+  setPollerSendTelegramForTests(null)
   setPollerSendPushForTests(null)
   setAttachOddsForTests(null)
   saveSent(previousSent)
@@ -232,5 +241,5 @@ if (fail.length) {
   process.exit(1)
 }
 console.log(
-  'OK: push does not wait for odds HTTP, sent keys block double-send, tips open after odd',
+  'OK: telegram does not wait for odds HTTP, sent keys block double-send, tips open after odd',
 )

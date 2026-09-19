@@ -144,8 +144,8 @@ export function NotificationBar({ settings, onChange, compact = false }: Props) 
         </p>
         <h2 className="text-lg font-semibold">Telemóvel e PC</h2>
         <p className="mt-1 text-sm text-emerald-100/60">
-          Locais: o separador/PWA tem de estar aberto. Remotas: o poller do
-          servidor envia Web Push mesmo com a app fechada (VAPID).
+          Avisos via Telegram (bot). Web Push desligado. Locais no browser
+          continuam a funcionar se a PWA estiver aberta.
         </p>
       </div>
 
@@ -230,9 +230,11 @@ export function NotificationBar({ settings, onChange, compact = false }: Props) 
       <div className="rounded-xl border border-line bg-pitch px-3 py-3">
         <p className="text-sm font-semibold">Push remoto (app fechada)</p>
         <p className="mt-1 text-xs text-emerald-100/55">
+          Canal dormente. Os avisos ao vivo vão pelo Telegram. Só reactive
+          com WEB_PUSH_ENABLED=1 no servidor.
           {remote
-            ? 'Este dispositivo está subscrito. O poller avisa os telemóveis e PCs registados.'
-            : 'Subscreva para receber alertas com a PWA fechada.'}
+            ? ' Este dispositivo ainda tem uma subscription antiga.'
+            : ''}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {remote ? (

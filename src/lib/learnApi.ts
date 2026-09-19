@@ -221,6 +221,13 @@ export async function fetchPollerStatus(): Promise<{
   } | null
   liveProcessed?: number
   pushSubscribers?: number
+  webPushEnabled?: boolean
+  telegram?: {
+    configured: boolean
+    enabled: boolean
+    lastSendAt: string | null
+    lastError: string | null
+  }
 } | null> {
   try {
     const res = await fetch('/api/poller/status')
@@ -244,7 +251,31 @@ export async function fetchPollerStatus(): Promise<{
       } | null
       liveProcessed?: number
       pushSubscribers?: number
+      webPushEnabled?: boolean
+      telegram?: {
+        configured: boolean
+        enabled: boolean
+        lastSendAt: string | null
+        lastError: string | null
+      }
     }
+  } catch {
+    return null
+  }
+}
+
+export type TelegramStatus = {
+  configured: boolean
+  enabled: boolean
+  lastSendAt: string | null
+  lastError: string | null
+}
+
+export async function fetchTelegramStatus(): Promise<TelegramStatus | null> {
+  try {
+    const res = await fetch('/api/telegram/status')
+    if (!res.ok) return null
+    return (await res.json()) as TelegramStatus
   } catch {
     return null
   }

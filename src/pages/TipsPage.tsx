@@ -165,7 +165,7 @@ export function TipsPage() {
         <h2 className="text-lg font-semibold">Tips · ROI</h2>
         <p className="mt-1 max-w-3xl text-sm text-emerald-100/60">
           Overlay em <span className="font-mono">data/tip_overlay.json</span>, separado
-          dos <span className="font-mono">params*.json</span>. Alertas e Web Push
+          dos <span className="font-mono">params*.json</span>. Alertas e Telegram
           disparam pelas regras de sinal (Spike/Swing/Sustained) — a odd{' '}
           <strong>não</strong> os bloqueia. Observamos limite (mais-um / over
           current±0,5) e asiático quando o SuperScore/Superbet os tem; se faltar,

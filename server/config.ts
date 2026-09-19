@@ -45,6 +45,50 @@ export const LEARN_AUTO_MIN_OUTCOMES = Number(
 export const LEARN_AUTO_APPLY = process.env.LEARN_AUTO_APPLY === '1'
 export const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:dev@localhost'
 
+/** Bot API token. Empty = Telegram channel off. Never log this value. */
+export function telegramBotToken(): string {
+  return (process.env.TELEGRAM_BOT_TOKEN || '').trim()
+}
+
+/** Destination chat / group / channel id (may be negative). */
+export function telegramChatId(): string {
+  return (process.env.TELEGRAM_CHAT_ID || '').trim()
+}
+
+export function telegramConfigured(): boolean {
+  return Boolean(telegramBotToken() && telegramChatId())
+}
+
+/** Default on when token + chat are set. `TELEGRAM_ENABLED=0` forces off. */
+export function telegramEnabled(): boolean {
+  return telegramConfigured() && process.env.TELEGRAM_ENABLED !== '0'
+}
+
+/** Dormant by default. `WEB_PUSH_ENABLED=1` re-enables the old channel. */
+export function webPushEnabled(): boolean {
+  return process.env.WEB_PUSH_ENABLED === '1'
+}
+
+export const TELEGRAM_TIMEOUT_MS = Number(process.env.TELEGRAM_TIMEOUT_MS || 9000)
+
+function resolvePublicAppUrl(): string {
+  const raw = (
+    process.env.PUBLIC_URL ||
+    process.env.APP_URL ||
+    process.env.RAILWAY_PUBLIC_DOMAIN ||
+    ''
+  ).trim()
+  const fallback = 'https://web-production-837b3.up.railway.app'
+  const value = raw || fallback
+  const withProto = /^https?:\/\//i.test(value) ? value : `https://${value}`
+  return withProto.replace(/\/$/, '')
+}
+
+/** Public origin for monitor deep-links in Telegram (no trailing slash). */
+export function publicAppUrl(): string {
+  return resolvePublicAppUrl()
+}
+
 mkdirSync(MATCHES_DIR, { recursive: true })
 
 type VapidFile = { publicKey: string; privateKey: string; subject: string }

@@ -22,6 +22,7 @@ import {
   POLLER_LIVE_LIMIT,
   POLLER_REGION,
   POLLER_TICK_WATCHDOG_MS,
+  webPushEnabled,
 } from './config.ts'
 import { currentSettings, ingestFeedAlerts, labelMatch } from './learn.ts'
 import {
@@ -32,6 +33,11 @@ import {
   withTimeout,
 } from './pollerHealth.ts'
 import { sendPushToAll, type PushSendResult } from './push.ts'
+import {
+  getTelegramStatus,
+  sendTelegramAlert,
+  type TelegramSendResult,
+} from './telegram.ts'
 import {
   fetchFixturesServer,
   fetchMomentumServer,
@@ -75,6 +81,8 @@ const status: PollerStatus = {
   lastFixtureError: null,
   liveProcessed: 0,
   pushSubscribers: 0,
+  webPushEnabled: webPushEnabled(),
+  telegram: getTelegramStatus(),
 }
 
 let inFlight = false
@@ -92,7 +100,9 @@ const lastMomentumOkAt = new Map<string, number>()
 let storeTail = Promise.resolve()
 
 type SendPushFn = typeof sendPushToAll
+type SendTelegramFn = typeof sendTelegramAlert
 let sendPush: SendPushFn = sendPushToAll
+let sendTelegram: SendTelegramFn = sendTelegramAlert
 const pendingOddsAttach = new Set<Promise<void>>()
 
 type ProcessFixtureFn = (fixture: Fixture, signal?: AbortSignal) => Promise<number>
@@ -121,11 +131,17 @@ export function getPollerStatus(): PollerStatus {
     ...status,
     tickInFlight: inFlight,
     pushSubscribers: loadSubscriptions().length,
+    webPushEnabled: webPushEnabled(),
+    telegram: getTelegramStatus(),
   }
 }
 
 export function setPollerSendPushForTests(fn: SendPushFn | null): void {
   sendPush = fn ?? sendPushToAll
+}
+
+export function setPollerSendTelegramForTests(fn: SendTelegramFn | null): void {
+  sendTelegram = fn ?? sendTelegramAlert
 }
 
 export async function waitForOddsAttachForTests(): Promise<void> {
@@ -188,6 +204,9 @@ export function resetPollerRuntimeForTests(): void {
   status.lastFixtureError = null
   status.liveProcessed = 0
   status.pushSubscribers = 0
+  status.webPushEnabled = webPushEnabled()
+  status.telegram = getTelegramStatus()
+  sendTelegram = sendTelegramAlert
 }
 
 export type FixtureTickError = {
@@ -255,22 +274,45 @@ async function notifyFreshAlerts(
     notified.push(alert)
     const copy = alertNotificationCopy(alert)
     const alertKey = `${fixture.id}:${alert.id}`
-    const result: PushSendResult = await sendPush({
+    const monitorUrl = `/#/monitor?alert=${encodeURIComponent(alertKey)}`
+    let notifiedOk = false
+    const telegramResult: TelegramSendResult = await sendTelegram({
       title: copy.title,
       body: copy.body,
-      url: `/#/monitor?alert=${encodeURIComponent(alertKey)}`,
+      url: monitorUrl,
       alertKey,
-      tag: pushTagFor(market, key),
+      ruleLabel: alert.ruleName,
     })
-    if (result.sent > 0) {
+    if (telegramResult.sent > 0) {
+      notifiedOk = true
+    } else if (!telegramResult.skipped) {
+      console.error(
+        '[poller] telegram não enviado',
+        alertKey,
+        telegramResult.reason || 'sem detalhe',
+      )
+    }
+    if (webPushEnabled()) {
+      const result: PushSendResult = await sendPush({
+        title: copy.title,
+        body: copy.body,
+        url: monitorUrl,
+        alertKey,
+        tag: pushTagFor(market, key),
+      })
+      if (result.sent > 0) {
+        notifiedOk = true
+      } else if (!result.errors.includes('sem subscritores')) {
+        console.error(
+          '[poller] push não enviado',
+          alertKey,
+          result.errors.join(' | ') || 'sem detalhe',
+        )
+      }
+    }
+    if (notifiedOk) {
       markAlertPushed(alertKey, market, alert.cornerHalf)
       sent += 1
-    } else if (!result.errors.includes('sem subscritores')) {
-      console.error(
-        '[poller] push não enviado',
-        alertKey,
-        result.errors.join(' | ') || 'sem detalhe',
-      )
     }
   }
   return { sent, notified }
@@ -317,7 +359,7 @@ export type EvaluatedAlertsTick = {
 }
 
 /**
- * Evaluate/ingest/push on the critical path; SuperScore ∥ SokkerPro ∥ RoboBet
+ * Evaluate/ingest/telegram on the critical path; SuperScore ∥ SokkerPro ∥ RoboBet
  * run afterwards. Do not await odds HTTP before notify.
  */
 export async function processEvaluatedAlerts(
@@ -405,7 +447,7 @@ export async function processEvaluatedAlerts(
     clockPeriod: clock?.period,
   })
 
-  // 1) notify / mark sent / ingest (already done)  2) void odds attach — never await before push
+  // 1) notify / mark sent / ingest (already done)  2) void odds attach — never await before telegram
   const { sent, notified } = await notifyFreshAlerts(
     fixture,
     market,
@@ -595,7 +637,9 @@ export async function tick(): Promise<void> {
     status.liveWatched = live.length
     status.liveProcessed = 0
     status.pushSubscribers = loadSubscriptions().length
-    if (status.pushSubscribers === 0) {
+    status.webPushEnabled = webPushEnabled()
+    status.telegram = getTelegramStatus()
+    if (webPushEnabled() && status.pushSubscribers === 0) {
       console.warn(
         '[poller] Web Push: 0 subscritores neste tick — os alertas não chegam ao telemóvel (ativar notificações remotas na PWA)',
       )

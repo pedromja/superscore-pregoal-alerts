@@ -25,6 +25,7 @@ import {
   setFeedback,
 } from './learn.ts'
 import { getPollerStatus, startPoller } from './poller.ts'
+import { getTelegramStatus, sendTelegramAlert } from './telegram.ts'
 import {
   addSubscription,
   publicVapidKey,
@@ -142,6 +143,24 @@ app.post('/api/push/test', async (req, res) => {
 
 app.get('/api/poller/status', (_req, res) => {
   res.json(getPollerStatus())
+})
+
+app.get('/api/telegram/status', (_req, res) => {
+  res.json(getTelegramStatus())
+})
+
+app.post('/api/telegram/test', async (req, res) => {
+  const market = marketFromReq(req)
+  const sample = sampleFeedAlert(market, halfFromReq(req) ?? 'ht')
+  const copy = alertNotificationCopy(sample)
+  const result = await sendTelegramAlert({
+    title: copy.title,
+    body: copy.body,
+    url: '/#/monitor?alert=demo-teste%3Aprimary-1-38-0',
+    alertKey: 'demo-teste:primary-1-38-0',
+    ruleLabel: sample.ruleName,
+  })
+  res.json({ ...result, ...getTelegramStatus() })
 })
 
 app.post('/api/robobet/ingest', (req, res) => {
