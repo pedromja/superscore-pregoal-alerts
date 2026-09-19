@@ -461,8 +461,26 @@ async function main() {
     },
     publishedSensitivity: sensitivity,
     pairing: {
-      goals: pairingGoals ? { ...pairingGoals, paired: undefined } : null,
-      corners: pairingCorners ? { ...pairingCorners, paired: undefined } : null,
+      goals: pairingGoals
+        ? {
+            medianOffset: pairingGoals.medianOffset,
+            meanOffset: pairingGoals.meanOffset,
+            lateShare: pairingGoals.lateShare,
+            unpairedSuperscore: pairingGoals.unpairedSuperscore,
+            unpairedSokker: pairingGoals.unpairedSokker,
+            pairedCount: pairingGoals.paired.length,
+          }
+        : null,
+      corners: pairingCorners
+        ? {
+            medianOffset: pairingCorners.medianOffset,
+            meanOffset: pairingCorners.meanOffset,
+            lateShare: pairingCorners.lateShare,
+            unpairedSuperscore: pairingCorners.unpairedSuperscore,
+            unpairedSokker: pairingCorners.unpairedSokker,
+            pairedCount: pairingCorners.paired.length,
+          }
+        : null,
     },
     buckets,
     recommendation,
