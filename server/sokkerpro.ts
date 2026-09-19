@@ -1,3 +1,4 @@
+import { fastScoreFromBoard, type FastScore } from '../src/lib/fastScore.ts'
 import {
   collectOddsMap,
   flattenMiniFixtures,
@@ -10,8 +11,8 @@ import {
   SOKKERPRO_BOARD_CACHE_MS,
   SOKKERPRO_PREODDS_CACHE_MS,
 } from '../src/lib/sokkerpro.ts'
-import type { CornerHalf, Market } from '../src/lib/types.ts'
-import { SOKKERPRO_ODDS } from './config.ts'
+import type { CornerHalf, Fixture, Market } from '../src/lib/types.ts'
+import { SOKKERPRO_LIVE_SCORE, SOKKERPRO_ODDS } from './config.ts'
 
 const BASE = (process.env.SOKKERPRO_M2_URL || 'https://m2.sokkerpro.com').replace(/\/$/, '')
 /** Mini board is ~1 MB and often slower than preodds. Do not inherit the old 6s default. */
@@ -35,6 +36,9 @@ const boardInflight = new Map<string, Promise<SokkerProFixture[] | null>>()
 let boardFailLoggedThisTick = false
 let nowFn = (): Date => new Date()
 let fetchFn: typeof fetch = globalThis.fetch.bind(globalThis)
+let liveScoreEnabled = SOKKERPRO_LIVE_SCORE
+/** Use a slightly stale board for live scores rather than blocking notify. */
+const LIVE_SCORE_STALE_MS = Number(process.env.SOKKERPRO_LIVE_STALE_MS || 180_000)
 
 export type SokkerProMatchOdds = {
   fixture: SokkerProFixture
@@ -43,6 +47,14 @@ export type SokkerProMatchOdds = {
 
 export function isSokkerProOddsEnabled(): boolean {
   return SOKKERPRO_ODDS
+}
+
+export function isSokkerProLiveScoreEnabled(): boolean {
+  return liveScoreEnabled
+}
+
+export function isSokkerProBoardEnabled(): boolean {
+  return isSokkerProOddsEnabled() || isSokkerProLiveScoreEnabled()
 }
 
 /** New poller tick: retry a failed mini board once, keep a successful cache. */
@@ -54,7 +66,7 @@ export function beginSokkerProTick(): void {
 }
 
 export async function warmupSokkerProBoard(): Promise<SokkerProFixture[] | null> {
-  if (!isSokkerProOddsEnabled()) return null
+  if (!isSokkerProBoardEnabled()) return null
   beginSokkerProTick()
   try {
     return await fetchSokkerProBoard(todayKey())
@@ -80,6 +92,50 @@ export function resetSokkerProStateForTests(): void {
   boardFailLoggedThisTick = false
   nowFn = () => new Date()
   fetchFn = globalThis.fetch.bind(globalThis)
+  liveScoreEnabled = SOKKERPRO_LIVE_SCORE
+}
+
+export function setSokkerProLiveScoreEnabledForTests(on: boolean | null): void {
+  liveScoreEnabled = on ?? SOKKERPRO_LIVE_SCORE
+}
+
+/** Inject a flattened mini board (no HTTP) so notify-path tests stay in-memory. */
+export function seedSokkerProBoardForTests(
+  dateKey: string,
+  fixtures: SokkerProFixture[],
+): void {
+  boardCache.set(dateKey, { ts: Date.now(), value: fixtures })
+}
+
+/**
+ * Cache-only peek. Never starts a mini-board HTTP — notify must not wait
+ * on the ~1 MB download. Slightly stale successful boards are OK.
+ */
+export function peekCachedSokkerProFixtures(): SokkerProFixture[] {
+  const out: SokkerProFixture[] = []
+  const seen = new Set<string>()
+  for (const key of [todayKey(), yesterdayKey()]) {
+    const hit = boardCache.get(key)
+    if (!hit || !hit.value) continue
+    if (Date.now() - hit.ts >= LIVE_SCORE_STALE_MS) continue
+    for (const fixture of hit.value) {
+      if (seen.has(fixture.fixtureId)) continue
+      seen.add(fixture.fixtureId)
+      out.push(fixture)
+    }
+  }
+  return out
+}
+
+/**
+ * SuperScore fixture → SokkerPro live score. In-memory match against the
+ * warmed mini board. Missing board / name miss / disabled → `null` (fall through).
+ */
+export function getFastScore(
+  fixture: Pick<Fixture, 'team1' | 'team2' | 'dateSeconds'>,
+): FastScore | null {
+  if (!isSokkerProLiveScoreEnabled()) return null
+  return fastScoreFromBoard(peekCachedSokkerProFixtures(), fixture)
 }
 
 function todayKey(): string {

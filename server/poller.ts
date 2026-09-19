@@ -14,6 +14,7 @@ import type {
   MomentumPayload,
 } from '../src/lib/types.ts'
 import {
+  FAST_CORNER_REFETCH_MS,
   MIN_NOTIFY_LEAD_MIN,
   POLLER_CONCURRENCY,
   POLLER_ENABLED,
@@ -72,7 +73,15 @@ import {
   settleTipsForMatch,
   tipAlreadyOpen,
 } from './tips.ts'
-import { warmupSokkerProBoard } from './sokkerpro.ts'
+import {
+  alreadyHitSuppressReason,
+  latestCornerTotal,
+  type FastScore,
+} from '../src/lib/fastScore.ts'
+import {
+  getFastScore,
+  warmupSokkerProBoard,
+} from './sokkerpro.ts'
 import type { PollerStatus } from './types.ts'
 
 const status: PollerStatus = {
@@ -92,6 +101,8 @@ const status: PollerStatus = {
   liveProcessed: 0,
   pushSubscribers: 0,
   webPushEnabled: webPushEnabled(),
+  suppressedAlreadyHit: 0,
+  lastAlreadyHitReason: null,
   telegram: getTelegramStatus(),
 }
 
@@ -120,10 +131,28 @@ const pendingOddsAttach = new Set<Promise<void>>()
 type ProcessFixtureFn = (fixture: Fixture, signal?: AbortSignal) => Promise<number>
 type FetchFixturesFn = (signal?: AbortSignal) => Promise<Fixture[]>
 type WarmupFn = () => Promise<unknown>
+type GetFastScoreFn = (fixture: Fixture) => FastScore | null
+type CornerRefetchFn = (fixtureId: string) => Promise<MomentumPayload | null>
 
 let processFixtureFn: ProcessFixtureFn = processFixture
 let fetchFixturesFn: FetchFixturesFn = defaultFetchFixtures
 let warmupFn: WarmupFn = warmupSokkerProBoard
+let getFastScoreFn: GetFastScoreFn = getFastScore
+/** Production tick enables a short SuperScore re-read; tests keep this null (reuse payload). */
+let cornerRefetchFn: CornerRefetchFn | null = null
+
+async function cheapCornerRefetch(fixtureId: string): Promise<MomentumPayload | null> {
+  if (FAST_CORNER_REFETCH_MS <= 0) return null
+  try {
+    return await withTimeout(
+      fetchMomentumServer(fixtureId),
+      FAST_CORNER_REFETCH_MS,
+      `Timeout ${FAST_CORNER_REFETCH_MS}ms (cantos refetch)`,
+    )
+  } catch {
+    return null
+  }
+}
 
 async function defaultFetchFixtures(signal?: AbortSignal): Promise<Fixture[]> {
   return fetchFixturesServer(lisbonDate(), POLLER_REGION, signal)
@@ -170,6 +199,14 @@ export function setPollerDepsForTests(deps: {
   processFixtureFn = deps?.processFixture ?? processFixture
   fetchFixturesFn = deps?.fetchFixtures ?? defaultFetchFixtures
   warmupFn = deps?.warmup ?? warmupSokkerProBoard
+}
+
+export function setPollerGetFastScoreForTests(fn: GetFastScoreFn | null): void {
+  getFastScoreFn = fn ?? getFastScore
+}
+
+export function setPollerCornerRefetchForTests(fn: CornerRefetchFn | null): void {
+  cornerRefetchFn = fn
 }
 
 export function setPollerLimitsForTests(
@@ -223,8 +260,12 @@ export function resetPollerRuntimeForTests(): void {
   status.liveProcessed = 0
   status.pushSubscribers = 0
   status.webPushEnabled = webPushEnabled()
+  status.suppressedAlreadyHit = 0
+  status.lastAlreadyHitReason = null
   status.telegram = getTelegramStatus()
   sendTelegram = sendTelegramAlert
+  getFastScoreFn = getFastScore
+  cornerRefetchFn = null
   resetTelegramOutcomesForTests()
 }
 
@@ -419,6 +460,67 @@ async function attachOddsAndEnrich(args: {
   }
 }
 
+function noteAlreadyHit(reason: string, alert: FeedAlert): void {
+  status.suppressedAlreadyHit += 1
+  status.lastAlreadyHitReason = reason
+  console.info(
+    `[poller] suppress ${reason} ${alert.min}' P${alert.period} ${alert.matchLabel}`,
+  )
+}
+
+async function latestCornersForGate(
+  fixtureId: string,
+  payload: MomentumPayload,
+): Promise<number> {
+  let latest = payload
+  if (cornerRefetchFn) {
+    try {
+      const fresh = await cornerRefetchFn(fixtureId)
+      if (fresh && Array.isArray(fresh.events)) latest = fresh
+    } catch {
+      latest = payload
+    }
+  }
+  return latestCornerTotal(latest)
+}
+
+/**
+ * After min-lead / coincident suppress. SokkerPro miss → fall through.
+ * In-memory board match; optional short corner events re-read.
+ */
+async function gateClaimedAlerts(args: {
+  fixture: Fixture
+  market: Market
+  claimed: FeedAlert[]
+  events: GoalEvent[]
+  payload: MomentumPayload
+}): Promise<FeedAlert[]> {
+  if (!args.claimed.length) return args.claimed
+  const fast =
+    args.market === 'goals' ? getFastScoreFn(args.fixture) : null
+  let latestCorners: number | null = null
+  if (args.market === 'corners') {
+    latestCorners = await latestCornersForGate(args.fixture.id, args.payload)
+  }
+  const kept: FeedAlert[] = []
+  for (const alert of args.claimed) {
+    const reason = alreadyHitSuppressReason({
+      market: args.market,
+      alert,
+      events: args.events,
+      fast,
+      latestCorners,
+      minLeadExclusive: MIN_NOTIFY_LEAD_MIN,
+    })
+    if (reason) {
+      noteAlreadyHit(reason, alert)
+      continue
+    }
+    kept.push(alert)
+  }
+  return kept
+}
+
 export type EvaluatedAlertsTick = {
   fixture: Fixture
   market: Market
@@ -540,7 +642,14 @@ export async function processEvaluatedAlerts(
     )
   })
 
-  const { sent, notified } = await dispatchClaimedAlerts(fixture, market, claimed)
+  const gated = await gateClaimedAlerts({
+    fixture,
+    market,
+    claimed,
+    events,
+    payload,
+  })
+  const { sent, notified } = await dispatchClaimedAlerts(fixture, market, gated)
   scheduleTelegramOutcomeFlush()
   if (fresh.length) {
     scheduleOddsAttach(() =>
@@ -737,6 +846,7 @@ export async function tick(): Promise<void> {
       )
     }
     // Prefetch SokkerPro mini in parallel; do not block evaluate/push on board/preodds HTTP.
+    if (!cornerRefetchFn) cornerRefetchFn = cheapCornerRefetch
     void warmupFn()
     const tickErrors: FixtureTickError[] = []
     const runTargets = async (batch: Fixture[], workerLimit: number) =>

@@ -148,6 +148,9 @@ export type PollerStatus = {
   liveProcessed: number
   pushSubscribers: number
   webPushEnabled: boolean
+  /** Telegram skipped because SokkerPro / latest SuperScore already showed the event. */
+  suppressedAlreadyHit: number
+  lastAlreadyHitReason: string | null
   telegram: {
     configured: boolean
     enabled: boolean
