@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { config as loadEnv } from 'dotenv'
 import webpush from 'web-push'
 import { defaultsFor } from '../src/lib/market.ts'
+import { parseMinNotifyLeadMin } from '../src/lib/notifyLead.ts'
 import type { AlertSettings } from '../src/lib/types.ts'
 import {
   POLLER_CONCURRENCY_DEFAULT,
@@ -86,6 +87,11 @@ export function webPushEnabled(): boolean {
 }
 
 export const TELEGRAM_TIMEOUT_MS = Number(process.env.TELEGRAM_TIMEOUT_MS || 9000)
+
+/** Live push floor: tips need ≥1′ of clock. Override with `MIN_NOTIFY_LEAD_MIN`. */
+export const MIN_NOTIFY_LEAD_MIN = parseMinNotifyLeadMin(
+  process.env.MIN_NOTIFY_LEAD_MIN,
+)
 
 /** `webhook` (default) or `poll`. `off` skips inbound callback handling. */
 export function telegramUpdatesMode(): 'webhook' | 'poll' | 'off' {
