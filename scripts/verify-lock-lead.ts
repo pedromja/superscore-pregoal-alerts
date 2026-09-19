@@ -9,6 +9,7 @@ import {
   outcomeForAlert,
   PREFERRED_LEAD_MAX,
 } from '../src/lib/horizons.ts'
+import { MIN_NOTIFY_LEAD_MIN } from '../src/lib/notifyLead.ts'
 import {
   DEFINITIONS_LOCKED,
   LOCK_APPLY_ERROR_PT,
@@ -93,6 +94,7 @@ const laterGoal: GoalEvent[] = [{ min: 81, period: 2, side: 'home', index: 1 }]
 const sameMinuteGoal: GoalEvent[] = [{ min: 80, period: 2, side: 'home', index: 0 }]
 
 expect(MIN_LEAD_MIN === 1, 'MIN_LEAD_MIN is 1')
+expect(MIN_NOTIFY_LEAD_MIN === MIN_LEAD_MIN, 'live notify floor matches MIN_LEAD_MIN')
 expect(PREFERRED_LEAD_MAX === 2, 'PREFERRED_LEAD_MAX is 2')
 expect(!isUsableLead(0), 'lead 0 is not usable')
 expect(!isUsableLead(null), 'null lead is not usable')

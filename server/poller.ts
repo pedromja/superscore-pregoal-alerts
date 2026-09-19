@@ -1,5 +1,6 @@
 import { pushTagFor } from '../src/lib/market.ts'
 import { ruleNotifyEnabled } from '../src/lib/notifications.ts'
+import { notifySuppressReason } from '../src/lib/notifyLead.ts'
 import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../src/lib/rules.ts'
 import { inMarketClockWindow } from '../src/lib/windows.ts'
 import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
@@ -13,6 +14,7 @@ import type {
   MomentumPayload,
 } from '../src/lib/types.ts'
 import {
+  MIN_NOTIFY_LEAD_MIN,
   POLLER_CONCURRENCY,
   POLLER_ENABLED,
   POLLER_FINISHED_LIMIT,
@@ -275,13 +277,26 @@ function claimFreshAlerts(
   settings: ReturnType<typeof currentSettings>,
   byHalf: CornersByHalf | undefined,
   fresh: FeedAlert[],
+  events: GoalEvent[],
+  clock?: { min: number; period: number },
 ): FeedAlert[] {
   const claimed: FeedAlert[] = []
   for (const alert of fresh) {
-    if (alert.coincident) continue
     // Stoppage (P1>45 / P2>90) and out-of-window: no push. Yeovil 96' arrived
     // after the goal; bookie markets were already gone.
     if (!inMarketClockWindow(market, alert.min, alert.period)) continue
+    const reason = notifySuppressReason(
+      alert,
+      events,
+      clock,
+      MIN_NOTIFY_LEAD_MIN,
+    )
+    if (reason) {
+      console.info(
+        `[poller] suppress ${reason} ${alert.min}' P${alert.period} ${alert.matchLabel}`,
+      )
+      continue
+    }
     const notify = settingsForAlert(alert, settings, byHalf)
     if (!ruleNotifyEnabled(notify, alert.rule)) continue
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
@@ -514,7 +529,15 @@ export async function processEvaluatedAlerts(
       clockMin: clock?.min,
       clockPeriod: clock?.period,
     })
-    return claimFreshAlerts(fixture, market, settings, byHalf, fresh)
+    return claimFreshAlerts(
+      fixture,
+      market,
+      settings,
+      byHalf,
+      fresh,
+      events,
+      clock,
+    )
   })
 
   const { sent, notified } = await dispatchClaimedAlerts(fixture, market, claimed)

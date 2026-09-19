@@ -26,6 +26,7 @@ import {
   ruleNotifyEnabled,
   showAlertNotification,
 } from '../lib/notifications'
+import { notifySuppressReason } from '../lib/notifyLead'
 import { postAlerts, postFeedback, fetchPollerStatus } from '../lib/learnApi'
 import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../lib/rules'
 import { withMatchTallies } from '../lib/tally'
@@ -166,6 +167,7 @@ export function MonitorPage({
     const { points, alerts } = evaluateAlerts(data, settings, undefined, byHalf)
     const events = extractMarketEvents(data, points, market)
     const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
+    const clock = points.at(-1)
     const firstSnapshot = !primed.current.has(fixture.id)
     const fresh: FeedAlert[] = []
     for (const alert of alerts) {
@@ -196,7 +198,7 @@ export function MonitorPage({
       void postAlerts(fresh, market)
       if (!firstSnapshot) {
         for (const alert of fresh) {
-          if (alert.coincident) continue
+          if (notifySuppressReason(alert, events, clock)) continue
           if (!ruleNotifyEnabled(settingsForAlert(alert, settings, byHalf), alert.rule)) continue
           void showAlertNotification(alert)
         }
