@@ -216,10 +216,35 @@ try {
     loadAlerts('goals').find((a) => a.id === sample.id)?.sentPush === true,
     'markAlertPushed sets sentPush',
   )
-  upsertAlerts([{ ...sample, sentPush: false, matchLabel: 'Teste vs Teste 2' }], 'goals')
+  upsertAlerts(
+    [
+      {
+        ...sample,
+        sentPush: false,
+        matchLabel: 'Teste vs Teste 2',
+        telegramMessageId: undefined,
+        telegramOutcomeSentAt: null,
+      },
+    ],
+    'goals',
+  )
   const after = loadAlerts('goals').find((a) => a.id === sample.id)
   check(after?.sentPush === true, 're-ingest must not clobber sentPush true')
   check(after?.matchLabel === 'Teste vs Teste 2', 're-ingest still updates other fields')
+  upsertAlerts(
+    [{ ...sample, sentPush: true, telegramMessageId: 77, telegramOutcomeSentAt: '2026-01-01T00:00:00.000Z' }],
+    'goals',
+  )
+  upsertAlerts(
+    [{ ...sample, sentPush: false, telegramMessageId: undefined, telegramOutcomeSentAt: null }],
+    'goals',
+  )
+  const afterTg = loadAlerts('goals').find((a) => a.id === sample.id)
+  check(afterTg?.telegramMessageId === 77, 're-ingest must keep telegramMessageId')
+  check(
+    afterTg?.telegramOutcomeSentAt === '2026-01-01T00:00:00.000Z',
+    're-ingest must keep telegramOutcomeSentAt',
+  )
   const withOdds = {
     ...sample,
     sentPush: false,

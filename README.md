@@ -95,6 +95,8 @@ O canal principal é um **bot Telegram**. Quando o poller dispara um alerta Golo
 
 Deduplica pelo mesmo `sent.json` / `alertKey` de antes — o mesmo alerta não sai duas vezes. Timeouts ~9s; falhas de rede/API são logadas e o tick continua. Sem `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` o poller corre na mesma e simplesmente não envia.
 
+Quando a aprendizagem marca `hit5` / `hitLong` (`true`|`false`), o servidor tenta um follow-up **🟢 GREEN** (acerto) ou **🔴 RED** (falha) — de preferência `reply_to` à mensagem original (`message_id` gravado em `data/telegram_messages.json` e no alerta). Se o reply falhar, tenta `editMessageText`; senão uma mensagem curta nova. Isto é **best-effort / baixa prioridade**: corre em background, não atrasa o aviso ao vivo nem o attach de odds, e é idempotente (`telegramOutcomeSentAt`). Sem Telegram configurado, salta em silêncio. Não muda janelas nem limiares locked.
+
 Health: `GET /api/telegram/status` (`configured`, `enabled`, `lastSendAt`, `lastError` — **sem secrets**). O mesmo bloco entra em `GET /api/poller/status`.
 
 ### Variáveis no Railway

@@ -26,6 +26,8 @@ const TIP_OVERLAY_FILE = 'tip_overlay.json'
 const TIP_OVERLAY_PROPOSAL_FILE = 'tip_overlay_proposal.json'
 const ODDS_LOG_FILE = 'odds_observations.json'
 const ODDS_LOG_CAP = 4000
+const TELEGRAM_MAP_FILE = 'telegram_messages.json'
+const TELEGRAM_MAP_CAP = 4000
 
 export type LearnScope = 'goals_ht' | 'goals_ft' | 'corners_ht' | 'corners_ft'
 
@@ -306,6 +308,7 @@ export const LEARN_RESET_KEPT = [
   'tip_overlay.json / tip_overlay_proposal.json',
   'tips.json / robobet_tips.json / odds_observations.json',
   'matches/*.json (arquivo de momentum)',
+  'telegram_messages.json (message_id + outcome sent — anti re-envio GREEN/RED)',
 ] as const
 
 function scopesForReset(market: ResetLearnMarket): LearnScope[] {
@@ -382,6 +385,17 @@ export function upsertAlerts(
             ...item,
             feedback: prev.feedback ?? item.feedback,
             sentPush: Boolean(prev.sentPush || item.sentPush),
+            telegramMessageId: item.telegramMessageId ?? prev.telegramMessageId,
+            telegramOutcomeSentAt:
+              item.telegramOutcomeSentAt ?? prev.telegramOutcomeSentAt,
+            hit: item.hit ?? prev.hit,
+            hit5: item.hit5 ?? prev.hit5,
+            hitLong: item.hitLong ?? prev.hitLong,
+            labeledAt: item.labeledAt ?? prev.labeledAt,
+            leadMin: item.leadMin ?? prev.leadMin,
+            leadTime5: item.leadTime5 ?? prev.leadTime5,
+            leadTimeLong: item.leadTimeLong ?? prev.leadTimeLong,
+            longDeadline: item.longDeadline ?? prev.longDeadline,
             odds: item.odds ?? prev.odds,
             market,
             cornerHalf: h ?? item.cornerHalf,
@@ -456,6 +470,128 @@ export function markAlertPushed(
   alerts[idx] = { ...alerts[idx], sentPush: true }
   saveAlerts(alerts, m, h)
   return true
+}
+
+export type TelegramMessageRecord = {
+  messageId: number
+  chatId: string
+  text: string
+  sentAt: string
+  outcomeSentAt?: string | null
+}
+
+const TELEGRAM_SCOPES: { market: Market; half: CornerHalf }[] = [
+  { market: 'goals', half: 'ht' },
+  { market: 'goals', half: 'ft' },
+  { market: 'corners', half: 'ht' },
+  { market: 'corners', half: 'ft' },
+]
+
+function capTelegramMap(
+  map: Record<string, TelegramMessageRecord>,
+): Record<string, TelegramMessageRecord> {
+  const entries = Object.entries(map)
+  if (entries.length <= TELEGRAM_MAP_CAP) return map
+  entries.sort((a, b) => (a[1].sentAt < b[1].sentAt ? -1 : 1))
+  return Object.fromEntries(entries.slice(-TELEGRAM_MAP_CAP))
+}
+
+export function loadTelegramMessages(): Record<string, TelegramMessageRecord> {
+  return readJson<Record<string, TelegramMessageRecord>>(TELEGRAM_MAP_FILE, {})
+}
+
+export function saveTelegramMessages(
+  map: Record<string, TelegramMessageRecord>,
+): void {
+  writeJson(TELEGRAM_MAP_FILE, capTelegramMap(map))
+}
+
+export function getTelegramMessage(
+  alertKey: string,
+): TelegramMessageRecord | null {
+  return loadTelegramMessages()[alertKey] ?? null
+}
+
+export function upsertTelegramMessage(
+  alertKey: string,
+  patch: Partial<TelegramMessageRecord>,
+): TelegramMessageRecord {
+  const map = loadTelegramMessages()
+  const prev = map[alertKey]
+  const next: TelegramMessageRecord = {
+    messageId: patch.messageId ?? prev?.messageId ?? 0,
+    chatId: patch.chatId ?? prev?.chatId ?? '',
+    text: patch.text ?? prev?.text ?? '',
+    sentAt: patch.sentAt ?? prev?.sentAt ?? new Date().toISOString(),
+    outcomeSentAt:
+      patch.outcomeSentAt !== undefined
+        ? patch.outcomeSentAt
+        : (prev?.outcomeSentAt ?? null),
+  }
+  map[alertKey] = next
+  saveTelegramMessages(map)
+  return next
+}
+
+export function findLoggedAlert(
+  alertId: string,
+): { alert: LoggedAlert; market: Market; half: CornerHalf } | null {
+  for (const { market, half } of TELEGRAM_SCOPES) {
+    const alert = loadAlerts(market, half).find((a) => a.id === alertId)
+    if (alert) return { alert, market, half }
+  }
+  return null
+}
+
+export function patchLoggedAlert(
+  alertId: string,
+  patch: Partial<LoggedAlert>,
+): LoggedAlert | null {
+  const found = findLoggedAlert(alertId)
+  if (!found) return null
+  const alerts = loadAlerts(found.market, found.half)
+  const idx = alerts.findIndex((a) => a.id === alertId)
+  if (idx < 0) return null
+  alerts[idx] = { ...alerts[idx], ...patch }
+  saveAlerts(alerts, found.market, found.half)
+  return alerts[idx]
+}
+
+export function markAlertTelegramMessage(
+  alertId: string,
+  messageId: number,
+  market?: Market,
+  half?: CornerHalf | null,
+): boolean {
+  if (market && parseCornerHalfOpt(half)) {
+    const alerts = loadAlerts(market, half)
+    const idx = alerts.findIndex((a) => a.id === alertId)
+    if (idx < 0) return false
+    alerts[idx] = { ...alerts[idx], telegramMessageId: messageId }
+    saveAlerts(alerts, market, half)
+    return true
+  }
+  return patchLoggedAlert(alertId, { telegramMessageId: messageId }) !== null
+}
+
+export function telegramOutcomeAlreadySent(alertKey: string): boolean {
+  const rec = getTelegramMessage(alertKey)
+  if (rec?.outcomeSentAt) return true
+  return Boolean(findLoggedAlert(alertKey)?.alert.telegramOutcomeSentAt)
+}
+
+/** Claim the outcome slot so two flushes cannot double-send. */
+export function claimTelegramOutcome(alertKey: string): boolean {
+  if (telegramOutcomeAlreadySent(alertKey)) return false
+  const at = new Date().toISOString()
+  upsertTelegramMessage(alertKey, { outcomeSentAt: at })
+  patchLoggedAlert(alertKey, { telegramOutcomeSentAt: at })
+  return true
+}
+
+export function clearTelegramOutcomeClaim(alertKey: string): void {
+  upsertTelegramMessage(alertKey, { outcomeSentAt: null })
+  patchLoggedAlert(alertKey, { telegramOutcomeSentAt: null })
 }
 
 export function primeFixture(id: string): boolean {

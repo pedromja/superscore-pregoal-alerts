@@ -26,6 +26,7 @@ import {
 } from './learn.ts'
 import { getPollerStatus, startPoller } from './poller.ts'
 import { getTelegramStatus, sendTelegramAlert } from './telegram.ts'
+import { scheduleTelegramOutcomeFlush } from './telegramOutcomes.ts'
 import {
   addSubscription,
   publicVapidKey,
@@ -299,6 +300,7 @@ app.post('/api/learn/alerts', (req, res) => {
     market,
     half,
   )
+  scheduleTelegramOutcomeFlush()
   res.json({ ok: true, n: stored.length, market, half })
 })
 

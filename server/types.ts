@@ -40,6 +40,10 @@ export type LoggedAlert = {
   labeledAt: string | null
   feedback: 'up' | 'down' | null
   sentPush: boolean
+  /** Bot API message_id of the live Telegram alert, if we captured it. */
+  telegramMessageId?: number
+  /** ISO timestamp after the GREEN/RED outcome notice was sent (idempotency). */
+  telegramOutcomeSentAt?: string | null
   odds?: OddsObservation
 }
 
