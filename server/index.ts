@@ -28,6 +28,10 @@ import { getPollerStatus, startPoller } from './poller.ts'
 import { getTelegramStatus, sendTelegramAlert } from './telegram.ts'
 import { scheduleTelegramOutcomeFlush } from './telegramOutcomes.ts'
 import {
+  acceptTelegramWebhook,
+  startTelegramUpdates,
+} from './telegramUpdates.ts'
+import {
   addSubscription,
   publicVapidKey,
   removeSubscription,
@@ -148,6 +152,19 @@ app.get('/api/poller/status', (_req, res) => {
 
 app.get('/api/telegram/status', (_req, res) => {
   res.json(getTelegramStatus())
+})
+
+app.post('/api/telegram/webhook', (req, res) => {
+  const secret = String(
+    req.headers['x-telegram-bot-api-secret-token'] ||
+      req.query.secret ||
+      '',
+  )
+  if (!acceptTelegramWebhook(secret, req.body)) {
+    res.status(401).json({ error: 'forbidden' })
+    return
+  }
+  res.json({ ok: true })
 })
 
 app.post('/api/telegram/test', async (req, res) => {
@@ -484,4 +501,5 @@ if (existsSync(dist)) {
 app.listen(SERVER_PORT, '0.0.0.0', () => {
   console.log(`SuperScore API em 0.0.0.0:${SERVER_PORT}`)
   startPoller()
+  void startTelegramUpdates()
 })

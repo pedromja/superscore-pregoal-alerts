@@ -478,6 +478,7 @@ export type TelegramMessageRecord = {
   text: string
   sentAt: string
   outcomeSentAt?: string | null
+  callbackToken?: string
 }
 
 const TELEGRAM_SCOPES: { market: Market; half: CornerHalf }[] = [
@@ -512,6 +513,16 @@ export function getTelegramMessage(
   return loadTelegramMessages()[alertKey] ?? null
 }
 
+export function findAlertKeyByCallbackToken(token: string): string | null {
+  if (!token) return null
+  const map = loadTelegramMessages()
+  if (map[token]) return token
+  for (const [key, rec] of Object.entries(map)) {
+    if (rec.callbackToken === token) return key
+  }
+  return null
+}
+
 export function upsertTelegramMessage(
   alertKey: string,
   patch: Partial<TelegramMessageRecord>,
@@ -527,6 +538,7 @@ export function upsertTelegramMessage(
       patch.outcomeSentAt !== undefined
         ? patch.outcomeSentAt
         : (prev?.outcomeSentAt ?? null),
+    callbackToken: patch.callbackToken ?? prev?.callbackToken,
   }
   map[alertKey] = next
   saveTelegramMessages(map)

@@ -97,6 +97,8 @@ Deduplica pelo mesmo `sent.json` / `alertKey` de antes — o mesmo alerta não s
 
 Quando a aprendizagem marca `hit5` / `hitLong` (`true`|`false`), o servidor tenta um follow-up **🟢 GREEN** (acerto) ou **🔴 RED** (falha) — de preferência `reply_to` à mensagem original (`message_id` gravado em `data/telegram_messages.json` e no alerta). Se o reply falhar, tenta `editMessageText`; senão uma mensagem curta nova. Isto é **best-effort / baixa prioridade**: corre em background, não atrasa o aviso ao vivo nem o attach de odds, e é idempotente (`telegramOutcomeSentAt`). Sem Telegram configurado, salta em silêncio. Não muda janelas nem limiares locked.
 
+Cada aviso leva um botão **Resolver agora**. O clique reavalia o alerta contra o momentum SuperScore actual (ou o último snapshot em disco). Se já houver evento no horizonte → 🟢/🔴 e marca settled. Se ainda for cedo / sem evento → reply `ainda sem resolução` (**nunca** marca vermelho prematuro). O handler é async (webhook `POST /api/telegram/webhook` com `X-Telegram-Bot-Api-Secret-Token`, ou long-poll se o webhook falhar). Chats desconhecidos são ignorados. A validação em lote nas horas mortas (~04:01 PT) continua à parte e não-prioritária.
+
 Health: `GET /api/telegram/status` (`configured`, `enabled`, `lastSendAt`, `lastError` — **sem secrets**). O mesmo bloco entra em `GET /api/poller/status`.
 
 ### Variáveis no Railway
@@ -108,7 +110,9 @@ No serviço `web` → Variables (nunca no git):
 | `TELEGRAM_BOT_TOKEN` | sim, para enviar | Token do [@BotFather](https://t.me/BotFather). **Não commitar.** |
 | `TELEGRAM_CHAT_ID` | sim, para enviar | Id do chat/grupo/canal (grupos são negativos, ex. `-100…`) |
 | `TELEGRAM_ENABLED` | não | Default **ligado** quando token+chat existem. `0` desliga |
-| `PUBLIC_URL` | não | Origem do link «Abrir no monitor». Default `https://web-production-837b3.up.railway.app` |
+| `TELEGRAM_WEBHOOK_SECRET` | não | Secret do webhook (header Telegram). Se vazio, deriva do bot token |
+| `TELEGRAM_UPDATES` | não | `webhook` (default), `poll` (getUpdates) ou `off` |
+| `PUBLIC_URL` | não | Origem do link «Abrir no monitor» e do `setWebhook`. Default `https://web-production-837b3.up.railway.app` |
 | `WEB_PUSH_ENABLED` | não | Default **desligado**. `1` reactive o Web Push (só se houver subscritores) |
 
 Dashboard: Project → serviço `web` → **Variables** → Raw Editor ou Add. Depois Redeploy. Alternativa CLI (com o projecto ligado):

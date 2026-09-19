@@ -1,5 +1,6 @@
 import { marketCopy, parseMarket } from '../src/lib/market.ts'
 import type { CornerHalf, Market } from '../src/lib/types.ts'
+import { createHash } from 'node:crypto'
 import {
   publicAppUrl,
   TELEGRAM_TIMEOUT_MS,
@@ -9,9 +10,16 @@ import {
   telegramEnabled,
 } from './config.ts'
 import {
+  findAlertKeyByCallbackToken,
   markAlertTelegramMessage,
   upsertTelegramMessage,
 } from './store.ts'
+
+export const RESOLVE_NOW_LABEL = 'Resolver agora'
+export const PENDING_RESOLVE_TEXT = 'ainda sem resolução'
+export const ALREADY_RESOLVED_TEXT = 'já resolvido'
+export const RESOLVE_CALLBACK_PREFIX = 'rn:'
+const CALLBACK_DATA_MAX = 64
 
 export type TelegramPayload = {
   title: string
@@ -126,16 +134,55 @@ export function formatTelegramOutcomeHtml(alert: TelegramOutcomeInput): string {
   return `<b>${badge}</b> · ${bits.map(escapeTelegramHtml).join(' · ')}`
 }
 
+export function isAllowedTelegramChat(chatId: unknown): boolean {
+  const expected = telegramChatId()
+  if (!expected) return false
+  return String(chatId ?? '') === expected
+}
+
+export function buildResolveCallbackData(alertKey: string): string {
+  const raw = `${RESOLVE_CALLBACK_PREFIX}${alertKey}`
+  if (Buffer.byteLength(raw, 'utf8') <= CALLBACK_DATA_MAX) return raw
+  const token = createHash('sha256')
+    .update(alertKey)
+    .digest('base64url')
+    .slice(0, 16)
+  upsertTelegramMessage(alertKey, { callbackToken: token })
+  return `${RESOLVE_CALLBACK_PREFIX}${token}`
+}
+
+export function parseResolveCallbackData(data: string): string | null {
+  if (!data.startsWith(RESOLVE_CALLBACK_PREFIX)) return null
+  const rest = data.slice(RESOLVE_CALLBACK_PREFIX.length).trim()
+  if (!rest) return null
+  return findAlertKeyByCallbackToken(rest) ?? rest
+}
+
+export function resolveNowKeyboard(alertKey: string): {
+  inline_keyboard: { text: string; callback_data: string }[][]
+} {
+  return {
+    inline_keyboard: [
+      [{ text: RESOLVE_NOW_LABEL, callback_data: buildResolveCallbackData(alertKey) }],
+    ],
+  }
+}
+
 function persistTelegramMessageId(
   alertKey: string,
   messageId: number,
   text: string,
 ): void {
+  const callback = buildResolveCallbackData(alertKey)
+  const token = callback.startsWith(RESOLVE_CALLBACK_PREFIX)
+    ? callback.slice(RESOLVE_CALLBACK_PREFIX.length)
+    : undefined
   upsertTelegramMessage(alertKey, {
     messageId,
     chatId: telegramChatId(),
     text,
     sentAt: new Date().toISOString(),
+    callbackToken: token !== alertKey ? token : undefined,
   })
   markAlertTelegramMessage(alertKey, messageId)
 }
@@ -159,16 +206,18 @@ function recordFailure(alertKey: string, reason: string): TelegramSendResult {
   return { sent: 0, skipped: false, reason }
 }
 
-type TelegramApiParsed = {
+export type TelegramApiParsed = {
   ok: boolean
   description: string
   messageId?: number
   httpStatus: number
+  result?: unknown
 }
 
-async function telegramApi(
+export async function callTelegramApi(
   method: string,
   body: Record<string, unknown>,
+  timeoutMs = TELEGRAM_TIMEOUT_MS,
 ): Promise<TelegramApiParsed> {
   const token = telegramBotToken()
   const endpoint = `https://api.telegram.org/bot${token}/${method}`
@@ -176,14 +225,14 @@ async function telegramApi(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(TELEGRAM_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   })
   const raw = await res.text()
   try {
     const parsed = JSON.parse(raw) as {
       ok?: boolean
       description?: string
-      result?: { message_id?: number }
+      result?: { message_id?: number } | unknown[]
     }
     const messageId = parsed.result?.message_id
     return {
@@ -191,6 +240,7 @@ async function telegramApi(
       description: parsed.description || '',
       messageId: typeof messageId === 'number' ? messageId : undefined,
       httpStatus: res.status,
+      result: parsed.result,
     }
   } catch {
     return {
@@ -223,11 +273,12 @@ export async function sendTelegramAlert(
   const text = formatTelegramHtml(payload)
 
   try {
-    const parsed = await telegramApi('sendMessage', {
+    const parsed = await callTelegramApi('sendMessage', {
       chat_id: chatId,
       text,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
+      reply_markup: resolveNowKeyboard(payload.alertKey),
     })
     if (parsed.ok) {
       status.lastSendAt = new Date().toISOString()
@@ -276,7 +327,7 @@ export async function sendTelegramOutcomeNotice(args: {
     replyTo?: number,
   ): Promise<{ parsed: TelegramApiParsed } | { error: TelegramSendResult }> => {
     try {
-      const parsed = await telegramApi('sendMessage', {
+      const parsed = await callTelegramApi('sendMessage', {
         chat_id: chatId,
         text,
         parse_mode: 'HTML',
@@ -312,7 +363,7 @@ export async function sendTelegramOutcomeNotice(args: {
 
     if (originalText) {
       try {
-        const edited = await telegramApi('editMessageText', {
+        const edited = await callTelegramApi('editMessageText', {
           chat_id: chatId,
           message_id: replyToMessageId,
           text: `${originalText}\n\n${text}`,
@@ -338,4 +389,56 @@ export async function sendTelegramOutcomeNotice(args: {
     return { sent: 1, skipped: false, messageId: fresh.parsed.messageId }
   }
   return recordFailure(alertKey, reasonFromApi(fresh.parsed, token))
+}
+
+export async function answerTelegramCallback(
+  callbackQueryId: string,
+  text?: string,
+): Promise<void> {
+  if (!telegramEnabled() || !callbackQueryId) return
+  try {
+    await callTelegramApi('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text, show_alert: false } : {}),
+    })
+  } catch (err) {
+    console.warn(
+      '[telegram] answerCallbackQuery',
+      err instanceof Error ? err.message : err,
+    )
+  }
+}
+
+export async function sendTelegramText(args: {
+  alertKey: string
+  text: string
+  replyToMessageId?: number
+}): Promise<TelegramSendResult> {
+  status.configured = telegramConfigured()
+  status.enabled = telegramEnabled()
+  if (!status.enabled) {
+    const reason = status.configured ? 'desligado' : 'não configurado'
+    return { sent: 0, skipped: true, reason }
+  }
+  const token = telegramBotToken()
+  try {
+    const parsed = await callTelegramApi('sendMessage', {
+      chat_id: telegramChatId(),
+      text: args.text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...(args.replyToMessageId != null
+        ? { reply_to_message_id: args.replyToMessageId }
+        : {}),
+    })
+    if (parsed.ok) {
+      status.lastSendAt = new Date().toISOString()
+      status.lastError = null
+      return { sent: 1, skipped: false, messageId: parsed.messageId }
+    }
+    return recordFailure(args.alertKey, reasonFromApi(parsed, token))
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return recordFailure(args.alertKey, sanitizeError(message, token))
+  }
 }
