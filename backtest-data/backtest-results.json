@@ -1,0 +1,496 @@
+{
+  "generatedAt": "2026-09-18T21:00:56.428Z",
+  "dataset": {
+    "source": "backtest-data/matches/*.json",
+    "fetchedFrom": "SuperScore fixtures by-date/ro + attacking-momentum",
+    "timezone": "Europe/Lisbon",
+    "dateFrom": "2026-09-08",
+    "dateTo": "2026-09-18",
+    "filesOnDisk": 2203,
+    "sampled": 880,
+    "sampleRule": "até 80 jogos/dia, preferência a mais golos type=4, timeline≥80",
+    "demosNotIncluded": [
+      "public/demo/celtic-ferenc-momentum.json",
+      "public/demo/drava-bistrica-momentum.json"
+    ],
+    "note": "train_*.py não está no repo; o backtest reutiliza evaluateAlerts/rules.ts (o mesmo caminho do poller). O único script Python referido em treinos anteriores era train_corners_windowed.py, offline e não commitado."
+  },
+  "constraints": {
+    "minLead": 1,
+    "preferredLead": [
+      1,
+      2
+    ],
+    "stoppageBan": "period===1 && min>45 OR period===2 && min>90",
+    "windows": {
+      "goals": {
+        "ht": {
+          "half": "ht",
+          "period": 1,
+          "from": 20,
+          "to": 42,
+          "label": "1.ª parte · 20–42",
+          "shortLabel": "HT 20–42"
+        },
+        "ft": {
+          "half": "ft",
+          "period": 2,
+          "from": 70,
+          "to": 90,
+          "label": "2.ª parte · 70–90",
+          "shortLabel": "FT 70–90"
+        }
+      },
+      "corners": {
+        "ht": {
+          "half": "ht",
+          "period": 1,
+          "from": 32,
+          "to": 42,
+          "shortHorizon": 5,
+          "label": "1.ª parte · 32–42",
+          "shortLabel": "HT 32–42"
+        },
+        "ft": {
+          "half": "ft",
+          "period": 2,
+          "from": 82,
+          "to": 87,
+          "shortHorizon": 3,
+          "label": "2.ª parte · 82–87",
+          "shortLabel": "FT 82–87"
+        }
+      }
+    }
+  },
+  "results": {
+    "goals_ht": {
+      "window": {
+        "half": "ht",
+        "period": 1,
+        "from": 20,
+        "to": 42,
+        "label": "1.ª parte · 20–42",
+        "shortLabel": "HT 20–42"
+      },
+      "baseline": {
+        "score": 0.3254988016161063,
+        "settings": {
+          "cornerHalf": "ht",
+          "primaryKind": "combo",
+          "secondaryKind": "swing",
+          "fallbackKind": "sustainedFallback",
+          "spikeThreshold": 80,
+          "swingComboThreshold": 50,
+          "swingSecondaryThreshold": 60,
+          "sustainedThreshold": 30,
+          "sustainedComboMinutes": 3,
+          "sustainedFallbackMinutes": 4,
+          "fallbackSpikeThreshold": 80,
+          "fallbackSustainedThreshold": 30,
+          "sustainedSecondaryThreshold": 30,
+          "sustainedSecondaryMinutes": 5,
+          "evaluationWindow": 5
+        },
+        "metrics": {
+          "matches": 880,
+          "events": 859,
+          "alerts": 2720,
+          "alertsPerMatch": 3.090909090909091,
+          "hits": 889,
+          "preferredHits": 482,
+          "eventsHit": 395,
+          "precision": 0.32683823529411765,
+          "precisionPreferred": 0.17720588235294119,
+          "recall": 0.459837019790454,
+          "medianLead": 2,
+          "meanLead": 3.8976377952755907,
+          "leadHist": {
+            "1": 405,
+            "2": 77,
+            "3": 62,
+            "4": 69,
+            "5": 45,
+            "6": 32,
+            "7": 37,
+            "8": 35,
+            "9": 28,
+            "10": 24,
+            "11": 11,
+            "12": 13,
+            "13": 15,
+            "14": 16,
+            "15": 20
+          },
+          "coincident": 954
+        }
+      },
+      "best": {
+        "score": 0.33819089721466294,
+        "settings": {
+          "cornerHalf": "ht",
+          "primaryKind": "combo",
+          "secondaryKind": "swing",
+          "fallbackKind": "sustainedFallback",
+          "spikeThreshold": 80,
+          "swingComboThreshold": 50,
+          "swingSecondaryThreshold": 60,
+          "sustainedThreshold": 30,
+          "sustainedComboMinutes": 3,
+          "sustainedFallbackMinutes": 5,
+          "fallbackSpikeThreshold": 80,
+          "fallbackSustainedThreshold": 30,
+          "sustainedSecondaryThreshold": 30,
+          "sustainedSecondaryMinutes": 5,
+          "evaluationWindow": 5
+        },
+        "metrics": {
+          "matches": 880,
+          "events": 859,
+          "alerts": 2177,
+          "alertsPerMatch": 2.473863636363636,
+          "hits": 768,
+          "preferredHits": 450,
+          "eventsHit": 372,
+          "precision": 0.35277905374368396,
+          "precisionPreferred": 0.20670647680293983,
+          "recall": 0.4330616996507567,
+          "medianLead": 2,
+          "meanLead": 3.6471354166666665,
+          "leadHist": {
+            "1": 383,
+            "2": 67,
+            "3": 45,
+            "4": 55,
+            "5": 34,
+            "6": 26,
+            "7": 33,
+            "8": 26,
+            "9": 19,
+            "10": 19,
+            "11": 10,
+            "12": 11,
+            "13": 13,
+            "14": 13,
+            "15": 14
+          },
+          "coincident": 930
+        }
+      }
+    },
+    "goals_ft": {
+      "window": {
+        "half": "ft",
+        "period": 2,
+        "from": 70,
+        "to": 90,
+        "label": "2.ª parte · 70–90",
+        "shortLabel": "FT 70–90"
+      },
+      "baseline": {
+        "score": 0.29487287389942907,
+        "settings": {
+          "cornerHalf": "ft",
+          "primaryKind": "combo",
+          "secondaryKind": "swing",
+          "fallbackKind": "sustainedFallback",
+          "spikeThreshold": 80,
+          "swingComboThreshold": 50,
+          "swingSecondaryThreshold": 60,
+          "sustainedThreshold": 30,
+          "sustainedComboMinutes": 3,
+          "sustainedFallbackMinutes": 4,
+          "fallbackSpikeThreshold": 80,
+          "fallbackSustainedThreshold": 30,
+          "sustainedSecondaryThreshold": 30,
+          "sustainedSecondaryMinutes": 5,
+          "evaluationWindow": 5
+        },
+        "metrics": {
+          "matches": 880,
+          "events": 894,
+          "alerts": 2657,
+          "alertsPerMatch": 3.019318181818182,
+          "hits": 947,
+          "preferredHits": 454,
+          "eventsHit": 424,
+          "precision": 0.35641701166729395,
+          "precisionPreferred": 0.17086940158073013,
+          "recall": 0.4742729306487696,
+          "medianLead": 3,
+          "meanLead": 4.423442449841605,
+          "leadHist": {
+            "1": 372,
+            "2": 82,
+            "3": 75,
+            "4": 62,
+            "5": 52,
+            "6": 51,
+            "7": 37,
+            "8": 32,
+            "9": 34,
+            "10": 42,
+            "11": 26,
+            "12": 22,
+            "13": 30,
+            "14": 17,
+            "15": 13
+          },
+          "coincident": 1057
+        }
+      },
+      "best": {
+        "score": 0.3423461494710499,
+        "settings": {
+          "cornerHalf": "ft",
+          "primaryKind": "combo",
+          "secondaryKind": "swing",
+          "fallbackKind": "sustainedFallback",
+          "spikeThreshold": 80,
+          "swingComboThreshold": 50,
+          "swingSecondaryThreshold": 60,
+          "sustainedThreshold": 30,
+          "sustainedComboMinutes": 3,
+          "sustainedFallbackMinutes": 5,
+          "fallbackSpikeThreshold": 80,
+          "fallbackSustainedThreshold": 30,
+          "sustainedSecondaryThreshold": 30,
+          "sustainedSecondaryMinutes": 5,
+          "evaluationWindow": 5
+        },
+        "metrics": {
+          "matches": 880,
+          "events": 894,
+          "alerts": 2124,
+          "alertsPerMatch": 2.4136363636363636,
+          "hits": 795,
+          "preferredHits": 421,
+          "eventsHit": 393,
+          "precision": 0.3742937853107345,
+          "precisionPreferred": 0.19821092278719396,
+          "recall": 0.4395973154362416,
+          "medianLead": 2,
+          "meanLead": 4.133333333333334,
+          "leadHist": {
+            "1": 349,
+            "2": 72,
+            "3": 53,
+            "4": 48,
+            "5": 42,
+            "6": 37,
+            "7": 25,
+            "8": 27,
+            "9": 27,
+            "10": 31,
+            "11": 21,
+            "12": 16,
+            "13": 25,
+            "14": 12,
+            "15": 10
+          },
+          "coincident": 1023
+        }
+      }
+    },
+    "corners_ht": {
+      "window": {
+        "half": "ht",
+        "period": 1,
+        "from": 32,
+        "to": 42,
+        "shortHorizon": 5,
+        "label": "1.ª parte · 32–42",
+        "shortLabel": "HT 32–42"
+      },
+      "baseline": {
+        "score": 0.1794606043743998,
+        "settings": {
+          "cornerHalf": "ht",
+          "primaryKind": "sustained",
+          "secondaryKind": "combo",
+          "fallbackKind": "sustainedFallback",
+          "spikeThreshold": 60,
+          "swingComboThreshold": 40,
+          "swingSecondaryThreshold": 60,
+          "sustainedThreshold": 25,
+          "sustainedComboMinutes": 3,
+          "sustainedFallbackMinutes": 4,
+          "fallbackSpikeThreshold": 70,
+          "fallbackSustainedThreshold": 30,
+          "sustainedSecondaryThreshold": 30,
+          "sustainedSecondaryMinutes": 2,
+          "evaluationWindow": 5
+        },
+        "metrics": {
+          "matches": 880,
+          "events": 871,
+          "alerts": 3326,
+          "alertsPerMatch": 3.7795454545454548,
+          "hits": 759,
+          "preferredHits": 310,
+          "eventsHit": 256,
+          "precision": 0.22820204449789536,
+          "precisionPreferred": 0.09320505111244738,
+          "recall": 0.2939150401836969,
+          "medianLead": 3,
+          "meanLead": 3.6363636363636362,
+          "leadHist": {
+            "1": 188,
+            "2": 122,
+            "3": 100,
+            "4": 89,
+            "5": 79,
+            "6": 66,
+            "7": 57,
+            "8": 43,
+            "9": 12,
+            "10": 3
+          },
+          "coincident": 499
+        }
+      },
+      "best": {
+        "score": 0.20196867631061532,
+        "settings": {
+          "cornerHalf": "ht",
+          "primaryKind": "sustained",
+          "secondaryKind": "combo",
+          "fallbackKind": "sustainedFallback",
+          "spikeThreshold": 60,
+          "swingComboThreshold": 40,
+          "swingSecondaryThreshold": 60,
+          "sustainedThreshold": 25,
+          "sustainedComboMinutes": 3,
+          "sustainedFallbackMinutes": 4,
+          "fallbackSpikeThreshold": 70,
+          "fallbackSustainedThreshold": 30,
+          "sustainedSecondaryThreshold": 20,
+          "sustainedSecondaryMinutes": 2,
+          "evaluationWindow": 5
+        },
+        "metrics": {
+          "matches": 880,
+          "events": 871,
+          "alerts": 4418,
+          "alertsPerMatch": 5.0204545454545455,
+          "hits": 995,
+          "preferredHits": 403,
+          "eventsHit": 337,
+          "precision": 0.22521502942507923,
+          "precisionPreferred": 0.09121774558623812,
+          "recall": 0.3869115958668197,
+          "medianLead": 3,
+          "meanLead": 3.5889447236180905,
+          "leadHist": {
+            "1": 241,
+            "2": 162,
+            "3": 143,
+            "4": 124,
+            "5": 103,
+            "6": 84,
+            "7": 66,
+            "8": 51,
+            "9": 18,
+            "10": 3
+          },
+          "coincident": 593
+        }
+      }
+    },
+    "corners_ft": {
+      "window": {
+        "half": "ft",
+        "period": 2,
+        "from": 82,
+        "to": 87,
+        "shortHorizon": 3,
+        "label": "2.ª parte · 82–87",
+        "shortLabel": "FT 82–87"
+      },
+      "baseline": {
+        "score": 0.17563835337813938,
+        "settings": {
+          "cornerHalf": "ft",
+          "primaryKind": "combo",
+          "secondaryKind": "sustained",
+          "fallbackKind": "spike",
+          "spikeThreshold": 80,
+          "swingComboThreshold": 50,
+          "swingSecondaryThreshold": 60,
+          "sustainedThreshold": 30,
+          "sustainedComboMinutes": 3,
+          "sustainedFallbackMinutes": 4,
+          "fallbackSpikeThreshold": 85,
+          "fallbackSustainedThreshold": 30,
+          "sustainedSecondaryThreshold": 25,
+          "sustainedSecondaryMinutes": 2,
+          "evaluationWindow": 3
+        },
+        "metrics": {
+          "matches": 880,
+          "events": 514,
+          "alerts": 1760,
+          "alertsPerMatch": 2,
+          "hits": 238,
+          "preferredHits": 149,
+          "eventsHit": 123,
+          "precision": 0.13522727272727272,
+          "precisionPreferred": 0.0846590909090909,
+          "recall": 0.23929961089494164,
+          "medianLead": 2,
+          "meanLead": 2.2983193277310923,
+          "leadHist": {
+            "1": 84,
+            "2": 65,
+            "3": 40,
+            "4": 32,
+            "5": 17
+          },
+          "coincident": 226
+        }
+      },
+      "best": {
+        "score": 0.18347618994830409,
+        "settings": {
+          "cornerHalf": "ft",
+          "primaryKind": "combo",
+          "secondaryKind": "sustained",
+          "fallbackKind": "spike",
+          "spikeThreshold": 80,
+          "swingComboThreshold": 50,
+          "swingSecondaryThreshold": 60,
+          "sustainedThreshold": 30,
+          "sustainedComboMinutes": 3,
+          "sustainedFallbackMinutes": 4,
+          "fallbackSpikeThreshold": 85,
+          "fallbackSustainedThreshold": 30,
+          "sustainedSecondaryThreshold": 20,
+          "sustainedSecondaryMinutes": 2,
+          "evaluationWindow": 3
+        },
+        "metrics": {
+          "matches": 880,
+          "events": 514,
+          "alerts": 2106,
+          "alertsPerMatch": 2.393181818181818,
+          "hits": 278,
+          "preferredHits": 179,
+          "eventsHit": 140,
+          "precision": 0.13200379867046533,
+          "precisionPreferred": 0.08499525166191833,
+          "recall": 0.2723735408560311,
+          "medianLead": 2,
+          "meanLead": 2.241007194244604,
+          "leadHist": {
+            "1": 103,
+            "2": 76,
+            "3": 46,
+            "4": 35,
+            "5": 18
+          },
+          "coincident": 261
+        }
+      }
+    }
+  }
+}

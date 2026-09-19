@@ -160,6 +160,15 @@ try {
 }
 if (!autoThrew) fail.push('applyProposal(reason=auto) must stay disabled')
 
+let lockThrew = false
+try {
+  applyProposal('latest', 'manual', 'goals', undefined, { confirm: true })
+} catch (err) {
+  lockThrew =
+    err instanceof Error && /Definições bloqueadas/i.test(err.message)
+}
+if (!lockThrew) fail.push('applyProposal without unlock must be blocked while locked')
+
 let overlayThrew = false
 try {
   applyTipOverlay({ overlay: DEFAULT_TIP_OVERLAY })

@@ -195,6 +195,30 @@ try {
     loadTips().filter((t) => t.fixtureId === primedId).length === 0,
     'primed alerts do not open tips',
   )
+
+  const lateId = `odds-sep-late-${Date.now()}`
+  const lateAlert = {
+    ...testAlert(lateId, 'primary-2-96-0'),
+    id: 'primary-2-96-0',
+    min: 96,
+    period: 2,
+  }
+  const lateBefore = pushCount
+  const lateSent = await processEvaluatedAlerts({
+    fixture: testFixture(lateId),
+    market: 'goals',
+    settings,
+    byHalf: undefined,
+    fresh: [lateAlert],
+    first: false,
+    finished: false,
+    payload,
+    events: [],
+    points: [{ period: 2, min: 96 }],
+  })
+  await waitForOddsAttachForTests()
+  check(lateSent === 0, `96' stoppage must not push, got ${lateSent}`)
+  check(pushCount === lateBefore, '96\' stoppage must not call sendPush')
 } finally {
   setPollerSendPushForTests(null)
   setAttachOddsForTests(null)

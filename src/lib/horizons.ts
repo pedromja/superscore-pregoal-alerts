@@ -1,8 +1,12 @@
-import type { CornerHalf, GoalEvent, Side, TimelinePoint } from './types'
-import { CORNER_WINDOWS, cornerHalfOf } from './windows'
+import type { CornerHalf, GoalEvent, Market, Side, TimelinePoint } from './types'
+import { CORNER_WINDOWS, GOAL_WINDOWS, cornerHalfOf, goalHalfOf } from './windows'
 
 export const HORIZON_SHORT = 5
 export const HORIZON_LONG_CAP = 15
+/** Hard floor: never credit lead 0 / post-event. 1' is the first usable minute. */
+export const MIN_LEAD_MIN = 1
+/** Preferred actionable band on the absolute SuperScore clock. */
+export const PREFERRED_LEAD_MAX = 2
 
 export type HorizonOutcome = {
   hit5: boolean | null
@@ -16,6 +20,8 @@ export type HorizonOptions = {
   shortHorizon?: number
   deadlineCap?: number
   sameWindowOnly?: boolean
+  halfOf?: (min: number, period: number) => CornerHalf | null
+  minLead?: number
 }
 
 export function periodEndMin(
@@ -37,6 +43,14 @@ export function longDeadlineMin(
   return deadlineCap === undefined ? raw : Math.min(raw, deadlineCap)
 }
 
+export function isUsableLead(lead: number | null | undefined): lead is number {
+  return typeof lead === 'number' && lead >= MIN_LEAD_MIN
+}
+
+export function isPreferredLead(lead: number | null | undefined): boolean {
+  return isUsableLead(lead) && lead <= PREFERRED_LEAD_MAX
+}
+
 function isAfterAlert(
   goal: Pick<GoalEvent, 'min' | 'period'>,
   alertMin: number,
@@ -53,33 +67,53 @@ function nearestLead(
   alertPeriod: number,
   deadlineMin: number,
   samePeriodOnly: boolean,
-  sameWindowOnly: boolean,
+  options: HorizonOptions,
 ): number | null {
-  const alertHalf = sameWindowOnly ? cornerHalfOf(alertMin, alertPeriod) : null
+  const minLead = options.minLead ?? MIN_LEAD_MIN
+  const halfOf = options.halfOf ?? cornerHalfOf
+  const alertHalf = options.sameWindowOnly ? halfOf(alertMin, alertPeriod) : null
   let best: number | null = null
   for (const goal of goals) {
     if (goal.side !== side) continue
     if (!isAfterAlert(goal, alertMin, alertPeriod)) continue
     if (samePeriodOnly && goal.period !== alertPeriod) continue
     if (goal.min > deadlineMin) continue
-    if (sameWindowOnly) {
-      const goalHalf = cornerHalfOf(goal.min, goal.period)
+    if (options.sameWindowOnly) {
+      const goalHalf = halfOf(goal.min, goal.period)
       if (!alertHalf || goalHalf !== alertHalf) continue
     }
     const lead = goal.min - alertMin
-    if (lead <= 0) continue
+    if (lead < minLead) continue
     if (best === null || lead < best) best = lead
   }
   return best
 }
 
 export function horizonOptionsForHalf(half?: CornerHalf | null): HorizonOptions {
-  if (!half) return {}
+  if (!half) return { minLead: MIN_LEAD_MIN }
   const window = CORNER_WINDOWS[half]
   return {
     shortHorizon: window.shortHorizon,
     deadlineCap: window.to,
     sameWindowOnly: true,
+    halfOf: cornerHalfOf,
+    minLead: MIN_LEAD_MIN,
+  }
+}
+
+export function horizonOptionsForMarket(
+  market: Market,
+  half?: CornerHalf | null,
+): HorizonOptions {
+  if (market === 'corners') return horizonOptionsForHalf(half)
+  if (!half) return { minLead: MIN_LEAD_MIN, halfOf: goalHalfOf, sameWindowOnly: true }
+  const window = GOAL_WINDOWS[half]
+  return {
+    shortHorizon: HORIZON_SHORT,
+    deadlineCap: window.to,
+    sameWindowOnly: true,
+    halfOf: goalHalfOf,
+    minLead: MIN_LEAD_MIN,
   }
 }
 
@@ -90,6 +124,7 @@ export function outcomeForAlert(
   options: HorizonOptions = {},
 ): HorizonOutcome {
   const shortHorizon = options.shortHorizon ?? HORIZON_SHORT
+  const minLead = options.minLead ?? MIN_LEAD_MIN
   const longDeadline = longDeadlineMin(
     alert.min,
     alert.period,
@@ -109,7 +144,6 @@ export function outcomeForAlert(
       leadTimeLong: 0,
     }
   }
-  const sameWindowOnly = Boolean(options.sameWindowOnly)
   const leadTime5 = nearestLead(
     goals,
     alert.side,
@@ -117,7 +151,7 @@ export function outcomeForAlert(
     alert.period,
     shortDeadline,
     false,
-    sameWindowOnly,
+    { ...options, minLead },
   )
   const leadTimeLong = nearestLead(
     goals,
@@ -126,11 +160,11 @@ export function outcomeForAlert(
     alert.period,
     longDeadline,
     true,
-    sameWindowOnly,
+    { ...options, minLead },
   )
   return {
-    hit5: leadTime5 !== null,
-    hitLong: leadTimeLong !== null,
+    hit5: isUsableLead(leadTime5),
+    hitLong: isUsableLead(leadTimeLong),
     longDeadline,
     leadTime5,
     leadTimeLong,
@@ -149,7 +183,7 @@ export function goalHadPrealert(
     if (alert.coincident || alert.side !== goal.side) continue
     const out = outcomeForAlert(alert, [goal], points, options)
     const lead = mode === 'short' ? out.leadTime5 : out.leadTimeLong
-    if (lead === null) continue
+    if (!isUsableLead(lead)) continue
     if (best === null || lead < best) best = lead
   }
   return { hit: best !== null, lead: best }

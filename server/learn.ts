@@ -4,9 +4,14 @@ import {
   goalHadPrealert,
   HORIZON_LONG_CAP,
   HORIZON_SHORT,
-  horizonOptionsForHalf,
+  horizonOptionsForMarket,
   outcomeForAlert,
 } from '../src/lib/horizons.ts'
+import {
+  DEFINITIONS_LOCKED,
+  LOCK_APPLY_ERROR_PT,
+  LOCK_SAVE_ERROR_PT,
+} from '../src/lib/lock.ts'
 import { defaultsFor, parseMarket } from '../src/lib/market.ts'
 import {
   evaluateAlerts,
@@ -25,7 +30,10 @@ import type {
 } from '../src/lib/types.ts'
 import {
   CORNER_HALVES,
+  GOAL_HALVES,
   cornerHalfOf,
+  goalHalfOf,
+  inGoalsWindow,
   parseCornerHalf,
   parseCornerHalfOpt,
 } from '../src/lib/windows.ts'
@@ -38,6 +46,7 @@ import {
   loadHistory,
   loadParams,
   loadProposal,
+  resetLearnStore,
   saveAlerts,
   saveHistory,
   saveMatch,
@@ -45,6 +54,7 @@ import {
   saveProposal,
   upsertAlerts,
   upsertGoals,
+  type ResetLearnMarket,
 } from './store.ts'
 import type {
   DualMetrics,
@@ -67,21 +77,36 @@ export function currentSettings(
   half?: CornerHalf | null,
 ): AlertSettings {
   const m = market ?? loadActiveMarket()
-  if (m !== 'corners') {
+  const h = parseCornerHalf(half)
+  const defaults = defaultsFor(m, h)
+  const stored = loadParams(m, h)
+  const notify = {
+    notificationsEnabled:
+      stored?.notificationsEnabled ?? defaults.notificationsEnabled,
+    notifyPrimary: stored?.notifyPrimary ?? defaults.notifyPrimary,
+    notifySecondary: stored?.notifySecondary ?? defaults.notifySecondary,
+    notifyFallback: stored?.notifyFallback ?? defaults.notifyFallback,
+  }
+  if (DEFINITIONS_LOCKED) {
     return {
-      ...defaultsFor('goals'),
-      ...loadParams('goals'),
-      market: 'goals',
-      evaluationWindow: LEARN_WINDOW,
+      ...defaults,
+      ...notify,
+      market: m,
+      cornerHalf: h,
+      evaluationWindow:
+        m === 'corners' ? defaults.evaluationWindow : LEARN_WINDOW,
     }
   }
-  const h = parseCornerHalf(half)
-  const defaults = defaultsFor('corners', h)
   return {
     ...defaults,
-    ...loadParams('corners', h),
-    market: 'corners',
+    ...stored,
+    ...notify,
+    market: m,
     cornerHalf: h,
+    evaluationWindow:
+      m === 'corners'
+        ? (stored?.evaluationWindow ?? defaults.evaluationWindow)
+        : LEARN_WINDOW,
   }
 }
 
@@ -112,12 +137,13 @@ export function toLoggedAlert(
   sentPush = false,
 ): LoggedAlert {
   const market = parseMarket(alert.market ?? settings.market)
-  const half =
-    market === 'corners'
-      ? parseCornerHalf(
-          alert.cornerHalf ?? settings.cornerHalf ?? cornerHalfOf(alert.min, alert.period),
-        )
-      : undefined
+  const half = parseCornerHalf(
+    alert.cornerHalf ??
+      settings.cornerHalf ??
+      (market === 'corners'
+        ? cornerHalfOf(alert.min, alert.period)
+        : goalHalfOf(alert.min, alert.period)),
+  )
   return {
     id: `${alert.fixtureId}:${alert.id}`,
     fixtureId: alert.fixtureId,
@@ -158,8 +184,10 @@ export function labelMatch(
   half?: CornerHalf | null,
 ): void {
   const m = market ?? loadActiveMarket()
-  if (m === 'corners' && !parseCornerHalfOpt(half)) {
-    for (const h of CORNER_HALVES) labelMatch(match, window, m, h)
+  if (!parseCornerHalfOpt(half)) {
+    for (const h of m === 'corners' ? CORNER_HALVES : GOAL_HALVES) {
+      labelMatch(match, window, m, h)
+    }
     return
   }
   const settings = currentSettings(m, half)
@@ -168,7 +196,7 @@ export function labelMatch(
     evaluationWindow: settings.evaluationWindow || window,
   })
   const goals = extractMarketEvents(match.payload, points, m, settings.cornerHalf)
-  const horizon = horizonOptionsForHalf(settings.cornerHalf)
+  const horizon = horizonOptionsForMarket(m, settings.cornerHalf)
   const firedLite = fired.map((a) => ({
     min: a.min,
     period: a.period,
@@ -253,14 +281,14 @@ function weightedHit(alert: LoggedAlert, field: 'hit5' | 'hitLong'): boolean | n
 function scoreNoteFor(settings: AlertSettings): string {
   const short = settings.evaluationWindow || HORIZON_SHORT
   const cap = settings.market === 'corners' ? 16 : 12
-  return `Score = 0,4×precisão(≤${short} min) + 0,6×precisão(≤15 min ou fim da janela/parte), menos penalização se alertas/jogo > ${cap}. A aprendizagem só propõe; as regras base não mudam sem confirmação na UI.`
+  return `Score = 0,4×precisão(≤${short} min) + 0,6×precisão(≤15 min ou fim da janela/parte), menos penalização se alertas/jogo > ${cap}. HIT exige lead ≥1 min (ideal 1–2). A aprendizagem só propõe; com definições locked aplicar exige desbloquear + confirmar.`
 }
 
 export function computeMetrics(
   settings: AlertSettings = currentSettings(),
 ): LearnSummary {
   const market = parseMarket(settings.market)
-  const half = market === 'corners' ? parseCornerHalf(settings.cornerHalf) : undefined
+  const half = parseCornerHalf(settings.cornerHalf)
   const matches = listMatches()
   const alerts = loadAlerts(market, half).filter((a) => !a.coincident)
   const goals = loadGoals(market, half)
@@ -346,8 +374,8 @@ function replayAll(settings: AlertSettings): DualMetrics {
   const matches = listMatches()
   if (!matches.length) return { w5: emptyMetrics(), wLong: emptyMetrics() }
   const market = parseMarket(settings.market)
-  const half = market === 'corners' ? parseCornerHalf(settings.cornerHalf) : undefined
-  const horizon = horizonOptionsForHalf(half)
+  const half = parseCornerHalf(settings.cornerHalf)
+  const horizon = horizonOptionsForMarket(market, half)
 
   let alerts = 0
   let tp5 = 0
@@ -521,10 +549,8 @@ export function recalculate(
   half?: CornerHalf | null,
 ): ParamVersion {
   const m = market ?? loadActiveMarket()
-  if (m === 'corners' && !parseCornerHalfOpt(half)) {
-    throw new Error('Recálculo de cantos exige half=ht ou half=ft')
-  }
-  const base = currentSettings(m, half)
+  const h = parseCornerHalf(half)
+  const base = currentSettings(m, h)
   const before = replayAll(base)
   let best = { settings: base, metrics: before, score: scoreOf(before, m) }
 
@@ -576,7 +602,7 @@ export function applyProposal(
   reason = 'manual',
   market?: Market,
   half?: CornerHalf | null,
-  opts: { confirm?: boolean } = {},
+  opts: { confirm?: boolean; unlock?: boolean } = {},
 ): ParamVersion {
   if (opts.confirm !== true) {
     throw new Error(
@@ -586,8 +612,11 @@ export function applyProposal(
   if (reason === 'auto') {
     throw new Error('Auto-aplicar está desligado. Confirme a proposta na UI.')
   }
+  if (DEFINITIONS_LOCKED && opts.unlock !== true) {
+    throw new Error(LOCK_APPLY_ERROR_PT)
+  }
   const m = market ?? loadActiveMarket()
-  const h = m === 'corners' ? parseCornerHalf(half) : undefined
+  const h = parseCornerHalf(half)
   const proposal = loadProposal(m, h)
   if (!proposal || (id !== proposal.id && id !== 'latest')) {
     throw new Error('Proposta inexistente')
@@ -606,6 +635,30 @@ export function applyProposal(
   return applied
 }
 
+export function putParams(
+  incoming: Partial<AlertSettings> & Pick<AlertSettings, 'market'>,
+  opts: { confirm?: boolean; unlock?: boolean } = {},
+): AlertSettings {
+  if (opts.confirm !== true) {
+    throw new Error(
+      'Gravação exige confirmação explícita (confirm:true). As regras base não mudam em silêncio.',
+    )
+  }
+  if (DEFINITIONS_LOCKED && opts.unlock !== true) {
+    throw new Error(LOCK_SAVE_ERROR_PT)
+  }
+  const m = parseMarket(incoming.market)
+  const h = parseCornerHalf(incoming.cornerHalf)
+  const next: AlertSettings = {
+    ...defaultsFor(m, h),
+    ...incoming,
+    market: m,
+    cornerHalf: h,
+  }
+  saveParams(next, m, h)
+  return currentSettings(m, h)
+}
+
 export function setFeedback(
   alertId: string,
   feedback: 'up' | 'down' | null,
@@ -613,14 +666,14 @@ export function setFeedback(
   half?: CornerHalf | null,
 ): LoggedAlert {
   const m = market ?? loadActiveMarket()
-  if (m === 'corners' && !parseCornerHalfOpt(half)) {
+  if (!parseCornerHalfOpt(half)) {
     try {
       return setFeedback(alertId, feedback, m, 'ht')
     } catch {
       return setFeedback(alertId, feedback, m, 'ft')
     }
   }
-  const h = m === 'corners' ? parseCornerHalf(half) : undefined
+  const h = parseCornerHalf(half)
   const alerts = loadAlerts(m, h)
   const idx = alerts.findIndex((a) => a.id === alertId)
   if (idx < 0) throw new Error('Alerta não encontrado')
@@ -633,6 +686,10 @@ function usableCornerAlert(alert: FeedAlert): boolean {
   return cornerHalfOf(alert.min, alert.period) !== null
 }
 
+function usableGoalAlert(alert: FeedAlert): boolean {
+  return inGoalsWindow(alert.min, alert.period)
+}
+
 export function ingestFeedAlerts(
   alerts: FeedAlert[],
   settings: AlertSettings,
@@ -641,32 +698,29 @@ export function ingestFeedAlerts(
   half?: CornerHalf | null,
 ): LoggedAlert[] {
   const m = parseMarket(market ?? settings.market ?? alerts[0]?.market)
-  if (m !== 'corners') {
-    const logged = alerts
-      .filter((a) => !a.coincident)
-      .map((a) => toLoggedAlert({ ...a, market: m }, settings, sentPush))
-    return upsertAlerts(logged, m)
-  }
-
+  const clockHalf = m === 'corners' ? cornerHalfOf : goalHalfOf
   const forced = parseCornerHalfOpt(half)
+  const halves = forced ? [forced] : m === 'corners' ? CORNER_HALVES : GOAL_HALVES
   const stored: LoggedAlert[] = []
-  for (const h of forced ? [forced] : CORNER_HALVES) {
+  for (const h of halves) {
     const slice = alerts.filter((a) => {
       if (a.coincident) return false
-      const found = a.cornerHalf ?? cornerHalfOf(a.min, a.period)
+      if (m === 'corners' && !usableCornerAlert(a)) return false
+      if (m === 'goals' && !usableGoalAlert(a)) return false
+      const found = a.cornerHalf ?? clockHalf(a.min, a.period)
       return found === h
     })
     if (!slice.length) continue
     const halfSettings =
-      settings.cornerHalf === h ? settings : currentSettings('corners', h)
+      settings.cornerHalf === h ? settings : currentSettings(m, h)
     const logged = slice.map((a) =>
       toLoggedAlert(
-        { ...a, market: 'corners', cornerHalf: h },
+        { ...a, market: m, cornerHalf: h },
         halfSettings,
         sentPush,
       ),
     )
-    stored.push(...upsertAlerts(logged, 'corners', h))
+    stored.push(...upsertAlerts(logged, m, h))
   }
   return stored
 }
@@ -676,7 +730,7 @@ export function seedDemos(
   half?: CornerHalf | null,
 ): { matches: number; alerts: number } {
   const m = market ?? loadActiveMarket()
-  if (m === 'corners' && !parseCornerHalfOpt(half)) {
+  if (!parseCornerHalfOpt(half)) {
     const ht = seedDemos(m, 'ht')
     const ft = seedDemos(m, 'ft')
     return { matches: ht.matches, alerts: ht.alerts + ft.alerts }
@@ -728,7 +782,9 @@ export function seedDemos(
     saveMatch(match)
     const replay = evaluateReplay(payload, settings)
     const feed: FeedAlert[] = replay.alerts
-      .filter((a) => m !== 'corners' || usableCornerAlert(a))
+      .filter((a) =>
+        m === 'corners' ? usableCornerAlert(a) : usableGoalAlert(a),
+      )
       .map((a) =>
         withMatchTallies(
           {
@@ -748,6 +804,24 @@ export function seedDemos(
     alerts += feed.filter((a) => !a.coincident).length
   }
   return { matches: demos.length, alerts }
+}
+
+export function parseResetMarket(value: unknown): ResetLearnMarket {
+  if (value === undefined || value === null || value === '') return 'all'
+  if (value === 'goals' || value === 'corners' || value === 'all') return value
+  throw new Error("market deve ser 'goals' | 'corners' | 'all'")
+}
+
+export function resetLearnStats(opts: {
+  confirm?: unknown
+  market?: unknown
+}): ReturnType<typeof resetLearnStore> {
+  if (opts.confirm !== true) {
+    throw new Error(
+      'Reset exige confirmação explícita (confirm:true). Não apaga VAPID, subscrições, overlay nem sent-keys.',
+    )
+  }
+  return resetLearnStore(parseResetMarket(opts.market))
 }
 
 export { RULE_SHORT }

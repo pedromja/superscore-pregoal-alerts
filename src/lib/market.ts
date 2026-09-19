@@ -6,7 +6,7 @@ import type {
   RuleId,
   RuleKind,
 } from './types'
-import { CORNER_WINDOWS, parseCornerHalf } from './windows'
+import { CORNER_WINDOWS, GOAL_WINDOWS, parseCornerHalf } from './windows'
 
 export const MARKETS: Market[] = ['goals', 'corners']
 
@@ -23,7 +23,7 @@ export const MARKET_COPY = {
     nounCap: 'Golo',
     title: 'Alertas pré-golo',
     blurb:
-      'Momentum de ataque assinado (−100 fora / +100 casa). As regras disparam antes do golo — um spike no minuto do golo é coincidente, não um acerto.',
+      `Momentum de ataque assinado (−100 fora / +100 casa). Golos só alertam na 1.ª parte aos ${GOAL_WINDOWS.ht.from}–${GOAL_WINDOWS.ht.to} e na 2.ª aos ${GOAL_WINDOWS.ft.from}–${GOAL_WINDOWS.ft.to} (relógio absoluto; FT não passa de 90). Prolongamento (P1>45 / P2>90) está banido: um 96' chega depois do golo, sem mercados nas casas. Um spike no minuto do golo é coincidente, não um acerto.`,
     pushPrefix: 'Golo',
     pushTag: 'pregoal',
   },
@@ -34,7 +34,7 @@ export const MARKET_COPY = {
     nounCap: 'Canto',
     title: 'Alertas pré-canto',
     blurb:
-      `Momentum de ataque assinado (−100 fora / +100 casa). Cantos só alertam na 1.ª parte aos ${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to} e na 2.ª aos ${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to} (relógio absoluto). Fora destas janelas não há avaliação, push nem aprendizagem. O minuto ao vivo escolhe os parâmetros HT ou FT.`,
+      `Momentum de ataque assinado (−100 fora / +100 casa). Cantos só alertam na 1.ª parte aos ${CORNER_WINDOWS.ht.from}–${CORNER_WINDOWS.ht.to} e na 2.ª aos ${CORNER_WINDOWS.ft.from}–${CORNER_WINDOWS.ft.to} (relógio absoluto). Prolongamento (P1>45 / P2>90) está banido nos dois mercados — push de injury time chega depois do evento, sem mercados. Fora destas janelas não há avaliação, push nem aprendizagem. O minuto ao vivo escolhe os parâmetros HT ou FT.`,
     pushPrefix: 'Canto',
     pushTag: 'precantos',
   },
@@ -50,7 +50,8 @@ const SHARED_FLAGS = {
   notifyFallback: false,
 } as const
 
-const GOAL_THRESHOLDS = {
+/** HT 20–42 — backtest lead≥1, 18/set/2026 (880 jogos SuperScore ro). Locked. */
+export const GOAL_HT_THRESHOLDS = {
   primaryKind: 'combo' as const,
   secondaryKind: 'swing' as const,
   fallbackKind: 'sustainedFallback' as const,
@@ -59,7 +60,7 @@ const GOAL_THRESHOLDS = {
   swingSecondaryThreshold: 60,
   sustainedThreshold: 30,
   sustainedComboMinutes: 3,
-  sustainedFallbackMinutes: 4,
+  sustainedFallbackMinutes: 5,
   fallbackSpikeThreshold: 80,
   fallbackSustainedThreshold: 30,
   sustainedSecondaryThreshold: 30,
@@ -67,8 +68,13 @@ const GOAL_THRESHOLDS = {
   evaluationWindow: 5,
 }
 
-/** HT 32–42, W=5 — limiares do retrain offline 2026-09-18 (inalterados). */
-const CORNER_HT_THRESHOLDS = {
+/** FT 70–90 — mesmo combo; reserva Sustained 5@30 (med lead 2). Locked. */
+export const GOAL_FT_THRESHOLDS = {
+  ...GOAL_HT_THRESHOLDS,
+}
+
+/** HT 32–42, W=5 — backtest 18/set (Sust sec. 2@20). Locked. */
+export const CORNER_HT_THRESHOLDS = {
   primaryKind: 'sustained' as const,
   secondaryKind: 'combo' as const,
   fallbackKind: 'sustainedFallback' as const,
@@ -80,13 +86,13 @@ const CORNER_HT_THRESHOLDS = {
   sustainedFallbackMinutes: 4,
   fallbackSpikeThreshold: 70,
   fallbackSustainedThreshold: 30,
-  sustainedSecondaryThreshold: 30,
+  sustainedSecondaryThreshold: 20,
   sustainedSecondaryMinutes: 2,
   evaluationWindow: CORNER_WINDOWS.ht.shortHorizon,
 }
 
-/** FT 82–87, W=3 — limiares do retrain offline 2026-09-18 (inalterados). */
-const CORNER_FT_THRESHOLDS = {
+/** FT 82–87, W=3 — backtest 18/set (Sust sec. 2@20). Locked. */
+export const CORNER_FT_THRESHOLDS = {
   primaryKind: 'combo' as const,
   secondaryKind: 'sustained' as const,
   fallbackKind: 'spike' as const,
@@ -98,7 +104,7 @@ const CORNER_FT_THRESHOLDS = {
   sustainedFallbackMinutes: 4,
   fallbackSpikeThreshold: 85,
   fallbackSustainedThreshold: 30,
-  sustainedSecondaryThreshold: 25,
+  sustainedSecondaryThreshold: 20,
   sustainedSecondaryMinutes: 2,
   evaluationWindow: CORNER_WINDOWS.ft.shortHorizon,
 }
@@ -115,8 +121,8 @@ export function defaultsFor(
   market: Market = 'goals',
   half: CornerHalf = 'ht',
 ): AlertSettings {
+  const h = parseCornerHalf(half)
   if (market === 'corners') {
-    const h = parseCornerHalf(half)
     const thresholds = h === 'ft' ? CORNER_FT_THRESHOLDS : CORNER_HT_THRESHOLDS
     return {
       market: 'corners',
@@ -125,9 +131,11 @@ export function defaultsFor(
       ...SHARED_FLAGS,
     }
   }
+  const thresholds = h === 'ft' ? GOAL_FT_THRESHOLDS : GOAL_HT_THRESHOLDS
   return {
     market: 'goals',
-    ...GOAL_THRESHOLDS,
+    cornerHalf: h,
+    ...thresholds,
     ...SHARED_FLAGS,
   }
 }
@@ -137,6 +145,17 @@ export function defaultCornersByHalf(): CornersByHalf {
     ht: defaultsFor('corners', 'ht'),
     ft: defaultsFor('corners', 'ft'),
   }
+}
+
+export function defaultGoalsByHalf(): CornersByHalf {
+  return {
+    ht: defaultsFor('goals', 'ht'),
+    ft: defaultsFor('goals', 'ft'),
+  }
+}
+
+export function defaultHalves(market: Market): CornersByHalf {
+  return market === 'corners' ? defaultCornersByHalf() : defaultGoalsByHalf()
 }
 
 export function eventTypeFor(market: Market): number {

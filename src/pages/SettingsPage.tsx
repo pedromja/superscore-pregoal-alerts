@@ -5,9 +5,16 @@ import {
   TRAINING_CORNERS_HT,
 } from '../lib/demos'
 import { pct } from '../lib/format'
+import {
+  DEFINITIONS_LOCKED,
+  LOCK_SESSION_NOTE_PT,
+  LOCK_UNLOCK_LABEL_PT,
+  LOCK_WARNING_PT,
+} from '../lib/lock'
 import { defaultsFor, marketCopy, ruleDetails, syncNotifyFlags } from '../lib/market'
+import { useState } from 'react'
 import type { AlertSettings, CornerHalf, CornersByHalf, RuleKind } from '../lib/types'
-import { CORNER_WINDOWS } from '../lib/windows'
+import { CORNER_WINDOWS, GOAL_WINDOWS } from '../lib/windows'
 
 type Props = {
   settings: AlertSettings
@@ -23,65 +30,82 @@ export function SettingsPage({
   onChangeCorners,
 }: Props) {
   const copy = marketCopy(settings.market)
-
-  if (settings.market === 'corners') {
-    return (
-      <div className="space-y-4">
-        <NotificationBar settings={settings} onChange={onChange} />
-        <section className="rounded-2xl border border-line bg-panel p-4">
-          <h2 className="text-lg font-semibold">Definições das regras · Cantos</h2>
-          <p className="mt-1 text-sm text-emerald-100/60">
-            HT e FT têm limiares e aprendizagem separados. Ao vivo, o minuto
-            absoluto escolhe a janela:{' '}
-            <strong>
-              {CORNER_WINDOWS.ht.from}–{CORNER_WINDOWS.ht.to}
-            </strong>{' '}
-            (1.ª parte) ou{' '}
-            <strong>
-              {CORNER_WINDOWS.ft.from}–{CORNER_WINDOWS.ft.to}
-            </strong>{' '}
-            (2.ª parte, o relógio começa em 46). Fora destas janelas não há
-            avaliação, push nem amostras de aprendizagem.
-          </p>
-        </section>
-        <div className="grid gap-4 xl:grid-cols-2">
-          <HalfEditor
-            half="ht"
-            settings={cornersByHalf.ht}
-            onChange={(next) =>
-              onChangeCorners({
-                ...cornersByHalf,
-                ht: syncNotifyFlags(settings, { ...next, cornerHalf: 'ht' }),
-              })
-            }
-          />
-          <HalfEditor
-            half="ft"
-            settings={cornersByHalf.ft}
-            onChange={(next) =>
-              onChangeCorners({
-                ...cornersByHalf,
-                ft: syncNotifyFlags(settings, { ...next, cornerHalf: 'ft' }),
-              })
-            }
-          />
-        </div>
-      </div>
-    )
-  }
+  const [unlocked, setUnlocked] = useState(false)
+  const locked = DEFINITIONS_LOCKED && !unlocked
+  const windows = settings.market === 'corners' ? CORNER_WINDOWS : GOAL_WINDOWS
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="space-y-4">
-        <NotificationBar settings={settings} onChange={onChange} />
-        <RuleEditor
-          settings={settings}
-          onChange={onChange}
-          title="Definições das regras"
-          blurb={`Defaults treinados para ${copy.nounPlural}. Gravados neste browser (\`localStorage\`), separados de cantos. Um pico no minuto do ${copy.noun} nunca conta como pré-alerta.`}
+    <div className="space-y-4">
+      <NotificationBar settings={settings} onChange={onChange} />
+      {DEFINITIONS_LOCKED ? (
+        <section className="rounded-2xl border border-amber-400/40 bg-amber-950/20 p-4">
+          <h2 className="text-lg font-semibold text-amber-100">Definições bloqueadas</h2>
+          <p className="mt-1 text-sm text-amber-100/80">{LOCK_WARNING_PT}</p>
+          <label className="mt-3 flex items-start gap-2 text-sm text-amber-50">
+            <input
+              type="checkbox"
+              checked={unlocked}
+              onChange={(e) => setUnlocked(e.target.checked)}
+              className="mt-0.5 accent-lime"
+            />
+            <span>{LOCK_UNLOCK_LABEL_PT}</span>
+          </label>
+          {unlocked ? (
+            <p className="mt-2 text-xs text-amber-100/70">{LOCK_SESSION_NOTE_PT}</p>
+          ) : null}
+        </section>
+      ) : null}
+      <section className="rounded-2xl border border-line bg-panel p-4">
+        <h2 className="text-lg font-semibold">
+          Definições das regras · {copy.toggle}
+        </h2>
+        <p className="mt-1 text-sm text-emerald-100/60">
+          HT e FT têm limiares separados. Relógio absoluto:{' '}
+          <strong>
+            {windows.ht.from}–{windows.ht.to}
+          </strong>{' '}
+          (1.ª parte) ou{' '}
+          <strong>
+            {windows.ft.from}–{windows.ft.to}
+          </strong>{' '}
+          (2.ª parte). Prolongamento (P1&gt;45 / P2&gt;90) está banido — um
+          96' chega depois do golo, sem mercados nas casas. Lead útil
+          ≥ 1 min (ideal 1–2). Fora destas janelas não há avaliação, push nem
+          amostras de aprendizagem.
+        </p>
+      </section>
+      <div className={`grid gap-4 xl:grid-cols-2 ${locked ? 'pointer-events-none opacity-60' : ''}`}>
+        <HalfEditor
+          half="ht"
+          settings={cornersByHalf.ht}
+          locked={locked}
+          onChange={(next) =>
+            onChangeCorners({
+              ...cornersByHalf,
+              ht: syncNotifyFlags(settings, {
+                ...next,
+                market: settings.market,
+                cornerHalf: 'ht',
+              }),
+            })
+          }
+        />
+        <HalfEditor
+          half="ft"
+          settings={cornersByHalf.ft}
+          locked={locked}
+          onChange={(next) =>
+            onChangeCorners({
+              ...cornersByHalf,
+              ft: syncNotifyFlags(settings, {
+                ...next,
+                market: settings.market,
+                cornerHalf: 'ft',
+              }),
+            })
+          }
         />
       </div>
-      <TrainingAside settings={settings} />
     </div>
   )
 }
@@ -90,19 +114,22 @@ function HalfEditor({
   half,
   settings,
   onChange,
+  locked = false,
 }: {
   half: CornerHalf
   settings: AlertSettings
   onChange: (next: AlertSettings) => void
+  locked?: boolean
 }) {
-  const window = CORNER_WINDOWS[half]
+  const window =
+    settings.market === 'corners' ? CORNER_WINDOWS[half] : GOAL_WINDOWS[half]
   return (
     <div className="space-y-3">
       <RuleEditor
         settings={settings}
-        onChange={onChange}
+        onChange={locked ? () => undefined : onChange}
         title={`${window.shortLabel}`}
-        blurb={`Relógio absoluto, period ${window.period}. W=${window.shortHorizon}. Defaults do retrain offline (95 jogos).`}
+        blurb={`Relógio absoluto, period ${window.period}. W=${settings.evaluationWindow}. Limiares do backtest 18/set (lead ≥1 min).`}
       />
       <TrainingAside settings={settings} compact />
     </div>
@@ -313,7 +340,7 @@ function TrainingAside({
   const windowLabel =
     settings.market === 'corners'
       ? CORNER_WINDOWS[settings.cornerHalf === 'ft' ? 'ft' : 'ht'].shortLabel
-      : copy.toggle
+      : `${GOAL_WINDOWS.ht.shortLabel} / ${GOAL_WINDOWS.ft.shortLabel}`
 
   return (
     <aside className="space-y-3">

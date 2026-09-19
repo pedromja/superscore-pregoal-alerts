@@ -85,6 +85,7 @@ export type LearnPayload = {
   autoAfter: number
   autoApply?: boolean
   confirmRequired?: boolean
+  locked?: boolean
 }
 
 export type LearnCornersPayload = {
@@ -167,13 +168,17 @@ export async function applyLearnProposal(
   id: string,
   market?: Market,
   half?: CornerHalf,
+  unlock = false,
 ): Promise<ParamVersion> {
   const res = await fetch(withQuery('/api/learn/apply', { market, half }), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, market, half, confirm: true }),
+    body: JSON.stringify({ id, market, half, confirm: true, unlock }),
   })
-  if (!res.ok) throw new Error('Não foi possível aplicar')
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    throw new Error(body?.error || 'Não foi possível aplicar')
+  }
   return (await res.json()) as ParamVersion
 }
 

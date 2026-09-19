@@ -27,7 +27,7 @@ const TIP_OVERLAY_PROPOSAL_FILE = 'tip_overlay_proposal.json'
 const ODDS_LOG_FILE = 'odds_observations.json'
 const ODDS_LOG_CAP = 4000
 
-export type LearnScope = 'goals' | 'corners_ht' | 'corners_ft'
+export type LearnScope = 'goals_ht' | 'goals_ft' | 'corners_ht' | 'corners_ft'
 
 const FILES: Record<
   LearnScope,
@@ -39,12 +39,19 @@ const FILES: Record<
     proposal: string
   }
 > = {
-  goals: {
+  goals_ht: {
     alerts: 'alerts.json',
     events: 'goals.json',
     params: 'params.json',
     history: 'params_history.json',
     proposal: 'proposal.json',
+  },
+  goals_ft: {
+    alerts: 'alerts_goals_ft.json',
+    events: 'goals_ft.json',
+    params: 'params_goals_ft.json',
+    history: 'params_history_goals_ft.json',
+    proposal: 'proposal_goals_ft.json',
   },
   corners_ht: {
     alerts: 'alerts_corners_ht.json',
@@ -66,8 +73,11 @@ export function learnScope(
   market: Market = 'goals',
   half?: CornerHalf | null,
 ): LearnScope {
-  if (parseMarket(market) !== 'corners') return 'goals'
-  return parseCornerHalf(half) === 'ft' ? 'corners_ft' : 'corners_ht'
+  const h = parseCornerHalf(half)
+  if (parseMarket(market) === 'corners') {
+    return h === 'ft' ? 'corners_ft' : 'corners_ht'
+  }
+  return h === 'ft' ? 'goals_ft' : 'goals_ht'
 }
 
 function readJson<T>(file: string, fallback: T): T {
@@ -232,7 +242,7 @@ export function saveParams(
   market: Market = 'goals',
   half?: CornerHalf | null,
 ): void {
-  const h = market === 'corners' ? parseCornerHalf(half ?? settings.cornerHalf) : undefined
+  const h = parseCornerHalf(half ?? settings.cornerHalf)
   writeJson(FILES[learnScope(market, h)].params, {
     ...settings,
     market,
@@ -270,6 +280,60 @@ export function saveProposal(
   writeJson(FILES[learnScope(market, half)].proposal, item)
 }
 
+export type ResetLearnMarket = 'goals' | 'corners' | 'all'
+
+const RESET_SCOPE: Record<
+  Exclude<ResetLearnMarket, 'all'>,
+  LearnScope[]
+> = {
+  goals: ['goals_ht', 'goals_ft'],
+  corners: ['corners_ht', 'corners_ft'],
+}
+
+const SCOPE_REF: Record<LearnScope, { market: Market; half?: CornerHalf }> = {
+  goals_ht: { market: 'goals', half: 'ht' },
+  goals_ft: { market: 'goals', half: 'ft' },
+  corners_ht: { market: 'corners', half: 'ht' },
+  corners_ft: { market: 'corners', half: 'ft' },
+}
+
+/** Files we deliberately do not wipe on learn reset (avoid push storms / lost overlay). */
+export const LEARN_RESET_KEPT = [
+  'params*.json (limiares no disco — o poller usa defaults locked do código enquanto DEFINITIONS_LOCKED)',
+  'sent.json (anti re-spam de push)',
+  'primed.json',
+  'subscriptions.json / vapid.json',
+  'tip_overlay.json / tip_overlay_proposal.json',
+  'tips.json / robobet_tips.json / odds_observations.json',
+  'matches/*.json (arquivo de momentum)',
+] as const
+
+function scopesForReset(market: ResetLearnMarket): LearnScope[] {
+  return market === 'all'
+    ? ['goals_ht', 'goals_ft', 'corners_ht', 'corners_ft']
+    : RESET_SCOPE[market]
+}
+
+export function resetLearnStore(market: ResetLearnMarket = 'all'): {
+  market: ResetLearnMarket
+  scopes: LearnScope[]
+  cleared: string[]
+  kept: readonly string[]
+} {
+  const scopes = scopesForReset(market)
+  const cleared: string[] = []
+  for (const scope of scopes) {
+    const { market: m, half } = SCOPE_REF[scope]
+    const files = FILES[scope]
+    saveAlerts([], m, half)
+    saveGoals([], m, half)
+    saveHistory([], m, half)
+    saveProposal(null, m, half)
+    cleared.push(files.alerts, files.events, files.history, files.proposal)
+  }
+  return { market, scopes, cleared, kept: LEARN_RESET_KEPT }
+}
+
 export function saveMatch(match: StoredMatch): void {
   writeFileSync(
     join(MATCHES_DIR, `${match.fixture.id}.json`),
@@ -304,7 +368,7 @@ export function upsertAlerts(
   market: Market = 'goals',
   half?: CornerHalf | null,
 ): LoggedAlert[] {
-  const h = market === 'corners' ? parseCornerHalf(half) : undefined
+  const h = parseCornerHalf(half)
   const alerts = loadAlerts(market, h)
   const byId = new Map(alerts.map((a) => [a.id, a]))
   for (const item of incoming) {
@@ -335,7 +399,7 @@ export function upsertGoals(
   market: Market = 'goals',
   half?: CornerHalf | null,
 ): void {
-  const h = market === 'corners' ? parseCornerHalf(half) : undefined
+  const h = parseCornerHalf(half)
   const goals = loadGoals(market, h)
   const key = (g: GoalRecord) => `${g.fixtureId}:${g.period}:${g.min}:${g.side}`
   const byId = new Map(goals.map((g) => [key(g), g]))

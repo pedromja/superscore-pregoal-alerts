@@ -1,5 +1,5 @@
 import { marketCopy, parseMarket } from '../lib/market'
-import { CORNER_WINDOWS } from '../lib/windows'
+import { CORNER_WINDOWS, GOAL_WINDOWS, goalHalfOf } from '../lib/windows'
 import { formatRelative, formatSigned, minuteLabel, sideLabel } from '../lib/format'
 import { formatObservationLine } from '../lib/oddsObserve'
 import { alertDomId, feedAlertKey } from '../lib/notifications'
@@ -72,6 +72,14 @@ export function AlertCard({
   const copy = marketCopy(parseMarket(market ?? alert.market))
   const tallies = talliesLineOf(alert)
   const oddsLine = formatObservationLine(alert.odds)
+  const clockHalf =
+    alert.cornerHalf ??
+    (parseMarket(market ?? alert.market) === 'goals'
+      ? goalHalfOf(alert.min, alert.period)
+      : null)
+  const clockLabel = clockHalf
+    ? (alert.cornerHalf ? CORNER_WINDOWS : GOAL_WINDOWS)[clockHalf].shortLabel
+    : null
   return (
     <article
       id={alertDomId(feedAlertKey(alert))}
@@ -95,9 +103,9 @@ export function AlertCard({
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-1">
-          {alert.cornerHalf ? (
+          {clockLabel ? (
             <span className="rounded-full bg-emerald-800/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-100">
-              {CORNER_WINDOWS[alert.cornerHalf].shortLabel}
+              {clockLabel}
             </span>
           ) : null}
           <RuleChip rule={alert.rule} coincident={alert.coincident} />
