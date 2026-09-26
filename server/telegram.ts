@@ -476,6 +476,9 @@ export type TelegramEditResult = {
   notModified?: boolean
   skipped?: boolean
   reason?: string
+  /** Network error / timeout / 429 / 5xx: safe to try again (edits are idempotent). */
+  retryable?: boolean
+  retryAfterMs?: number
 }
 
 export function isTelegramNotModified(description: string): boolean {
@@ -515,8 +518,14 @@ export async function editTelegramMessage(args: {
     if (parsed.ok) return { ok: true }
     if (isTelegramNotModified(parsed.description)) return { ok: true, notModified: true }
     const reason = reasonFromApi(parsed, token)
+    const failure = classifyTelegramApiFailure(parsed)
     console.warn('[telegram] edit falhou', args.alertKey, reason)
-    return { ok: false, reason }
+    return {
+      ok: false,
+      reason,
+      retryable: failure.retryable,
+      ...(failure.retryAfterMs != null ? { retryAfterMs: failure.retryAfterMs } : {}),
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     const failure = classifyTelegramThrown(err)
@@ -525,7 +534,8 @@ export async function editTelegramMessage(args: {
       token,
     )
     console.warn('[telegram] edit falhou', args.alertKey, reason)
-    return { ok: false, reason }
+    // Unlike a send, a timed-out edit is safe to repeat (same text → "not modified").
+    return { ok: false, reason, retryable: true }
   }
 }
 

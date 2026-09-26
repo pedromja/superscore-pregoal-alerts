@@ -40,6 +40,8 @@ export type AlertEditOutcome = {
   kind: AlertEditKind
   reason?: string
   text?: string
+  retryable?: boolean
+  retryAfterMs?: number
 }
 
 export function alertEditSucceeded(outcome: AlertEditOutcome): boolean {
@@ -78,7 +80,32 @@ export function alertMessageState(
   }
 }
 
+/**
+ * Transient edit failures (network / timeout / 429 / 5xx) are retried a few
+ * times with backoff inside the per-message chain; 400s (e.g. "message to
+ * edit not found", "can't parse entities") are final. Bounded: at most
+ * 1 + EDIT_RETRY_DELAYS_MS.length calls per requested edit.
+ */
+const EDIT_RETRY_DELAYS_MS = [2_000, 6_000]
+const EDIT_RETRY_AFTER_CAP_MS = 30_000
+let editRetryDelays = EDIT_RETRY_DELAYS_MS
+
+export function setEditRetryDelaysForTests(delays: number[] | null): void {
+  editRetryDelays = delays ?? EDIT_RETRY_DELAYS_MS
+}
+
 async function runEdit(alertKey: string, why: string): Promise<AlertEditOutcome> {
+  let outcome = await runEditOnce(alertKey, why)
+  for (const delay of editRetryDelays) {
+    if (outcome.kind !== 'failed' || !outcome.retryable) break
+    const wait = Math.min(outcome.retryAfterMs ?? delay, EDIT_RETRY_AFTER_CAP_MS)
+    await new Promise((r) => setTimeout(r, wait))
+    outcome = await runEditOnce(alertKey, `${why} (retry)`)
+  }
+  return outcome
+}
+
+async function runEditOnce(alertKey: string, why: string): Promise<AlertEditOutcome> {
   try {
     if (!inlineEditsActive()) return { kind: 'disabled' }
     const snap = alertMessageState(alertKey)
@@ -108,7 +135,12 @@ async function runEdit(alertKey: string, why: string): Promise<AlertEditOutcome>
     }
     if (res.skipped) return { kind: 'disabled', reason: res.reason }
     upsertTelegramMessage(alertKey, { lastEditError: `${why}: ${res.reason ?? 'erro'}` })
-    return { kind: 'failed', reason: res.reason }
+    return {
+      kind: 'failed',
+      reason: res.reason,
+      retryable: res.retryable,
+      retryAfterMs: res.retryAfterMs,
+    }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
     console.warn('[telegram] edit', alertKey, why, reason)

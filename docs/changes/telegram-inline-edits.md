@@ -73,8 +73,11 @@ Em vez do resultado pode surgir `🔴 RED · sem canto até 45'`, ou `⚪ VOID �
 
 ## Falhas e compatibilidade
 
-- `message is not modified` conta como sucesso. Outros erros de edição são registados (`lastEditError`) e não se
-  repetem (não há retry storm). O processo nunca rebenta por causa disto.
+- `message is not modified` conta como sucesso. Falhas transitórias (erro de rede/`fetch failed`, timeout, 429 e
+  5xx) repetem-se até 2 vezes, com 2 s e 6 s de espera (ou o `retry_after`, até 30 s), dentro da fila da mensagem.
+  Isto foi acrescentado depois do 1.º deploy: em produção, a Railway teve `fetch failed` para o Telegram e a
+  edição das odds perdeu-se. Os 400 (`message to edit not found`, `can't parse entities`) são finais. Os erros
+  ficam registados (`lastEditError`), não há retry storm e o processo nunca rebenta por causa disto.
 - Resultado: se a edição falhar, faz-se **um** fallback para a resposta antiga (reply 🟢/🔴). Se isso também falhar,
   o claim é libertado como antes.
 - Alertas sem `message_id` (antigos, ou sem registo com texto): mantêm o comportamento antigo de resposta.
