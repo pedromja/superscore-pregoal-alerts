@@ -27,7 +27,22 @@ export const POLLER_REGION =
 export const POLLER_INTERVAL_MS = Number(
   process.env.POLLER_INTERVAL_MS || POLLER_INTERVAL_MS_DEFAULT,
 )
-export const POLLER_ENABLED = process.env.POLLER_ENABLED !== '0'
+/**
+ * On/off env flag. Unset/empty → `fallback`; `0|false|off|no|disabled` → off;
+ * anything else → on. (Older builds only understood `0`; `0` still works.)
+ */
+export function parseEnabledFlag(raw: string | undefined, fallback = true): boolean {
+  const v = (raw ?? '').trim().toLowerCase()
+  if (!v) return fallback
+  return !['0', 'false', 'off', 'no', 'disabled'].includes(v)
+}
+
+/**
+ * `POLLER_ENABLED=0|false|off` starts the API/UI with no ticks at all (no
+ * evaluate, no Telegram/push, no data writes from the poller) — used for a
+ * safe cutover onto an empty or freshly restored data dir. Default on.
+ */
+export const POLLER_ENABLED = parseEnabledFlag(process.env.POLLER_ENABLED, true)
 /** Live fill cap after every in-window fixture is already included. Env overrides default. */
 export const POLLER_LIVE_LIMIT = Number(
   process.env.POLLER_LIVE_LIMIT || POLLER_LIVE_LIMIT_DEFAULT,
@@ -76,9 +91,9 @@ export function telegramConfigured(): boolean {
   return Boolean(telegramBotToken() && telegramChatId())
 }
 
-/** Default on when token + chat are set. `TELEGRAM_ENABLED=0` forces off. */
+/** Default on when token + chat are set. `TELEGRAM_ENABLED=0|false|off` forces off. */
 export function telegramEnabled(): boolean {
-  return telegramConfigured() && process.env.TELEGRAM_ENABLED !== '0'
+  return telegramConfigured() && parseEnabledFlag(process.env.TELEGRAM_ENABLED, true)
 }
 
 /** Dormant by default. `WEB_PUSH_ENABLED=1` re-enables the old channel. */

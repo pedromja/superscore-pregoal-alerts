@@ -214,7 +214,7 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `PORT` | `8080` em produção / `43174` em local | Railway e Render injectam automaticamente |
 | `TELEGRAM_BOT_TOKEN` | — | Canal principal. **Não commitar.** Sem isto o poller corre e não envia |
 | `TELEGRAM_CHAT_ID` | — | Chat/grupo/canal de destino |
-| `TELEGRAM_ENABLED` | on se token+chat | `0` desliga o bot mesmo com credenciais |
+| `TELEGRAM_ENABLED` | on se token+chat | `0`/`false`/`off` desliga o bot mesmo com credenciais |
 | `TELEGRAM_TIMEOUT_MS` | `9000` | Timeout do `sendMessage` |
 | `PUBLIC_URL` | URL Railway de produção | Link «Abrir no monitor» nas mensagens |
 | `WEB_PUSH_ENABLED` | off | `1` reactive Web Push (dormente) |
@@ -222,7 +222,7 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
 | `VAPID_PRIVATE_KEY` | — | Nunca expor no cliente |
 | `VAPID_SUBJECT` | `mailto:dev@localhost` | Use `mailto:` com um email vosso |
 | `POLLER_REGION` | `ro` | Região SuperScore. Alias: `POLL_REGION` |
-| `POLLER_ENABLED` | `1` | `0` desliga o poller |
+| `POLLER_ENABLED` | `1` | `0`/`false`/`off` arranca só API+UI, sem ticks (sem avaliação, Telegram, push nem escrita de dados pelo poller). Útil para cutover/restauro de dados |
 | `POLLER_INTERVAL_MS` | `15000` | Intervalo entre ticks. Env ganha sempre (Railway já usa 15000) |
 | `POLLER_LIVE_LIMIT` | `32` | Cap do fill **fora de janela**. Jogos em janela entram todos, mesmo acima deste número |
 | `POLLER_CONCURRENCY` | `8` | Processors em paralelo para o fill / jogos acabados |
