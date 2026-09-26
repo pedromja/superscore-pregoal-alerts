@@ -129,6 +129,17 @@ try {
     ...(store.loadAlerts(market, 'ht').find((a) => a.id === K) as LoggedAlert),
     hit5: true,
     hitLong: true,
+    betOutcome: {
+      status: 'green',
+      rule: 'half-end-v1',
+      baseline: 0,
+      total: 1,
+      targetPeriod: 1,
+      event: { min: 40, period: 1, side: 'home' },
+      endMin: null,
+      reason: 'event',
+      decidedAt: new Date().toISOString(),
+    },
     telegramOutcomeSentAt: null,
   })
   const queued = outcomes.enqueueSettledTelegramOutcomes([settled('goals'), settled('corners')])

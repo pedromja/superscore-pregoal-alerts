@@ -25,7 +25,7 @@ resultado) mantêm-na. O valor é o do momento do envio e não é atualizado dep
 
 - Entra todo o alerta guardado das regras bloqueadas (primary/secondary/fallback), quer tenha sido enviado quer
   não: o overlay de qualidade não altera o resultado da regra.
-- Conta se estiver resolvido (`hit5`/`hitLong` ≠ null). GREEN = `hit5 || hitLong`, a mesma definição do resultado
+- Conta se tiver `betOutcome` (regra do fim da parte, ver `telegram-bet-outcome.md`). GREEN = `betOutcome.status === 'green'`, a mesma definição do resultado
   no Telegram.
 - Ficam de fora: os **VOID**, os não resolvidos, os coincidentes e o próprio alerta.
 - Chave da liga: a mesma do seguimento por liga, `leagueKeyOf(fixture.competition)` (trim; vazio = "Sem liga").

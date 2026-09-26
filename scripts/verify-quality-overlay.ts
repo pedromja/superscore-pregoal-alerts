@@ -315,7 +315,7 @@ try {
   // Stats: overlay vs base per market×half.
   const s = qo.overlayStats('goals', 'ht')
   expect(s.base.alerts === 4 && s.overlayPass.alerts === 1 && s.overlayNotified.alerts === 1 && s.delivered.alerts === 1, `goals HT stats counts, got ${JSON.stringify(s)}`)
-  // won = GREEN (hit5 ∨ hitLong): 25' (long window), 28', 30'; 34' after the goal is RED.
+  // won = bet GREEN (goal before the HT whistle): 25', 28', 30'; 34' after the goal is RED once the match is over.
   expect(s.base.settled === 4 && s.base.won === 3 && s.overlayPass.won === 1 && s.overlayPass.settled === 1, `goals HT won/settled, got ${JSON.stringify(s.base)} ${JSON.stringify(s.overlayPass)}`)
   expect(s.blockReasons[R.cap] === 2 && s.blockReasons[R.goalsHtSpike] === 1, `block reasons, got ${JSON.stringify(s.blockReasons)}`)
 

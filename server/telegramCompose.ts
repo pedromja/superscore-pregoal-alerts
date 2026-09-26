@@ -1,3 +1,4 @@
+import { formatBetDetail, isBetDecided, type BetOutcome } from '../src/lib/betOutcome.ts'
 /**
  * Pure text composition for inline-edited Telegram alerts.
  *
@@ -12,7 +13,7 @@
  * result).
  */
 import { marketCopy, parseMarket } from '../src/lib/market.ts'
-import { maisUmPriceOf, type OddsObservation } from '../src/lib/oddsObserve.ts'
+import { asianPricesOf, maisUmPriceOf, type OddsObservation } from '../src/lib/oddsObserve.ts'
 import type { Market } from '../src/lib/types.ts'
 import { escapeTelegramHtml } from './telegram.ts'
 
@@ -56,7 +57,7 @@ export function formatTelegramOddsLine(
     const source = SOURCE_NAME[picked.source] ?? picked.source
     parts.push(`💰 Odd ${lineLabel}${abs}: ${fmtOdd(picked.odd)} (${source})`)
   }
-  const asian = obs.asian?.prices.filter((p) => p.price > 1).slice(0, 2) ?? []
+  const asian = asianPricesOf(obs).slice(0, 2)
   if (asian.length) {
     const compact = asian.map((p) => `${p.name} ${fmtOdd(p.price)}`).join(' / ')
     parts.push(picked ? `Asiático ${compact}` : `💰 Asiático ${compact}`)
@@ -66,9 +67,11 @@ export function formatTelegramOddsLine(
 }
 
 export type ResultLineInput = {
-  hit5: boolean | null
-  hitLong: boolean | null
-  minute: number
+  /** Bet rule outcome (end of the half); preferred when present. */
+  betOutcome?: BetOutcome | null
+  hit5?: boolean | null
+  hitLong?: boolean | null
+  minute?: number
   period?: number
   market?: Market
   leadTime5?: number | null
@@ -77,11 +80,18 @@ export type ResultLineInput = {
 }
 
 /**
- * GREEN/RED line appended to the alert. GREEN carries the event minute
- * (alert minute + lead), RED the deadline it ran to, e.g. `🟢 GREEN · 81'`,
- * `🔴 RED · sem golo até 45'`.
+ * GREEN/RED line appended to the alert, from the bet outcome:
+ * `🟢 GREEN · canto aos 44'`, `🔴 RED · sem canto até ao intervalo (45+2')`,
+ * `🔴 RED · sem golo até ao fim (90+5')`. Legacy input (no bet outcome) keeps
+ * the old horizon text.
  */
 export function formatTelegramResultLine(alert: ResultLineInput): string {
+  const market = parseMarket(alert.market)
+  if (alert.betOutcome && isBetDecided(alert.betOutcome)) {
+    const badge = alert.betOutcome.status === 'green' ? '🟢 GREEN' : '🔴 RED'
+    const detail = formatBetDetail(alert.betOutcome, market)
+    return detail ? `<b>${badge}</b> · ${escapeTelegramHtml(detail)}` : `<b>${badge}</b>`
+  }
   const hit = alert.hit5 === true || alert.hitLong === true
   if (hit) {
     const lead =
@@ -90,10 +100,10 @@ export function formatTelegramResultLine(alert: ResultLineInput): string {
         : alert.hitLong === true && alert.leadTimeLong != null
           ? alert.leadTimeLong
           : null
-    const minute = lead != null ? alert.minute + lead : null
+    const minute = lead != null && alert.minute != null ? alert.minute + lead : null
     return minute != null ? `<b>🟢 GREEN</b> · ${minute}'` : '<b>🟢 GREEN</b>'
   }
-  const noun = marketCopy(parseMarket(alert.market)).noun
+  const noun = marketCopy(market).noun
   const detail =
     alert.longDeadline != null ? ` · sem ${noun} até ${alert.longDeadline}'` : ''
   return `<b>🔴 RED</b>${escapeTelegramHtml(detail)}`

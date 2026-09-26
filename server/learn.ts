@@ -65,6 +65,7 @@ import {
 import type {
   DualMetrics,
   GoalRecord,
+  BetSummary,
   LearnSummary,
   LoggedAlert,
   ParamVersion,
@@ -369,7 +370,28 @@ export function computeMetrics(
       .length,
     lastRecalcAt: history.at(-1)?.ts ?? null,
     scoreNote: scoreNoteFor(settings),
+    bet: betSummaryOf(loadAlerts(market, half)),
   }
+}
+
+/** GREEN/RED by the bet rule (end of the half); VOID/coincident excluded. */
+export function betSummaryOf(all: LoggedAlert[]): BetSummary {
+  let green = 0
+  let red = 0
+  let pending = 0
+  let voided = 0
+  for (const a of all) {
+    if (a.coincident) continue
+    if (a.void) {
+      voided += 1
+      continue
+    }
+    if (a.betOutcome?.status === 'green') green += 1
+    else if (a.betOutcome?.status === 'red') red += 1
+    else pending += 1
+  }
+  const settled = green + red
+  return { settled, green, red, pending, voided, hitRate: settled ? green / settled : null }
 }
 
 function overCap(market: Market): number {

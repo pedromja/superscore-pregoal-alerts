@@ -37,6 +37,13 @@ type Fixture = import('../src/lib/types.ts').Fixture
 type OddsObservation = import('../src/lib/oddsObserve.ts').OddsObservation
 
 const poller = await import('../server/poller.ts')
+type BetOutcome = import('../src/lib/betOutcome.ts').BetOutcome
+function greenBet(min: number, period = 1): BetOutcome {
+  return { status: 'green', rule: 'half-end-v1', baseline: 0, total: 1, targetPeriod: 1, event: { min, period, side: 'away' }, endMin: null, reason: 'event', decidedAt: new Date().toISOString() }
+}
+function redBet(endMin: number): BetOutcome {
+  return { status: 'red', rule: 'half-end-v1', baseline: 0, total: 0, targetPeriod: 1, event: null, endMin, reason: 'period-over', decidedAt: new Date().toISOString() }
+}
 const store = await import('../server/store.ts')
 const tips = await import('../server/tips.ts')
 const telegram = await import('../server/telegram.ts')
@@ -153,7 +160,7 @@ function ssObservation(alert: FeedAlert): OddsObservation {
     sourceLabel: 'SuperScore · Total de golos',
     limit: {
       kind: 'limit',
-      marketName: 'Total de golos',
+      marketName: 'Prima repriză - Total goluri',
       line: 0.5,
       prices: [
         { name: 'Over 0.5', price: 1.85, line: 0.5, side: 'over' },
@@ -162,7 +169,7 @@ function ssObservation(alert: FeedAlert): OddsObservation {
     },
     asian: {
       kind: 'asian',
-      marketName: 'Total asiático',
+      marketName: 'Prima repriză - Total goluri asiatice',
       line: 0.75,
       prices: [
         { name: 'Over 0.75', price: 1.9, line: 0.75, side: 'over' },
@@ -337,7 +344,7 @@ try {
   const greenEdit = editsOf(s4.messageId, before4).at(-1)
   const s4base = String(s4.send?.body.text)
   expect(
-    greenEdit?.body.text === `${s4base}\n${odds}\n<b>🟢 GREEN</b> · 38'`,
+    greenEdit?.body.text === `${s4base}\n${odds}\n<b>🟢 GREEN</b> · golo aos 38'`,
     `GREEN appended after odds, got ${greenEdit?.body.text}`,
   )
   expect(keyboardLen(greenEdit) === 0, 'button removed after resolution')
@@ -366,7 +373,7 @@ try {
   })
   await settleAll()
   expect(early.kind === 'pending', `early press pending, got ${early.kind}`)
-  expect(byMethod('answerCallbackQuery', before5)[0]?.body.text === telegram.PENDING_RESOLVE_TEXT, 'pending toast')
+  expect(byMethod('answerCallbackQuery', before5)[0]?.body.text === resolve.PART_IN_PROGRESS_TEXT, `pending toast (parte a decorrer), got ${byMethod('answerCallbackQuery', before5)[0]?.body.text}`)
   expect(byMethod('editMessageText', before5).length === 0 && byMethod('sendMessage', before5).length === 0, 'too early: no edit, no message')
 
   // Slow resolution: Telegram gets "A verificar…" early, exactly one answer.
@@ -388,11 +395,11 @@ try {
 
   // ── 6. Automatic settle (RED) edits the alert too ───────────────────────
   const before6 = calls.length
-  store.patchLoggedAlert(s5.key, { hit: false, hit5: false, hitLong: false, longDeadline: 42, labeledAt: new Date().toISOString() })
+  store.patchLoggedAlert(s5.key, { hit: false, hit5: false, hitLong: false, longDeadline: 42, labeledAt: new Date().toISOString(), betOutcome: redBet(47) })
   outcomes.enqueueAndFlushTelegramOutcomes([logged(s5.key)!])
   await settleAll()
   const redEdit = editsOf(s5.messageId, before6).at(-1)
-  expect(lastLine(redEdit?.body.text) === "<b>🔴 RED</b> · sem golo até 42'", `auto settle RED appended, got ${redEdit?.body.text}`)
+  expect(lastLine(redEdit?.body.text) === "<b>🔴 RED</b> · sem golo até ao intervalo (45+2')", `auto settle RED appended, got ${redEdit?.body.text}`)
   expect(byMethod('sendMessage', before6).length === 0, 'auto settle: no new message')
 
   // ── 7. Fallback: alert without an editable message → old reply ──────────
@@ -427,6 +434,7 @@ try {
         sentPush: true,
         telegramMessageId: 77,
         telegramOutcomeSentAt: null,
+        betOutcome: greenBet(40),
       },
     ],
     'goals',
@@ -461,7 +469,7 @@ try {
   const nm2 = await edits.requestTelegramAlertEdit(s8.key, 'test')
   expect(nm2.kind === 'unchanged' && editsOf(s8.messageId, before8).length === 1, 'same state again: no API call')
   editHandler = () => json({ ok: false, error_code: 400, description: 'Bad Request: message to edit not found' }, 400)
-  store.patchLoggedAlert(s8.key, { hit: true, hit5: true, hitLong: true, leadTime5: 3, labeledAt: new Date().toISOString() })
+  store.patchLoggedAlert(s8.key, { hit: true, hit5: true, hitLong: true, leadTime5: 3, labeledAt: new Date().toISOString(), betOutcome: greenBet(41) })
   const before8b = calls.length
   outcomes.enqueueAndFlushTelegramOutcomes([logged(s8.key)!])
   await settleAll()
@@ -520,7 +528,7 @@ try {
   expect(tip9?.void === true, 'tip of a VOID alert flagged (still stored)')
   // Settles GREEN later: no GREEN/RED edit on a VOID message, not counted.
   const before9 = calls.length
-  store.patchLoggedAlert(s9.key, { hit: true, hit5: true, hitLong: true, leadTime5: 2, labeledAt: new Date().toISOString() })
+  store.patchLoggedAlert(s9.key, { hit: true, hit5: true, hitLong: true, leadTime5: 2, labeledAt: new Date().toISOString(), betOutcome: greenBet(40) })
   outcomes.enqueueAndFlushTelegramOutcomes([logged(s9.key)!])
   await settleAll()
   expect(byMethod('editMessageText', before9).length === 0 && byMethod('sendMessage', before9).length === 0, 'VOID alert gets no outcome edit/message')
@@ -606,7 +614,7 @@ try {
   const s12 = await sendAlert('ie-off')
   await settleAll()
   expect(byMethod('editMessageText', s12.before).length === 0, 'inline edits off: no odds edit')
-  store.patchLoggedAlert(s12.key, { hit: true, hit5: true, hitLong: true, leadTime5: 2, labeledAt: new Date().toISOString() })
+  store.patchLoggedAlert(s12.key, { hit: true, hit5: true, hitLong: true, leadTime5: 2, labeledAt: new Date().toISOString(), betOutcome: greenBet(40) })
   const before12 = calls.length
   outcomes.enqueueAndFlushTelegramOutcomes([logged(s12.key)!])
   await settleAll()

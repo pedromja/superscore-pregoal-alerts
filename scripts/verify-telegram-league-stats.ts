@@ -121,6 +121,21 @@ function logged(
     labeledAt: null,
     feedback: null,
     sentPush: false,
+    // The league line counts the bet outcome (end of the half), not hit5.
+    betOutcome:
+      hit === null
+        ? undefined
+        : {
+            status: hit ? 'green' : 'red',
+            rule: 'half-end-v1',
+            baseline: 0,
+            total: hit ? 1 : 0,
+            targetPeriod: 1,
+            event: hit ? { min: 40, period: 1, side: 'home' } : null,
+            endMin: hit ? null : 47,
+            reason: hit ? 'event' : 'period-over',
+            decidedAt: new Date().toISOString(),
+          },
     ...extra,
   }
 }
@@ -242,7 +257,22 @@ try {
   const rec = store.getTelegramMessage('lx-live:primary-1-36-35')
   expect(Boolean(rec?.text?.includes('📊 Liga (golos): 4/6 · 67 %')), 'stored base text keeps the league line')
   const liveKey = 'lx-live:primary-1-36-35'
-  const patched = store.patchLoggedAlert(liveKey, { hit5: false, hitLong: false, longDeadline: 42 })
+  const patched = store.patchLoggedAlert(liveKey, {
+    hit5: false,
+    hitLong: false,
+    longDeadline: 42,
+    betOutcome: {
+      status: 'red',
+      rule: 'half-end-v1',
+      baseline: 0,
+      total: 0,
+      targetPeriod: 1,
+      event: null,
+      endMin: 48,
+      reason: 'period-over',
+      decidedAt: new Date().toISOString(),
+    },
+  })
   expect(Boolean(patched), 'live alert stored')
   const before = calls.length
   outcomes.enqueueTelegramOutcome(liveKey)
@@ -253,7 +283,7 @@ try {
   {
     expect(
       Boolean(resultEdit) && String(resultEdit?.body.text).includes('📊 Liga (golos): 4/6 · 67 %') &&
-        String(resultEdit?.body.text).trimEnd().endsWith("<b>🔴 RED</b> · sem golo até 42'"),
+        String(resultEdit?.body.text).trimEnd().endsWith("<b>🔴 RED</b> · sem golo até ao intervalo (45+3')"),
       `result edit keeps the league line, got ${JSON.stringify(resultEdit?.body.text)}`,
     )
   }
@@ -266,6 +296,11 @@ try {
   // the RED settle above also counts (the live alert is stored and settled)
   const expectSettled = goalsX.settled + 1 + 1
   expect(withCur.settled === expectSettled, `settle adds to the sample, got ${JSON.stringify(withCur)} want ${expectSettled}`)
+  // A learning label alone (hit5, no bet outcome) is not a settled bet.
+  const labelOnly = logged('lx1', 'green', { betOutcome: undefined })
+  store.saveAlerts([...store.loadAlerts('goals', 'ht'), labelOnly], 'goals', 'ht')
+  expect(league.leagueStatsFor('goals', 'Liga X').settled === withCur.settled, 'hit5 without betOutcome is not counted')
+  store.saveAlerts(store.loadAlerts('goals', 'ht').filter((a) => a.id !== labelOnly.id), 'goals', 'ht')
   const excl = league.leagueStatsFor('goals', 'Liga X', league.leagueContribKey('goals', 'ht', cur.id))
   expect(excl.settled === withCur.settled - 1 && excl.green === withCur.green - 1, 'current alert excluded from its own line')
   store.saveAlerts(store.loadAlerts('goals', 'ht').map((a) => (a.id === cur.id ? { ...a, void: true } : a)), 'goals', 'ht')

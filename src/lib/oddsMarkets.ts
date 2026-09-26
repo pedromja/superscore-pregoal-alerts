@@ -98,6 +98,59 @@ export function marketHalf(name: string): CornerHalf | 'any' {
   return 'any'
 }
 
+/**
+ * Period of a SuperScore (Superbet) market name: `Prima repriză - …` = 1st
+ * half, `A doua repriză - …` = 2nd half only, no prefix = full match.
+ * (`marketHalf` above is the old loose classifier; it maps 2nd-half-only
+ * markets to 'ft' and must not be used to pick the alert's market.)
+ */
+export function marketPeriod(name: string): 'ht' | '2h' | 'match' {
+  const n = name.toLowerCase()
+  if (/a\s+doua\s+repriz|2\.?ª\s+parte|2nd\s+half|second\s+half|\b2t\b|2\.?º\s+tempo/.test(n)) return '2h'
+  if (/prima\s+repriz|1\.?ª\s+parte|1st\s+half|first\s+half|half[-\s]?time|\bht\b|\b1t\b|1\.?º\s+tempo/.test(n)) return 'ht'
+  return 'match'
+}
+
+function stripDiacritics(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+/** Market name without its period prefix, lower-case, no diacritics. */
+export function marketBaseName(name: string): string {
+  const n = stripDiacritics(name).toLowerCase().trim()
+  const dash = n.split(/\s+[-–—:]\s+/)
+  const body = dash.length > 1 && marketPeriod(dash[0]) !== 'match' ? dash.slice(1).join(' - ') : n
+  return body
+    .replace(/^(prima|a doua)\s+repriza\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const CORNER_WORDS = '(?:cornere|cornerele|corners?|cantos|escanteios)'
+const GOAL_WORDS = '(?:goluri|golurile|goals?|gols|golos)'
+
+/**
+ * The match total of the market (both teams) — `Total cornere`, `Total
+ * goluri` (+ `asiatice` for the Asian total). Team totals (`Total cornere CA
+ * Penarol`), handicaps, intervals, 1X2… are rejected: they are not "one more
+ * event in the match".
+ */
+export function isMatchTotalMarket(name: string, family: Market, kind: 'limit' | 'asian'): boolean {
+  const base = marketBaseName(name)
+  const words = family === 'corners' ? CORNER_WORDS : GOAL_WORDS
+  const re =
+    kind === 'asian'
+      ? new RegExp(`^(?:total\\s+(?:de\\s+)?${words}\\s+asiatic[ea]?s?|asian\\s+total\\s+${words}|total\\s+${words}\\s+asian)$`)
+      : new RegExp(`^(?:total\\s+(?:de\\s+)?${words}|${words}\\s+total|total\\s+${words}\\s+over/under|over/under\\s+${words})$`)
+  return re.test(base)
+}
+
+/** HT alerts need a 1st-half market, FT alerts a full-match market. */
+export function marketPeriodMatches(name: string, half: CornerHalf): boolean {
+  const p = marketPeriod(name)
+  return half === 'ht' ? p === 'ht' : p === 'match'
+}
+
 function usableOdd(odd: SuperbetOdd): number | null {
   if (odd.display === false) return null
   if (odd.status !== undefined && odd.status !== 1) return null
@@ -114,27 +167,23 @@ function wantedLine(currentTotal: number): number {
   return Math.max(0, currentTotal) + 0.5
 }
 
+/** Only the exact next line (current total + 0.5), never an alt/beaten line. */
 function pickOverFromMarket(
   market: SuperbetMarket,
   currentTotal: number,
 ): { odd: number; line: number; outcomeName: string } | null {
   const want = wantedLine(currentTotal)
-  const overs: { odd: number; line: number; outcomeName: string }[] = []
   for (const odd of market.odds ?? []) {
     const price = usableOdd(odd)
     if (price === null) continue
     const parsed = parseOverUnder(oddLabel(odd))
     if (!parsed || parsed.side !== 'over') continue
-    if (parsed.line <= currentTotal) continue
-    overs.push({ odd: price, line: parsed.line, outcomeName: oddLabel(odd) })
+    if (Math.abs(parsed.line - want) < 1e-6) return { odd: price, line: parsed.line, outcomeName: oddLabel(odd) }
   }
-  if (!overs.length) return null
-  const exact = overs.find((o) => Math.abs(o.line - want) < 1e-6)
-  if (exact) return exact
-  overs.sort((a, b) => a.line - b.line || a.odd - b.odd)
-  return overs[0]
+  return null
 }
 
+/** 1 = the match total of the alert's market for the alert's period, else -1. */
 function scoreMarket(
   market: SuperbetMarket,
   family: Market,
@@ -142,16 +191,8 @@ function scoreMarket(
 ): number {
   const name = nameOf(market)
   if (!name) return -1
-  if (family === 'corners') {
-    if (!isCornersFamily(name)) return -1
-  } else if (!isGoalsTotalFamily(name)) {
-    return -1
-  }
-  const mh = marketHalf(name)
-  if (mh === half) return 3
-  if (mh === 'any' && half === 'ft') return 2
-  if (mh === 'any' && half === 'ht') return 1
-  return -1
+  if (!isMatchTotalMarket(name, family, 'limit')) return -1
+  return marketPeriodMatches(name, half) ? 1 : -1
 }
 
 export function pickMaisUmOdd(
@@ -215,18 +256,15 @@ export function parseAsianOutcome(
   return { side: 'other', line: null }
 }
 
+/** Asian TOTAL (over/under) of the market for the alert's period; no handicaps. */
 function scoreAsianMarket(
   market: SuperbetMarket,
   family: Market,
   half: CornerHalf,
 ): number {
   const name = nameOf(market)
-  if (!name || !isAsianMarket(name, family)) return -1
-  const mh = marketHalf(name)
-  if (mh === half) return 3
-  if (mh === 'any' && half === 'ft') return 2
-  if (mh === 'any' && half === 'ht') return 1
-  return -1
+  if (!name || !isMatchTotalMarket(name, family, 'asian')) return -1
+  return marketPeriodMatches(name, half) ? 1 : -1
 }
 
 function snapshotPrices(
@@ -272,43 +310,51 @@ export function pickLimitSnapshot(
   currentTotal: number,
 ): OddsSnapshot | null {
   const want = wantedLine(currentTotal)
-  const alt = currentTotal - 0.5
   const markets = collectMarkets(event)
     .map((market) => ({ market, score: scoreMarket(market, family, half) }))
     .filter((row) => row.score >= 0)
-    .sort((a, b) => b.score - a.score)
   for (const row of markets) {
     const snap = snapshotPrices(row.market, 'limit', (price) => {
       if (price.side !== 'over' && price.side !== 'under') return false
-      if (price.line === null) return false
-      if (Math.abs(price.line - want) < 1e-6) return true
-      if (alt >= 0 && Math.abs(price.line - alt) < 1e-6) return true
-      return false
+      return price.line !== null && Math.abs(price.line - want) < 1e-6
     })
-    if (snap) {
-      const preferred = snap.prices.filter((p) => p.line !== null && Math.abs(p.line - want) < 1e-6)
-      return {
-        ...snap,
-        line: want,
-        prices: preferred.length ? [...preferred, ...snap.prices.filter((p) => !preferred.includes(p))] : snap.prices,
-      }
+    if (snap && snap.prices.some((p) => p.side === 'over')) {
+      const over = snap.prices.filter((p) => p.side === 'over')
+      return { ...snap, line: want, prices: [...over, ...snap.prices.filter((p) => p.side !== 'over')] }
     }
   }
   return null
 }
 
+/**
+ * Asian total for the alert's period: the over/under pair of the lowest line
+ * above the current total and at most one event away (e.g. total 3 → 3.25 /
+ * 3.5 / 3.75 / 4). Without `currentTotal` (legacy callers) nothing is picked.
+ */
 export function pickAsianSnapshot(
   event: SuperbetEvent | null | undefined,
   family: Market,
   half: CornerHalf,
+  currentTotal?: number,
 ): OddsSnapshot | null {
+  if (currentTotal == null || !Number.isFinite(currentTotal)) return null
   const markets = collectMarkets(event)
     .map((market) => ({ market, score: scoreAsianMarket(market, family, half) }))
     .filter((row) => row.score >= 0)
-    .sort((a, b) => b.score - a.score)
   for (const row of markets) {
-    const snap = snapshotPrices(row.market, 'asian')
-    if (snap) return snap
+    const snap = snapshotPrices(row.market, 'asian', (price) =>
+      (price.side === 'over' || price.side === 'under') &&
+      price.line !== null &&
+      price.line > currentTotal &&
+      price.line <= currentTotal + 1 + 1e-6,
+    )
+    if (!snap) continue
+    const overLines = snap.prices.filter((p) => p.side === 'over').map((p) => p.line as number)
+    if (!overLines.length) continue
+    const line = Math.min(...overLines)
+    const pair = snap.prices.filter((p) => p.line !== null && Math.abs(p.line - line) < 1e-6)
+    pair.sort((a, b) => (a.side === 'over' ? -1 : 1) - (b.side === 'over' ? -1 : 1))
+    return { ...snap, line, prices: pair }
   }
   return null
 }

@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { pushTagFor } from '../src/lib/market.ts'
 import { ruleNotifyEnabled } from '../src/lib/notifications.ts'
 import { notifySuppressReason } from '../src/lib/notifyLead.ts'
@@ -22,6 +24,7 @@ import type {
   MomentumPayload,
 } from '../src/lib/types.ts'
 import {
+  DATA_DIR,
   MATCHES_DIR,
   MIN_NOTIFY_LEAD_MIN,
   POLLER_CONCURRENCY,
@@ -37,6 +40,7 @@ import {
   webPushEnabled,
 } from './config.ts'
 import { leagueLineForAlert, primeLeagueStats } from './leagueStats.ts'
+import { alertsByKeys, flushBetSettlements, noteBetCandidate, resettleAllBets, runResettleEdits } from './betSettle.ts'
 import { currentSettings, ingestFeedAlerts, labelMatch } from './learn.ts'
 import {
   resetTelegramOutcomesForTests,
@@ -736,6 +740,7 @@ export async function processEvaluatedAlerts(
         finished,
         clockMin: clock?.min,
         clockPeriod: clock?.period,
+        payload,
       })
     })
     if (fresh.length) {
@@ -781,6 +786,7 @@ export async function processEvaluatedAlerts(
       finished,
       clockMin: clock?.min,
       clockPeriod: clock?.period,
+      payload,
     })
     return claimFreshAlerts(
       fixture,
@@ -845,12 +851,15 @@ async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<n
   // One snapshot per fixture; each market primes separately (primedKey is
   // market-unique), so a market's first sight of a live match never pushes.
   const firsts = await withStoreLock(() => {
-    saveMatch({
+    const snapshot = {
       fixture,
       payload,
       finished,
       updatedAt: new Date().toISOString(),
-    })
+    }
+    saveMatch(snapshot)
+    // Bet outcome (end of the half) is settled in one batch per tick.
+    noteBetCandidate(snapshot)
     return evaluated.map(({ market }) => {
       const primedId = primedKey(market, fixture.id)
       const isFirst = !isPrimed(primedId)
@@ -1046,6 +1055,9 @@ export async function tick(): Promise<void> {
     const restSent = await runTargets(restTargets, concurrency)
     if (tickGen !== gen) return
     const sent = [...inWindowSent, ...restSent].reduce((sum, n) => sum + n, 0)
+    const betStarted = Date.now()
+    await withStoreLock(() => flushBetSettlements())
+    status.lastBetSettleMs = Date.now() - betStarted
     status.alertsSent += sent
     status.lastTickAt = new Date().toISOString()
     status.lastError = lastErrorAfterFixtureFailures(tickErrors, targets.length)
@@ -1067,11 +1079,41 @@ export async function tick(): Promise<void> {
   }
 }
 
+/**
+ * Boot: one-off bet re-settle of stored alerts/tips (end-of-half rule), then
+ * the league index (built on bet outcomes), then the rate-limited correction
+ * edits of alerts sent in the last 48 h. Runs beside the ticks (store lock).
+ */
+async function bootBetSettlement(): Promise<void> {
+  const started = Date.now()
+  const report = await withStoreLock(() => resettleAllBets())
+  const { editKeys, ...summary } = report
+  try {
+    writeFileSync(join(DATA_DIR, 'bet_resettle_report.json'), JSON.stringify({ ...summary, editKeys: editKeys.length, ms: Date.now() - started }, null, 2))
+  } catch {
+    // report is informative only
+  }
+  console.log(
+    `[bet] re-settle em ${Date.now() - started} ms: ${JSON.stringify(summary.alerts)} · 48h ${JSON.stringify(summary.sent48h)} · tips ${JSON.stringify(summary.tips)}`,
+  )
+  await primeLeagueStats({ matchesDir: MATCHES_DIR, loadAlerts })
+  const byKey = alertsByKeys(editKeys)
+  const edits = await runResettleEdits(editKeys, (key) => byKey.get(key) ?? null)
+  console.log(`[bet] edições de correção: ${JSON.stringify(edits)}`)
+  try {
+    writeFileSync(
+      join(DATA_DIR, 'bet_resettle_report.json'),
+      JSON.stringify({ ...summary, editKeys: editKeys.length, edits, ms: Date.now() - started }, null, 2),
+    )
+  } catch {
+    // informative only
+  }
+}
+
 export function startPoller(): void {
   if (!POLLER_ENABLED) return
-  // League hit-rate index for the Telegram line: filled once, off the tick.
-  void primeLeagueStats({ matchesDir: MATCHES_DIR, loadAlerts }).catch((err) => {
-    console.warn('[league] index falhou', err instanceof Error ? err.message : err)
+  void bootBetSettlement().catch((err) => {
+    console.warn('[bet] re-settle falhou', err instanceof Error ? err.message : err)
   })
   void tick()
   setInterval(() => {

@@ -117,33 +117,49 @@ const goalsMap = {
   BET365_GOLS_OVER_1_5: '1.95#0',
   BET365_GOLS_UNDER_1_5: '1.80#0',
   BET365_GOLS_OVER_1_5_LIVE: '1.88#0',
+  BET365_GOLS_UNDER_1_5_LIVE: '1.84#0',
   BET365_GOLS_OVER_2_5: '1.40#0',
 }
 const goalsPick = pickSokkerProMaisUm(goalsMap, 'goals', 'ft', 1)
 check(goalsPick?.line === 1.5, `goals mais-um line ${goalsPick?.line}`)
 check(goalsPick?.odd === 1.88, `prefer LIVE over preodds, got ${goalsPick?.odd}`)
 check(goalsPick?.rawKey === 'BET365_GOLS_OVER_1_5_LIVE', `raw key ${goalsPick?.rawKey}`)
-check(goalsPick?.underOdd === 1.8, `twin under ${goalsPick?.underOdd}`)
+check(goalsPick?.underOdd === 1.84, `twin live under ${goalsPick?.underOdd}`)
+// Pre-match (preodds) prices are stale for "current total + 0.5": never used.
+check(
+  pickSokkerProMaisUm({ BET365_GOLS_OVER_1_5: '1.95#0' }, 'goals', 'ft', 1) === null,
+  'pre-match price must not be the live +0.5 odd',
+)
 
+// Only the exact next line: integer / other lines are a different bet.
 const cornersMap = {
-  BET365_CANTO_OVER_8: '1.50#0',
-  BET365_CANTO_OVER_9: '1.91#0',
-  BET365_CANTO_UNDER_9: '1.89#0',
-  BET365_CANTO_OVER_10: '1.60#0',
+  BET365_CANTO_OVER_8_LIVE: '1.50#0',
+  BET365_CANTO_OVER_9_LIVE: '1.91#0',
+  BET365_CANTO_UNDER_9_LIVE: '1.89#0',
+  BET365_CANTO_OVER_10_LIVE: '1.60#0',
 }
-const cornersPick = pickSokkerProMaisUm(cornersMap, 'corners', 'ft', 8)
-check(cornersPick?.line === 9, `nearest CANTO above 8 is 9, got ${cornersPick?.line}`)
-check(cornersPick?.odd === 1.91, `CANTO over 9 price ${cornersPick?.odd}`)
-check(cornersPick?.rawKey === 'BET365_CANTO_OVER_9', 'CANTO raw key')
+check(pickSokkerProMaisUm(cornersMap, 'corners', 'ft', 8) === null, 'no CANTO 8.5 ⇒ no pick (not the nearest line)')
+const cornersPick = pickSokkerProMaisUm({ ...cornersMap, BET365_CANTO_OVER_8_5_LIVE: '1.30#0' }, 'corners', 'ft', 8)
+check(cornersPick?.line === 8.5, `CANTO exact 8.5, got ${cornersPick?.line}`)
+check(cornersPick?.odd === 1.3, `CANTO over 8.5 price ${cornersPick?.odd}`)
+check(cornersPick?.rawKey === 'BET365_CANTO_OVER_8_5_LIVE', `CANTO raw key ${cornersPick?.rawKey}`)
 
 const htMap = {
-  BET365_GOLS_OVER_0_5: '1.20#0',
-  BET365_GOLS_HT_OVER_0_5: '1.75#0',
+  BET365_GOLS_OVER_0_5_LIVE: '1.20#0',
+  BET365_GOLS_HT_OVER_0_5_LIVE: '1.75#0',
 }
 const htPick = pickSokkerProMaisUm(htMap, 'goals', 'ht', 0)
-check(htPick?.rawKey === 'BET365_GOLS_HT_OVER_0_5', `HT prefers HT key, got ${htPick?.rawKey}`)
+check(htPick?.rawKey === 'BET365_GOLS_HT_OVER_0_5_LIVE', `HT takes the HT key, got ${htPick?.rawKey}`)
 const ftIgnoresHt = pickSokkerProMaisUm(htMap, 'goals', 'ft', 0)
-check(ftIgnoresHt?.rawKey === 'BET365_GOLS_OVER_0_5', `FT ignores HT-only when FT key exists, got ${ftIgnoresHt?.rawKey}`)
+check(ftIgnoresHt?.rawKey === 'BET365_GOLS_OVER_0_5_LIVE', `FT takes the full-match key, got ${ftIgnoresHt?.rawKey}`)
+check(
+  pickSokkerProMaisUm({ BET365_GOLS_OVER_0_5_LIVE: '1.20#0' }, 'goals', 'ht', 0) === null,
+  'HT alert must not fall back to the full-match key',
+)
+check(
+  pickSokkerProMaisUm({ BET365_GOLS_2T_OVER_0_5_LIVE: '1.20#0' }, 'goals', 'ft', 0) === null,
+  '2nd-half-only key is not the full-match line',
+)
 
 const ssLimit: OddsSnapshot = {
   kind: 'limit',

@@ -3,7 +3,8 @@
  *
  * Sample = every stored locked-rule alert (primary/secondary/fallback, sent or
  * not — the quality overlay does not change a rule's outcome) of the same
- * league and market (both halves together) that is settled GREEN/RED, not
+ * league and market (both halves together) whose bet outcome (end of the
+ * half, src/lib/betOutcome.ts) is GREEN/RED, not
  * VOID and not coincident. The current alert is excluded. League key = the
  * league follow-up key (`leagueKeyOf(fixture.competition)`).
  *
@@ -16,6 +17,7 @@
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { isBetDecided } from '../src/lib/betOutcome.ts'
 import { marketCopy, parseMarket } from '../src/lib/market.ts'
 import { leagueKeyOf } from '../src/lib/tips.ts'
 import { parseCornerHalf } from '../src/lib/windows.ts'
@@ -83,13 +85,13 @@ function setContribution(key: string, next: Contribution | null): void {
   }
 }
 
-/** Settled GREEN/RED, not VOID, not coincident. */
+/** Bet outcome decided GREEN/RED (end of the half), not VOID, not coincident. */
 export function countsForLeague(
-  alert: Pick<LoggedAlert, 'hit5' | 'hitLong' | 'void' | 'coincident'>,
+  alert: Pick<LoggedAlert, 'betOutcome' | 'void' | 'coincident'>,
 ): { green: boolean } | null {
   if (alert.void || alert.coincident) return null
-  if (alert.hit5 == null && alert.hitLong == null) return null
-  return { green: alert.hit5 === true || alert.hitLong === true }
+  if (!isBetDecided(alert.betOutcome)) return null
+  return { green: alert.betOutcome.status === 'green' }
 }
 
 export function leagueForFixture(fixtureId: string): string | null {

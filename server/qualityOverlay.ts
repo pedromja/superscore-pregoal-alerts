@@ -1,3 +1,4 @@
+import { isBetDecided } from '../src/lib/betOutcome.ts'
 /**
  * Server side of the quality overlay (see src/lib/qualityOverlay.ts):
  * env switch, annotation of evaluated alerts, the one-per-match×half cap
@@ -73,9 +74,10 @@ export type OverlayBucket = {
   precision: number | null
 }
 
+/** Settled/won by the bet outcome (end of the half), not the learning horizons. */
 function bucket(items: LoggedAlert[]): OverlayBucket {
-  const settled = items.filter((a) => a.hit5 !== null || a.hitLong !== null)
-  const won = settled.filter((a) => a.hit5 === true || a.hitLong === true).length
+  const settled = items.filter((a) => isBetDecided(a.betOutcome))
+  const won = settled.filter((a) => a.betOutcome?.status === 'green').length
   return {
     alerts: items.length,
     settled: settled.length,

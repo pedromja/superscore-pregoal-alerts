@@ -23,6 +23,7 @@ import { oddsLogKey } from '../src/lib/oddsObserve.ts'
 import type { GoalRecord, LoggedAlert, ParamVersion, PushSub, StoredMatch } from './types.ts'
 import { marketFromTelegramText, parseAlertKey } from './alertKeys.ts'
 import { noteFixtureLeague, observeAlerts } from './leagueStats.ts'
+import { observeBetPending } from './betIndex.ts'
 
 const TIP_OVERLAY_FILE = 'tip_overlay.json'
 const TIP_OVERLAY_PROPOSAL_FILE = 'tip_overlay_proposal.json'
@@ -202,6 +203,7 @@ export function saveAlerts(
 ): void {
   writeJson(FILES[learnScope(market, half)].alerts, items)
   observeAlerts(items, market, half)
+  observeBetPending(items, market, half)
 }
 
 export function loadGoals(

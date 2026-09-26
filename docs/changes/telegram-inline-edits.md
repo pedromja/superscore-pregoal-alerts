@@ -6,7 +6,7 @@ Branch `feat/telegram-inline-edits` (a partir de `f0217dc`). Só código e teste
 
 1. **Resultado inline.** Quando se carrega em "Resolver agora", e também na notificação automática de settle,
    a mensagem original do alerta é **editada** (`editMessageText`, HTML, links preservados, previews desligadas).
-   Acrescenta-se no fim `🟢 GREEN · 39'` ou `🔴 RED · sem golo até 42'`. Não é enviada nenhuma mensagem nova.
+   Acrescenta-se no fim `🟢 GREEN · golo aos 39'` ou `🔴 RED · sem golo até ao intervalo (45+2')` (regra do fim da parte, ver `telegram-bet-outcome.md`). Não é enviada nenhuma mensagem nova.
    O callback responde com um toast: `Resolvido: GREEN`, `Resolvido: RED`, `ainda sem resolução` (o aviso
    existente de "ainda cedo"), `já resolvido` ou `⚪ VOID · linha já batida ao enviar`. Se a resolução demorar mais de 8 s, responde logo com `A verificar…`, uma única vez.
    Quando o resultado é final, o botão é removido (`reply_markup: {inline_keyboard: []}`).
@@ -33,9 +33,9 @@ Deportivo Pereira vs Internacional de Bogota · 36' · Fora · v -51
 Primária · Sustained |v|≥20 ×2
 Abrir no monitor
 💰 Odd +0.5 cantos (Over 4.5): 1.85 (SuperScore) · Asiático Over 4.75 2.02 / Under 4.75 1.80   <- +odds
-🟢 GREEN · 39'                             <- resultado (botão removido)
+🟢 GREEN · canto aos 39'                    <- resultado (botão removido)
 ```
-Em vez do resultado pode surgir `🔴 RED · sem canto até 45'`, ou `⚪ VOID · linha já batida ao enviar · canto aos 37'`.
+Em vez do resultado pode surgir `🔴 RED · sem canto até ao intervalo (45+2')`, ou `⚪ VOID · linha já batida ao enviar · canto aos 37'`.
 
 ## Regra VOID (fontes: SuperScore)
 
