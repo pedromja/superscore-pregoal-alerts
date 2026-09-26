@@ -100,3 +100,16 @@ Agora:
 - odds do caso Penarol.
 
 Os testes existentes foram ajustados à regra nova.
+
+## Correção: linhas de odd antigas (branch fix/legacy-odds-lines, ainda não publicada)
+
+No deploy 3, a edição corretiva recompôs as mensagens com o `oddsLine` guardado. A mensagem 2775 (Penarol) passou
+assim a mostrar a linha errada `Over 3.5: 10.50`. Antes não aparecia, porque a edição de odd tinha falhado com
+"fetch failed".
+
+Esta correção faz o seguinte:
+- As novas linhas passam a ser gravadas com `oddsRule: 'strict-v1'`.
+- No arranque, `stripLegacyOddsLines()` retira das mensagens enviadas nas últimas 48 h as linhas feitas pelo picker
+  antigo. A linha antiga fica guardada em `legacyOddsLine`.
+- A seguir, `runSpacedEdits` reedita essas mensagens, cerca de 1 por segundo, sem mensagens novas.
+- Em produção isto afeta 3 mensagens (2775, 2777, 2778).

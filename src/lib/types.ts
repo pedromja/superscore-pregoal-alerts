@@ -146,6 +146,8 @@ export type Fixture = {
   team2Id: string
   competition: string
   category: string
+  /** SuperScore competition id (unique across countries). */
+  competitionId?: string | null
   status: number
   state: number
   dateSeconds: number

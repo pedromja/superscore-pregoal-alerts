@@ -343,7 +343,7 @@ export function resetLearnStore(market: ResetLearnMarket = 'all'): {
 }
 
 export function saveMatch(match: StoredMatch): void {
-  noteFixtureLeague(match.fixture.id, match.fixture.competition)
+  noteFixtureLeague(match.fixture.id, match.fixture)
   writeFileSync(
     join(MATCHES_DIR, `${match.fixture.id}.json`),
     JSON.stringify(match),
@@ -518,6 +518,10 @@ export type TelegramMessageRecord = {
   /** Odds line (HTML) once attachOdds found a price; null = window expired, none. */
   oddsLine?: string | null
   oddsAt?: string
+  /** Picker rule that produced `oddsLine` ('strict-v1' = right period/line only). */
+  oddsRule?: string
+  /** Odds line removed because the old picker produced it (audit). */
+  legacyOddsLine?: string | null
   /** GREEN/RED line (HTML), frozen when the outcome was claimed. */
   resultLine?: string | null
   /** Last text Telegram accepted via editMessageText (skip identical edits). */
@@ -531,6 +535,8 @@ export type TelegramMessageRecord = {
 const TELEGRAM_EDIT_FIELDS = [
   'oddsLine',
   'oddsAt',
+  'oddsRule',
+  'legacyOddsLine',
   'resultLine',
   'lastEditText',
   'finalized',

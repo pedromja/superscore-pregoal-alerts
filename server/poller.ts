@@ -90,6 +90,7 @@ import {
 } from './telegramRetry.ts'
 import {
   attachOddsToAlerts,
+  backfillTipLeagues,
   createTipFromAlert,
   resolvedOddFromAlert,
   settleTipsForMatch,
@@ -105,7 +106,7 @@ import {
   qualityOverlayEnabled,
 } from './qualityOverlay.ts'
 import type { AlertSendSnapshot, LoggedAlert, PollerStatus } from './types.ts'
-import { noteTelegramOdds, trackTelegramOddsPending } from './telegramEdits.ts'
+import { noteTelegramOdds, runSpacedEdits, stripLegacyOddsLines, trackTelegramOddsPending } from './telegramEdits.ts'
 import { marketTotalAt, scheduleVoidCheck } from './telegramVoid.ts'
 
 const status: PollerStatus = {
@@ -587,6 +588,8 @@ async function dispatchClaimedAlerts(
           market,
           fixtureId: fixture.id,
           competition: fixture.competition,
+          category: fixture.category,
+          competitionId: fixture.competitionId,
           half: alert.cornerHalf,
           alertId: loggedId,
         }) ?? undefined,
@@ -1096,10 +1099,30 @@ async function bootBetSettlement(): Promise<void> {
   console.log(
     `[bet] re-settle em ${Date.now() - started} ms: ${JSON.stringify(summary.alerts)} · 48h ${JSON.stringify(summary.sent48h)} · tips ${JSON.stringify(summary.tips)}`,
   )
-  await primeLeagueStats({ matchesDir: MATCHES_DIR, loadAlerts })
+  await primeLeagueStats({
+    matchesDir: MATCHES_DIR,
+    loadAlerts,
+    fetchDay: async (date) => {
+      const ctl = new AbortController()
+      const t = setTimeout(() => ctl.abort(), 20_000)
+      try {
+        return await fetchFixturesServer(date, POLLER_REGION, ctl.signal)
+      } finally {
+        clearTimeout(t)
+      }
+    },
+  })
+  const tipLeagues = await withStoreLock(() => backfillTipLeagues())
+  if (tipLeagues) console.log(`[league] tips com liga única: ${tipLeagues}`)
   const byKey = alertsByKeys(editKeys)
   const edits = await runResettleEdits(editKeys, (key) => byKey.get(key) ?? null)
   console.log(`[bet] edições de correção: ${JSON.stringify(edits)}`)
+  // Odds lines from the old picker (wrong market/period/line) come off the messages.
+  const legacyOdds = await withStoreLock(() => stripLegacyOddsLines())
+  if (legacyOdds.length) {
+    const oddsEdits = await runSpacedEdits(legacyOdds, 'odds-legacy')
+    console.log(`[odds] linhas antigas removidas de ${legacyOdds.length} mensagens: ${JSON.stringify(oddsEdits)}`)
+  }
   try {
     writeFileSync(
       join(DATA_DIR, 'bet_resettle_report.json'),

@@ -1,6 +1,6 @@
 /**
  * League hit-rate line on Telegram alerts (offline, mocked Bot API):
- * - ≥3 settled non-VOID alerts of league+market ⇒ `📊 Liga (golos): 4/6 · 67 %`
+ * - ≥3 settled non-VOID alerts of league+market ⇒ `📊 Uruguai · Liga X (golos): 4/6 · 67 %`
  *   before "Abrir no monitor"; <3 ⇒ no line;
  * - VOID / unsettled / coincident excluded, current alert excluded;
  * - goals and corners separate, HT+FT together, league key = follow-up key;
@@ -62,7 +62,7 @@ telegram.setTelegramFetchForTests(async (input, init) => {
 })
 tips.setAttachOddsForTests(async ({ alerts }) => alerts)
 
-function fixture(id: string, competition: string): Fixture {
+function fixture(id: string, competition: string, category = 'Uruguay'): Fixture {
   return {
     id,
     team1: 'Casa',
@@ -70,7 +70,7 @@ function fixture(id: string, competition: string): Fixture {
     team1Id: 'h',
     team2Id: 'a',
     competition,
-    category: 'test',
+    category,
     status: 1,
     state: 1,
     dateSeconds: 0,
@@ -219,7 +219,7 @@ try {
   )
   // Before the boot prime no line is shown (index not ready).
   expect(
-    league.leagueLineForAlert({ market: 'goals', fixtureId: 'lx9', competition: 'Liga X', half: 'ht', alertId: 'lx9:a' }) === null,
+    league.leagueLineForAlert({ market: 'goals', fixtureId: 'lx9', competition: 'Liga X', category: 'Uruguay', half: 'ht', alertId: 'lx9:a' }) === null,
     'no line before the index is primed',
   )
   league.resetLeagueStatsForTests()
@@ -227,27 +227,34 @@ try {
   expect(league.leagueStatsReady(), 'index primed')
 
   // ── ≥3 ⇒ line with correct numbers; markets separate ────────────────────
-  const goalsX = league.leagueStatsFor('goals', 'Liga X')
+  // League key = country + name here (no competition id on these fixtures).
+  const X = league.leagueForFixture('lx1')
+  const Y = league.leagueForFixture('ly1')
+  expect(X === 'cn:uruguay|liga x', `Liga X key is country + name, got ${X}`)
+  expect(Y !== null && league.leagueForFixture('ly2') === Y, 'trimmed name → same league key')
+  const goalsX = league.leagueStatsFor('goals', X)
   expect(goalsX.green === 4 && goalsX.settled === 6, `goals Liga X 4/6, got ${JSON.stringify(goalsX)}`)
-  const cornersX = league.leagueStatsFor('corners', 'Liga X')
+  const cornersX = league.leagueStatsFor('corners', X)
   expect(cornersX.green === 2 && cornersX.settled === 5, `corners Liga X 2/5, got ${JSON.stringify(cornersX)}`)
-  expect(league.formatLeagueLine('goals', goalsX) === '📊 Liga (golos): 4/6 · 67 %', `goals line, got ${league.formatLeagueLine('goals', goalsX)}`)
-  expect(league.formatLeagueLine('corners', cornersX) === '📊 Liga (cantos): 2/5 · 40 %', 'corners line')
+  const XL = league.leagueLabelFor(X ?? '')
+  expect(XL === 'Uruguai · Liga X', `label country · league, got ${XL}`)
+  expect(league.formatLeagueLine('goals', goalsX, 3, XL) === '📊 Uruguai · Liga X (golos): 4/6 · 67 %', `goals line, got ${league.formatLeagueLine('goals', goalsX, 3, XL)}`)
+  expect(league.formatLeagueLine('corners', cornersX, 3, XL) === '📊 Uruguai · Liga X (cantos): 2/5 · 40 %', 'corners line')
 
   // ── <3 ⇒ nothing; unknown league ⇒ nothing ──────────────────────────────
-  const goalsY = league.leagueStatsFor('goals', 'Liga Y')
+  const goalsY = league.leagueStatsFor('goals', Y)
   expect(goalsY.settled === 2, `Liga Y (trimmed key) 2 settled, got ${goalsY.settled}`)
   expect(league.formatLeagueLine('goals', goalsY) === null, '<3 → no line')
-  expect(league.formatLeagueLine('corners', league.leagueStatsFor('corners', 'Liga Y')) === null, 'no corners history → no line')
+  expect(league.formatLeagueLine('corners', league.leagueStatsFor('corners', Y)) === null, 'no corners history → no line')
 
   // ── Real send: line in the base text before "Abrir no monitor" ──────────
   const text = await send('lx-live', 'Liga X', 'goals')
   const lines = text.split('\n')
   const at = lines.findIndex((l) => l.startsWith('📊'))
-  expect(leagueLine(text) === '📊 Liga (golos): 4/6 · 67 %', `goals alert carries the league line, got ${JSON.stringify(text)}`)
+  expect(leagueLine(text) === '📊 Uruguai · Liga X (golos): 4/6 · 67 %', `goals alert carries the league line, got ${JSON.stringify(text)}`)
   expect(at >= 0 && lines[at + 1]?.includes('Abrir no monitor'), 'league line sits right before "Abrir no monitor"')
   const cornersText = await send('lx-live2', 'Liga X', 'corners')
-  expect(leagueLine(cornersText) === '📊 Liga (cantos): 2/5 · 40 %', `corners alert uses corners stats, got ${leagueLine(cornersText)}`)
+  expect(leagueLine(cornersText) === '📊 Uruguai · Liga X (cantos): 2/5 · 40 %', `corners alert uses corners stats, got ${leagueLine(cornersText)}`)
   const yText = await send('ly-live', 'Liga Y', 'goals')
   expect(yText.length > 0 && leagueLine(yText) === null, 'Liga Y alert (2 settled) has no league line')
   const zText = await send('lz-live', 'Liga Z', 'goals')
@@ -255,7 +262,7 @@ try {
 
   // ── Line survives the odds/result edits (base text) ─────────────────────
   const rec = store.getTelegramMessage('lx-live:primary-1-36-35')
-  expect(Boolean(rec?.text?.includes('📊 Liga (golos): 4/6 · 67 %')), 'stored base text keeps the league line')
+  expect(Boolean(rec?.text?.includes('📊 Uruguai · Liga X (golos): 4/6 · 67 %')), 'stored base text keeps the league line')
   const liveKey = 'lx-live:primary-1-36-35'
   const patched = store.patchLoggedAlert(liveKey, {
     hit5: false,
@@ -282,7 +289,7 @@ try {
   const resultEdit = calls.slice(before).find((c) => c.method === 'editMessageText')
   {
     expect(
-      Boolean(resultEdit) && String(resultEdit?.body.text).includes('📊 Liga (golos): 4/6 · 67 %') &&
+      Boolean(resultEdit) && String(resultEdit?.body.text).includes('📊 Uruguai · Liga X (golos): 4/6 · 67 %') &&
         String(resultEdit?.body.text).trimEnd().endsWith("<b>🔴 RED</b> · sem golo até ao intervalo (45+3')"),
       `result edit keeps the league line, got ${JSON.stringify(resultEdit?.body.text)}`,
     )
@@ -292,36 +299,36 @@ try {
   const cur = logged('lx1', 'green')
   const ht = store.loadAlerts('goals', 'ht')
   store.saveAlerts([...ht, cur], 'goals', 'ht')
-  const withCur = league.leagueStatsFor('goals', 'Liga X')
+  const withCur = league.leagueStatsFor('goals', X)
   // the RED settle above also counts (the live alert is stored and settled)
   const expectSettled = goalsX.settled + 1 + 1
   expect(withCur.settled === expectSettled, `settle adds to the sample, got ${JSON.stringify(withCur)} want ${expectSettled}`)
   // A learning label alone (hit5, no bet outcome) is not a settled bet.
   const labelOnly = logged('lx1', 'green', { betOutcome: undefined })
   store.saveAlerts([...store.loadAlerts('goals', 'ht'), labelOnly], 'goals', 'ht')
-  expect(league.leagueStatsFor('goals', 'Liga X').settled === withCur.settled, 'hit5 without betOutcome is not counted')
+  expect(league.leagueStatsFor('goals', X).settled === withCur.settled, 'hit5 without betOutcome is not counted')
   store.saveAlerts(store.loadAlerts('goals', 'ht').filter((a) => a.id !== labelOnly.id), 'goals', 'ht')
-  const excl = league.leagueStatsFor('goals', 'Liga X', league.leagueContribKey('goals', 'ht', cur.id))
+  const excl = league.leagueStatsFor('goals', X, league.leagueContribKey('goals', 'ht', cur.id))
   expect(excl.settled === withCur.settled - 1 && excl.green === withCur.green - 1, 'current alert excluded from its own line')
   store.saveAlerts(store.loadAlerts('goals', 'ht').map((a) => (a.id === cur.id ? { ...a, void: true } : a)), 'goals', 'ht')
-  expect(league.leagueStatsFor('goals', 'Liga X').settled === withCur.settled - 1, 'VOID later removes it from the sample')
+  expect(league.leagueStatsFor('goals', X).settled === withCur.settled - 1, 'VOID later removes it from the sample')
   store.saveAlerts(store.loadAlerts('goals', 'ht').filter((a) => a.fixtureId !== 'lx2'), 'goals', 'ht')
-  expect(league.leagueStatsFor('goals', 'Liga X').settled === withCur.settled - 2, 'removed alerts leave the sample')
+  expect(league.leagueStatsFor('goals', X).settled === withCur.settled - 2, 'removed alerts leave the sample')
   store.saveAlerts([], 'goals', 'ht')
   store.saveAlerts([], 'goals', 'ft')
-  expect(league.leagueStatsFor('goals', 'Liga X').settled === 0, 'learn reset empties the goals sample')
-  expect(league.leagueStatsFor('corners', 'Liga X').settled === 5, 'corners untouched by goals reset')
+  expect(league.leagueStatsFor('goals', X).settled === 0, 'learn reset empties the goals sample')
+  expect(league.leagueStatsFor('corners', X).settled === 5, 'corners untouched by goals reset')
 
   // ── League learned later (alert saved before its match snapshot) ────────
   store.saveAlerts([logged('late1', 'green'), logged('late1', 'green'), logged('late1', 'red')], 'goals', 'ht')
-  expect(league.leagueStatsFor('goals', 'Liga W').settled === 0, 'unknown league waits')
+  expect(league.leagueForFixture('late1') === null, 'unknown league waits')
   saveFixture('late1', 'Liga W')
-  const w = league.leagueStatsFor('goals', 'Liga W')
+  const w = league.leagueStatsFor('goals', league.leagueForFixture('late1'))
   expect(w.settled === 3 && w.green === 2, `resolved once the fixture league is known, got ${JSON.stringify(w)}`)
 
   // ── Cost: 10k alerts observe + 10k lookups ──────────────────────────────
   league.resetLeagueStatsForTests({ primed: true })
-  for (let i = 0; i < 200; i += 1) league.noteFixtureLeague(`p${i}`, `Liga ${i % 40}`)
+  for (let i = 0; i < 200; i += 1) league.noteFixtureLeague(`p${i}`, { competition: `Liga ${i % 40}`, category: 'Chile' })
   const big = Array.from({ length: 10_000 }, (_, i) => logged(`p${i % 200}`, i % 3 === 0 ? 'green' : i % 5 === 0 ? 'open' : 'red'))
   let t = performance.now()
   league.observeAlerts(big, 'corners', 'ht')
@@ -331,7 +338,7 @@ try {
   const againMs = performance.now() - t
   t = performance.now()
   for (let i = 0; i < 10_000; i += 1) {
-    league.leagueLineForAlert({ market: 'corners', fixtureId: `p${i % 200}`, competition: `Liga ${i % 40}`, half: 'ht', alertId: 'x' })
+    league.leagueLineForAlert({ market: 'corners', fixtureId: `p${i % 200}`, competition: `Liga ${i % 40}`, category: 'Chile', half: 'ht', alertId: 'x' })
   }
   const lookupUs = ((performance.now() - t) * 1000) / 10_000
   console.log(`cost: observe 10k first ${firstMs.toFixed(1)} ms, re-observe ${againMs.toFixed(1)} ms, lookup ${lookupUs.toFixed(2)} µs`)

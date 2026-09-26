@@ -29,7 +29,7 @@ function TipRow({ tip }: { tip: Tip }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-emerald-50">{tip.matchLabel}</p>
-          <p className="mt-0.5 text-xs text-emerald-100/50">{tip.league}</p>
+          <p className="mt-0.5 text-xs text-emerald-100/50">{tip.leagueLabel || tip.league}</p>
         </div>
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>
           {tip.void ? `VOID · ${statusLabel(tip.status)}` : statusLabel(tip.status)}
@@ -105,7 +105,7 @@ function LeagueTable({ rows }: { rows: LeagueRow[] }) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.league} className="border-t border-line/80">
+            <tr key={row.key} className="border-t border-line/80">
               <td className="py-2 pr-3">{row.league}</td>
               <td className="py-2 pr-3 font-mono">{row.tips}</td>
               <td className="py-2 pr-3 font-mono">

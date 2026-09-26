@@ -274,7 +274,8 @@ try {
   store.saveMatch(match({ events: [...base3, corner(47, 1, 2)], points: pts(1, 47, 1) }))
   league.resetLeagueStatsForTests()
   await league.primeLeagueStats({ matchesDir: join(dataDir, 'matches'), loadAlerts: store.loadAlerts })
-  const ls = league.leagueStatsFor('corners', 'Liga Bet')
+  const ls = league.leagueStatsFor('corners', league.leagueForFixture(FX))
+  expect(league.leagueLabelFor(league.leagueForFixture(FX) ?? '') === 'Uruguai · Liga Bet', 'league label carries the country')
   expect(ls.settled === 3 && ls.green === 3, `league line counts bet outcomes, got ${JSON.stringify(ls)}`)
 
   // ── 3. Boot re-settle + corrective edits ─────────────────────────────────
@@ -315,6 +316,21 @@ try {
   expect(reEdits.every((c) => String(c.body.text).trimEnd().endsWith("<b>🔴 RED</b> · sem canto até ao intervalo (45+3')")), `corrected text, got ${JSON.stringify(reEdits.map((c) => String(c.body.text).split('\n').at(-1)))}`)
   expect(reEdits.length === 2 && reEdits[1].at - reEdits[0].at >= 55, `edits are spaced (rate limit), gap ${reEdits.length === 2 ? reEdits[1].at - reEdits[0].at : -1} ms`)
   betSettle.setResettleEditDelayForTests(null)
+
+  // Odds lines from the old picker come off recently sent messages (edit only).
+  const legacyKey = `corners:${b1.id}`
+  const strictKey = `corners:${b2.id}`
+  store.upsertTelegramMessage(legacyKey, { oddsLine: '💰 Odd +0.5 cantos (Over 3.5): 10.50 (SuperScore)', oddsAt: new Date(NOW - 3600_000).toISOString(), lastEditText: 'shown with the 10.50 line' })
+  store.upsertTelegramMessage(strictKey, { oddsLine: '💰 Odd +0.5 cantos (Over 3.5): 2.60 (SuperScore)', oddsAt: new Date().toISOString(), oddsRule: edits.ODDS_LINE_RULE })
+  const stripped = edits.stripLegacyOddsLines({ nowMs: NOW })
+  expect(stripped.length === 1 && stripped[0] === legacyKey, `only the old-picker odds line is stripped, got ${JSON.stringify(stripped)}`)
+  expect(store.getTelegramMessage(legacyKey)?.oddsLine === null && Boolean(store.getTelegramMessage(legacyKey)?.legacyOddsLine), 'legacy line kept for audit only')
+  const beforeStrip = calls.length
+  const stripRes = await edits.runSpacedEdits(stripped, 'odds-legacy', 1)
+  const stripEdit = byMethod('editMessageText', beforeStrip)
+  expect(stripRes.edited === 1 && stripEdit.length === 1 && !String(stripEdit[0].body.text).includes('10.50') && String(stripEdit[0].body.text).includes('🔴 RED'), `message re-edited without the wrong odd, got ${JSON.stringify(stripEdit.map((c) => c.body.text))}`)
+  expect(byMethod('sendMessage', beforeStrip).length === 0, 'odds strip sends no new messages')
+  expect(edits.stripLegacyOddsLines({ nowMs: NOW }).length === 0, 'odds strip is idempotent')
 
   // ── 4. Odds: next-event line of the alert's period only ─────────────────
   const offer = (name: string, odds: [string, number][]) => ({
