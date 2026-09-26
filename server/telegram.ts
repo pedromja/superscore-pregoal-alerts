@@ -30,6 +30,8 @@ export type TelegramPayload = {
   ruleLabel?: string
   /** Stored on the telegram_messages.json record (both markets share that file). */
   market?: Market
+  /** Short line under the title, e.g. "✅ Filtro" when the quality overlay passed. */
+  qualityLine?: string
 }
 
 export type TelegramFailureKind =
@@ -111,6 +113,7 @@ export function resolveMonitorUrl(pathOrUrl: string): string | null {
 export function formatTelegramHtml(payload: TelegramPayload): string {
   const lines = [
     `<b>${escapeTelegramHtml(payload.title)}</b>`,
+    payload.qualityLine ? escapeTelegramHtml(payload.qualityLine) : '',
     escapeTelegramHtml(payload.body),
   ]
   if (payload.ruleLabel) {

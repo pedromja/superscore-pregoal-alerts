@@ -52,6 +52,10 @@ import {
 } from '../server/store.ts'
 import type { LoggedAlert } from '../server/types.ts'
 
+// Base delivery pipeline with sample alerts the quality overlay would filter;
+// the overlay has its own test (verify-quality-overlay). Read live per call.
+process.env.QUALITY_OVERLAY = 'off'
+
 const fail: string[] = []
 
 function expect(cond: boolean, message: string) {

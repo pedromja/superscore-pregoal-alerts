@@ -19,6 +19,10 @@ import {
 } from '../server/store.ts'
 import { setAttachOddsForTests } from '../server/tips.ts'
 
+// Base delivery pipeline (sample alert v−61 would be filtered): the quality
+// overlay has its own test (verify-quality-overlay). Read live per call.
+process.env.QUALITY_OVERLAY = 'off'
+
 const fail: string[] = []
 
 function check(cond: boolean, msg: string) {

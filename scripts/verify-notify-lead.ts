@@ -25,6 +25,10 @@ import {
 } from '../server/poller.ts'
 import { loadAlerts, loadSent, saveAlerts, saveSent } from '../server/store.ts'
 
+// Base delivery pipeline with sample alerts the quality overlay would filter;
+// the overlay has its own test (verify-quality-overlay). Read live per call.
+process.env.QUALITY_OVERLAY = 'off'
+
 const fails: string[] = []
 
 function expect(cond: boolean, message: string) {

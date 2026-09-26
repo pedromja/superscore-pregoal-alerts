@@ -9,8 +9,11 @@ import {
 } from '../src/lib/rules.ts'
 import { inMarketClockWindow } from '../src/lib/windows.ts'
 import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
+import { QUALITY_FILTER_LINE, withCapReason } from '../src/lib/qualityOverlay.ts'
 import type {
+  AlertOverlay,
   AlertSettings,
+  CornerHalf,
   CornersByHalf,
   FeedAlert,
   Fixture,
@@ -69,6 +72,7 @@ import {
   markSent,
   primedKey,
   primeFixture,
+  saveAlerts,
   saveMatch,
   sentKey,
   telegramRecordMarket,
@@ -87,7 +91,14 @@ import {
 } from './tips.ts'
 import { warmupSokkerProBoard } from './sokkerpro.ts'
 import { alertKeyFor, loggedAlertId } from './alertKeys.ts'
-import type { PollerStatus } from './types.ts'
+import {
+  alertHalf,
+  annotateOverlay,
+  overlayCapReached,
+  overlayForFeedAlert,
+  qualityOverlayEnabled,
+} from './qualityOverlay.ts'
+import type { LoggedAlert, PollerStatus } from './types.ts'
 
 const status: PollerStatus = {
   enabled: POLLER_ENABLED,
@@ -313,6 +324,18 @@ function claimFreshAlerts(
   clock?: { min: number; period: number },
 ): FeedAlert[] {
   const claimed: FeedAlert[] = []
+  const enforced = qualityOverlayEnabled()
+  const storedByHalf = new Map<CornerHalf, LoggedAlert[]>()
+  const storedFor = (half: CornerHalf): LoggedAlert[] => {
+    let stored = storedByHalf.get(half)
+    if (!stored) {
+      stored = loadAlerts(market, half)
+      storedByHalf.set(half, stored)
+    }
+    return stored
+  }
+  const claimedPassByHalf = new Map<CornerHalf, number>()
+  const overlayPatches: { half: CornerHalf; loggedId: string; overlay: AlertOverlay }[] = []
   for (const alert of fresh) {
     // Stoppage (P1>45 / P2>90) and out-of-window: no push. Yeovil 96' arrived
     // after the goal; bookie markets were already gone.
@@ -333,8 +356,51 @@ function claimFreshAlerts(
     if (!ruleNotifyEnabled(notify, alert.rule)) continue
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     if (loadSent().includes(key)) continue
+
+    // Quality overlay (notification filter only; the alert is already stored
+    // and will be settled/learned like every other). Cap: one overlay-passed
+    // notified alert per match × market × half, counted from stored alerts.
+    const half = alertHalf(market, alert)
+    let overlay = alert.overlay ?? overlayForFeedAlert(market, alert, enforced)
+    if (overlay.pass && half) {
+      const capped = overlayCapReached(
+        storedFor(half),
+        fixture.id,
+        claimedPassByHalf.get(half) ?? 0,
+      )
+      if (capped) overlay = withCapReason(overlay)
+    }
+    const loggedId = loggedAlertId(fixture.id, alert.id)
+    if (enforced && !overlay.pass) {
+      // Decided once: consume the sent key so the blocked alert is not
+      // re-considered every tick.
+      markSent(key)
+      if (half) overlayPatches.push({ half, loggedId, overlay })
+      console.info(
+        `[poller] overlay block ${overlay.reasons.join(',')} ${market} ${alert.min}' P${alert.period} ${alert.matchLabel}`,
+      )
+      continue
+    }
     if (!markSent(key)) continue
-    claimed.push(alert)
+    if (overlay.pass && half) {
+      overlay = { ...overlay, notified: true }
+      claimedPassByHalf.set(half, (claimedPassByHalf.get(half) ?? 0) + 1)
+    }
+    if (half) overlayPatches.push({ half, loggedId, overlay })
+    claimed.push({ ...alert, overlay })
+  }
+  // Persist overlay decisions (cap / notified) — one write per touched half.
+  for (const half of new Set(overlayPatches.map((p) => p.half))) {
+    const stored = storedFor(half)
+    let dirty = false
+    for (const patch of overlayPatches) {
+      if (patch.half !== half) continue
+      const idx = stored.findIndex((a) => a.id === patch.loggedId)
+      if (idx < 0) continue
+      stored[idx] = { ...stored[idx], overlay: patch.overlay }
+      dirty = true
+    }
+    if (dirty) saveAlerts(stored, market, half)
   }
   return claimed
 }
@@ -451,6 +517,8 @@ async function dispatchClaimedAlerts(
       alertKey,
       ruleLabel: alert.ruleName,
       market,
+      qualityLine:
+        alert.overlay?.enforced && alert.overlay.pass ? QUALITY_FILTER_LINE : undefined,
     }
     const firstAttemptAt = telegramRetryNow()
     const telegramResult: TelegramSendResult = await sendTelegram(telegramPayload)
@@ -564,8 +632,10 @@ export async function processEvaluatedAlerts(
     events,
     points,
   } = args
-  const fresh = args.fresh.filter((alert) =>
-    inMarketClockWindow(market, alert.min, alert.period),
+  // Every evaluated alert carries its overlay decision (stored with it).
+  const fresh = annotateOverlay(
+    market,
+    args.fresh.filter((alert) => inMarketClockWindow(market, alert.min, alert.period)),
   )
 
   if (first) {

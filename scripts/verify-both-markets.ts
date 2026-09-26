@@ -62,14 +62,16 @@ function fixture(finished = false): Fixture {
 }
 
 /**
- * P1 1'..38': flat, then 37' = +30 and 38' = +85 (Δ55). At 38':
+ * P1 1'..38': flat, then 37' = +25 and 38' = +95 (Δ70). At 38':
  * goals HT primary Combo (Spike80 ∧ Swing50) and corners HT primary
  * Sustained (|v|≥20 ×2) both fire → same id `primary-1-38-37`.
+ * Both also pass the quality overlay (default on): goals HT |v|95≥85 ∧
+ * |Δ1|70≥70 at 0-0; corners HT minute 38 ≤ 38.
  */
 function payload(upTo: number, cornerAt40 = false): MomentumPayload {
   const timeline = []
   for (let min = 1; min <= upTo; min += 1) {
-    const value = min === 37 ? 30 : min === 38 ? 85 : 0
+    const value = min === 37 ? 25 : min === 38 ? 95 : 0
     timeline.push({ min, period: min <= 45 ? 1 : 2, value: { value } })
   }
   return {
@@ -155,6 +157,7 @@ try {
   const texts = sends.map((c) => String(c.body.text))
   expect(texts.some((t) => t.startsWith('<b>Golo')), 'goal alert delivered')
   expect(texts.some((t) => t.startsWith('<b>Canto')), 'corner alert delivered')
+  expect(texts.every((t) => t.split('\n')[1] === '✅ Filtro'), 'both alerts carry the ✅ Filtro line')
   const callbacks = sends.map(
     (c) =>
       (c.body.reply_markup as { inline_keyboard: { callback_data: string }[][] })

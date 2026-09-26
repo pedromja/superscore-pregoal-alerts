@@ -20,6 +20,9 @@ delete process.env.WEB_PUSH_ENABLED
 delete process.env.TELEGRAM_RETRY_MAX_ATTEMPTS
 delete process.env.TELEGRAM_RETRY_BASE_MS
 delete process.env.TELEGRAM_RETRY_MAX_AGE_MS
+// Base delivery pipeline with sample alerts the quality overlay would filter;
+// the overlay has its own test (verify-quality-overlay). Read live per call.
+process.env.QUALITY_OVERLAY = 'off'
 
 type FeedAlert = import('../src/lib/types.ts').FeedAlert
 type Fixture = import('../src/lib/types.ts').Fixture
