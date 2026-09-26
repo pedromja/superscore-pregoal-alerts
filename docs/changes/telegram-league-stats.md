@@ -12,7 +12,7 @@ Canto · Golos 0-0 · Cantos 2-2
 ✅ Filtro
 Deportivo Pereira vs Internacional de Bogota · 36' · Fora · v -51
 Primária · Sustained |v|≥20 ×2
-📊 Liga (cantos): 2/5 · 40 %
+📊 Colômbia · Primera A (cantos): 2/5 · 40 %
 Abrir no monitor
 💰 Odd …            (edição posterior)
 🟢 GREEN · 39'      (edição posterior)
@@ -28,9 +28,31 @@ resultado) mantêm-na. O valor é o do momento do envio e não é atualizado dep
 - Conta se tiver `betOutcome` (regra do fim da parte, ver `telegram-bet-outcome.md`). GREEN = `betOutcome.status === 'green'`, a mesma definição do resultado
   no Telegram.
 - Ficam de fora: os **VOID**, os não resolvidos, os coincidentes e o próprio alerta.
-- Chave da liga: a mesma do seguimento por liga, `leagueKeyOf(fixture.competition)` (trim; vazio = "Sem liga").
-  A liga de cada alerta vem do snapshot do jogo (`matches/<id>.json`, `fixture.competition`) e, em último caso,
-  de `alert.odds.league`.
+- Chave da liga: única, partilhada com o seguimento por liga (ver "Chave da liga" abaixo). O nome da liga sozinho
+  nunca é chave.
+
+## Chave da liga
+
+Os nomes repetem-se entre países ("Premier League", "Cup", "Primera Division"), por isso:
+
+1. `id:<competitionId>`: o id da competição do SuperScore (`competition.id` no feed fixtures-by-date,
+   guardado em `Fixture.competitionId`);
+2. sem id: `cn:<país>|<nome>` (normalizado), a partir de `category` + `competition`;
+   - se esse país+nome corresponder a **um só** id conhecido, usa-se esse id;
+   - se corresponder a **vários** (ambíguo), o jogo não tem liga e os seus alertas não contam;
+3. sem país nem id: não conta.
+
+Linha: `📊 Inglaterra · Premier League (cantos): 12/18 · 67 %` (país em português quando conhecido, senão o texto
+do SuperScore). A regra continua a ser ≥3 resolvidos, não VOID, mesmo mercado.
+
+**Backfill (arranque):** os jogos guardados antes do id ser mantido (`matches/*.json` sem `competitionId`) são
+completados com um pedido ao feed fixtures-by-date por dia de Lisboa. Os ids ficam em `data/competitions.json`
+(os ficheiros de jogo não são reescritos). Dias já obtidos não se pedem de novo; um dia que falhe tenta-se no
+arranque seguinte e, até lá, esses jogos usam país+nome. O índice é recalculado a partir dos alertas guardados.
+
+**Tips:** `Tip.leagueKey`/`leagueLabel` são preenchidos na criação e, no arranque, nas tips antigas
+(`backfillTipLeagues`). O seguimento por liga (`computeLeagueFollowup`) agrupa por `leagueKey` e ignora tips sem
+chave única.
 
 ## Custo
 
@@ -54,8 +76,7 @@ Medido com os dados de produção: `observeAlerts` custa ≤7 ms por gravação 
 
 ## Notas
 
-- O nome da competição sozinho junta ligas de países diferentes ("Primera Division", "Copa", "Cup"). É a chave
-  do seguimento por liga existente. Usar `category + competition` seria mais exato, mas altera essa chave.
+- Um par país+nome guardado como `cn:` só passa a `id:` quando o id é conhecido no arranque seguinte.
 - Os alertas contam individualmente: um jogo com vários disparos pesa mais do que um jogo com um só.
 
-Testes: `npm run test:telegram-league-stats`.
+Testes: `npm run test:telegram-league-stats`, `npm run test:league-key`.

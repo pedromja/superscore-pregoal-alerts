@@ -46,6 +46,7 @@ import type {
   RawMomentumEvent,
 } from '../src/lib/types.ts'
 import type { StoredMatch } from './types.ts'
+import { resolveFixtureLeague } from './competitions.ts'
 import { loggedAlertId, tipIdFor } from './alertKeys.ts'
 import { loadSuperbetEvent, resolveSuperScoreMaisUm, snapshotsFromEvent } from './odds.ts'
 import {
@@ -337,6 +338,27 @@ export function tipAlreadyOpen(
   )
 }
 
+/** Unique league (competition id / country + name) for the league follow-up. */
+function leagueFieldsOf(fixture: Fixture): { leagueKey?: string; leagueLabel?: string } {
+  const r = resolveFixtureLeague(fixture.id, fixture)
+  return r ? { leagueKey: r.key, leagueLabel: r.label } : {}
+}
+
+/** Boot: give stored tips their unique league (after the competition backfill). */
+export function backfillTipLeagues(): number {
+  const tips = loadTips()
+  let n = 0
+  const next = tips.map((tip) => {
+    if (tip.leagueKey) return tip
+    const r = resolveFixtureLeague(tip.fixtureId)
+    if (!r) return tip
+    n += 1
+    return { ...tip, leagueKey: r.key, leagueLabel: r.label }
+  })
+  if (n) saveTips(next)
+  return n
+}
+
 export function createTipFromAlert(args: {
   fixture: Fixture
   alert: FeedAlert
@@ -353,6 +375,7 @@ export function createTipFromAlert(args: {
     id: tipIdFor(market, args.fixture.id, args.alert.id),
     ts: args.alert.firedAt || new Date().toISOString(),
     league: args.odd.league || args.fixture.competition,
+    ...leagueFieldsOf(args.fixture),
     home: args.fixture.team1,
     away: args.fixture.team2,
     market,

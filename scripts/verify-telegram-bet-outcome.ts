@@ -274,7 +274,8 @@ try {
   store.saveMatch(match({ events: [...base3, corner(47, 1, 2)], points: pts(1, 47, 1) }))
   league.resetLeagueStatsForTests()
   await league.primeLeagueStats({ matchesDir: join(dataDir, 'matches'), loadAlerts: store.loadAlerts })
-  const ls = league.leagueStatsFor('corners', 'Liga Bet')
+  const ls = league.leagueStatsFor('corners', league.leagueForFixture(FX))
+  expect(league.leagueLabelFor(league.leagueForFixture(FX) ?? '') === 'Uruguai · Liga Bet', 'league label carries the country')
   expect(ls.settled === 3 && ls.green === 3, `league line counts bet outcomes, got ${JSON.stringify(ls)}`)
 
   // ── 3. Boot re-settle + corrective edits ─────────────────────────────────

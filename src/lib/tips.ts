@@ -37,6 +37,10 @@ export type Tip = {
    */
   void?: boolean
   voidReason?: string
+  /** Unique league: `id:<competitionId>` or `cn:<country>|<name>` (league follow-up). */
+  leagueKey?: string
+  /** `Inglaterra · Premier League`. */
+  leagueLabel?: string
   /** Bet-rule decision (end of the half); status/pnl follow it. */
   betOutcome?: import('./betOutcome').BetOutcome
   /** Status before the half-end re-settle, when it changed (audit). */
@@ -56,6 +60,9 @@ export type RoiRow = {
 }
 
 export type LeagueRow = {
+  /** Unique league key (competition id / country + name). */
+  key: string
+  /** Display: `Inglaterra · Premier League`. */
   league: string
   tips: number
   open: number
@@ -163,9 +170,13 @@ export function computeLeagueFollowup(tips: Tip[]): LeagueRow[] {
   const by = new Map<string, LeagueRow>()
   for (const tip of tips) {
     if (tip.void) continue
-    const league = leagueKeyOf(tip.league)
-    const row = by.get(league) ?? {
-      league,
+    // Names repeat across countries ("Premier League", "Cup"): only tips with a
+    // unique league key are grouped; the rest stay out of the follow-up.
+    const key = tip.leagueKey
+    if (!key) continue
+    const row = by.get(key) ?? {
+      key,
+      league: tip.leagueLabel || leagueKeyOf(tip.league),
       tips: 0,
       open: 0,
       won: 0,
@@ -183,7 +194,7 @@ export function computeLeagueFollowup(tips: Tip[]): LeagueRow[] {
       row.lost += 1
       row.pnl += tip.pnl ?? -1
     }
-    by.set(league, row)
+    by.set(key, row)
   }
   return [...by.values()]
     .map((row) => {

@@ -343,7 +343,7 @@ export function resetLearnStore(market: ResetLearnMarket = 'all'): {
 }
 
 export function saveMatch(match: StoredMatch): void {
-  noteFixtureLeague(match.fixture.id, match.fixture.competition)
+  noteFixtureLeague(match.fixture.id, match.fixture)
   writeFileSync(
     join(MATCHES_DIR, `${match.fixture.id}.json`),
     JSON.stringify(match),

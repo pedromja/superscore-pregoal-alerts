@@ -90,6 +90,7 @@ import {
 } from './telegramRetry.ts'
 import {
   attachOddsToAlerts,
+  backfillTipLeagues,
   createTipFromAlert,
   resolvedOddFromAlert,
   settleTipsForMatch,
@@ -587,6 +588,8 @@ async function dispatchClaimedAlerts(
           market,
           fixtureId: fixture.id,
           competition: fixture.competition,
+          category: fixture.category,
+          competitionId: fixture.competitionId,
           half: alert.cornerHalf,
           alertId: loggedId,
         }) ?? undefined,
@@ -1096,7 +1099,21 @@ async function bootBetSettlement(): Promise<void> {
   console.log(
     `[bet] re-settle em ${Date.now() - started} ms: ${JSON.stringify(summary.alerts)} · 48h ${JSON.stringify(summary.sent48h)} · tips ${JSON.stringify(summary.tips)}`,
   )
-  await primeLeagueStats({ matchesDir: MATCHES_DIR, loadAlerts })
+  await primeLeagueStats({
+    matchesDir: MATCHES_DIR,
+    loadAlerts,
+    fetchDay: async (date) => {
+      const ctl = new AbortController()
+      const t = setTimeout(() => ctl.abort(), 20_000)
+      try {
+        return await fetchFixturesServer(date, POLLER_REGION, ctl.signal)
+      } finally {
+        clearTimeout(t)
+      }
+    },
+  })
+  const tipLeagues = await withStoreLock(() => backfillTipLeagues())
+  if (tipLeagues) console.log(`[league] tips com liga única: ${tipLeagues}`)
   const byKey = alertsByKeys(editKeys)
   const edits = await runResettleEdits(editKeys, (key) => byKey.get(key) ?? null)
   console.log(`[bet] edições de correção: ${JSON.stringify(edits)}`)

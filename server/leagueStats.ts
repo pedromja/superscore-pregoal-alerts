@@ -6,7 +6,9 @@
  * league and market (both halves together) whose bet outcome (end of the
  * half, src/lib/betOutcome.ts) is GREEN/RED, not
  * VOID and not coincident. The current alert is excluded. League key = the
- * league follow-up key (`leagueKeyOf(fixture.competition)`).
+ * SuperScore competition id (else country + name, never a bare name that
+ * repeats across countries) — see server/competitions.ts. Line:
+ * `📊 Inglaterra · Premier League (cantos): 12/18 · 67 %`.
  *
  * Kept as an in-memory index so the send path is an O(1) lookup:
  *  - `noteFixtureLeague` (store.saveMatch, every tick) maps fixture → league;
@@ -15,21 +17,27 @@
  *  - `primeLeagueStats` fills the index once at boot, off the tick.
  * Until an alert's league is known it waits in `unresolved` (per fixture).
  */
-import { readdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { isBetDecided } from '../src/lib/betOutcome.ts'
 import { marketCopy, parseMarket } from '../src/lib/market.ts'
-import { leagueKeyOf } from '../src/lib/tips.ts'
+import type { CompetitionInfo } from '../src/lib/leagueKey.ts'
 import { parseCornerHalf } from '../src/lib/windows.ts'
 import type { CornerHalf, Market } from '../src/lib/types.ts'
 import { telegramLeagueStatsEnabled, telegramLeagueStatsMin } from './config.ts'
 import type { LoggedAlert } from './types.ts'
+import {
+  backfillCompetitionIds,
+  knownCompetitionFixtures,
+  loadStoredCompetitions,
+  noteFixtureCompetition,
+  resolveFixtureLeague,
+} from './competitions.ts'
 
 type Contribution = { bucket: string; green: boolean }
 type Pending = { market: Market; green: boolean }
 export type LeagueStats = { green: number; settled: number }
 
 const fixtureLeague = new Map<string, string>()
+const leagueLabels = new Map<string, string>()
 const contrib = new Map<string, Contribution>()
 const buckets = new Map<string, LeagueStats>()
 /** fixtureId → contribution key → waiting contribution (league unknown yet). */
@@ -98,11 +106,22 @@ export function leagueForFixture(fixtureId: string): string | null {
   return fixtureLeague.get(fixtureId) ?? null
 }
 
+export function leagueLabelFor(key: string): string | null {
+  return leagueLabels.get(key) ?? null
+}
+
 /** store.saveMatch: remember the fixture's league and resolve waiting alerts. */
-export function noteFixtureLeague(fixtureId: string, competition: string | null | undefined): void {
+export function noteFixtureLeague(
+  fixtureId: string,
+  info: (CompetitionInfo & { dateSeconds?: number }) | null | undefined,
+): void {
   if (!fixtureId || fixtureLeague.has(fixtureId)) return
-  const league = leagueKeyOf(competition)
+  if (info) noteFixtureCompetition({ fixtureId, ...info })
+  const resolved = resolveFixtureLeague(fixtureId, info ?? undefined)
+  if (!resolved) return // unknown or ambiguous name: its alerts don't count
+  const league = resolved.key
   fixtureLeague.set(fixtureId, league)
+  if (!leagueLabels.has(league)) leagueLabels.set(league, resolved.label)
   const waiting = unresolved.get(fixtureId)
   if (!waiting) return
   unresolved.delete(fixtureId)
@@ -151,8 +170,7 @@ export function observeAlerts(
       if (contrib.has(key)) setContribution(key, null)
       dropUnresolved(alert.fixtureId, key)
     } else {
-      const known = fixtureLeague.get(alert.fixtureId)
-      const league = known ?? (alert.odds?.league ? leagueKeyOf(alert.odds.league) : null)
+      const league = fixtureLeague.get(alert.fixtureId)
       if (!league) {
         entry.resolved = false
         if (contrib.has(key)) setContribution(key, null)
@@ -183,7 +201,8 @@ export function leagueStatsFor(
   league: string | null | undefined,
   excludeKey?: string,
 ): LeagueStats {
-  const bucket = bucketKey(market, leagueKeyOf(league))
+  if (!league) return { green: 0, settled: 0 }
+  const bucket = bucketKey(market, league)
   const row = buckets.get(bucket) ?? { green: 0, settled: 0 }
   let { green, settled } = row
   const own = excludeKey ? contrib.get(excludeKey) : undefined
@@ -194,16 +213,17 @@ export function leagueStatsFor(
   return { green, settled }
 }
 
-/** `📊 Liga (golos): 4/6 · 67 %`, or null below the minimum sample. */
+/** `📊 Inglaterra · Premier League (cantos): 12/18 · 67 %`, or null below the minimum sample. */
 export function formatLeagueLine(
   market: Market,
   stats: LeagueStats,
   min = telegramLeagueStatsMin(),
+  label?: string | null,
 ): string | null {
   if (stats.settled < Math.max(1, min)) return null
   const pct = Math.round((100 * stats.green) / stats.settled)
   const noun = marketCopy(parseMarket(market)).nounPlural
-  return `📊 Liga (${noun}): ${stats.green}/${stats.settled} · ${pct} %`
+  return `📊 ${label?.trim() || 'Liga'} (${noun}): ${stats.green}/${stats.settled} · ${pct} %`
 }
 
 /** Line for an alert about to be sent (null = no line). Never throws. */
@@ -211,19 +231,26 @@ export function leagueLineForAlert(args: {
   market: Market
   fixtureId: string
   competition: string | null | undefined
+  category?: string | null
+  competitionId?: string | null
   half?: CornerHalf | null
   alertId: string
 }): string | null {
   if (!telegramLeagueStatsEnabled() || !primed) return null
   try {
-    noteFixtureLeague(args.fixtureId, args.competition)
-    const league = fixtureLeague.get(args.fixtureId) ?? leagueKeyOf(args.competition)
+    noteFixtureLeague(args.fixtureId, {
+      competition: args.competition,
+      category: args.category,
+      competitionId: args.competitionId,
+    })
+    const league = fixtureLeague.get(args.fixtureId)
+    if (!league) return null
     const stats = leagueStatsFor(
       args.market,
       league,
       leagueContribKey(args.market, args.half, args.alertId),
     )
-    return formatLeagueLine(args.market, stats)
+    return formatLeagueLine(args.market, stats, undefined, leagueLabels.get(league))
   } catch (err) {
     console.warn('[league] line', err instanceof Error ? err.message : err)
     return null
@@ -233,6 +260,8 @@ export function leagueLineForAlert(args: {
 export type LeagueStatsLoaders = {
   matchesDir: string
   loadAlerts: (market: Market, half: CornerHalf) => LoggedAlert[]
+  /** Competition ids of stored matches missing them (one request per day). */
+  fetchDay?: Parameters<typeof backfillCompetitionIds>[0]
 }
 
 /**
@@ -243,24 +272,16 @@ export function primeLeagueStats(loaders: LeagueStatsLoaders): Promise<void> {
   if (priming) return priming
   priming = (async () => {
     const started = Date.now()
-    let files: string[] = []
-    try {
-      files = (await readdir(loaders.matchesDir)).filter((f) => f.endsWith('.json'))
-    } catch {
-      files = []
-    }
-    for (const file of files) {
-      const id = file.slice(0, -5)
-      if (fixtureLeague.has(id)) continue
+    await loadStoredCompetitions(loaders.matchesDir)
+    if (loaders.fetchDay) {
       try {
-        const raw = JSON.parse(await readFile(join(loaders.matchesDir, file), 'utf8')) as {
-          fixture?: { id?: string; competition?: string }
-        }
-        noteFixtureLeague(raw.fixture?.id ?? id, raw.fixture?.competition)
-      } catch {
-        // partial/corrupt snapshot: league stays unknown for that fixture
+        const bf = await backfillCompetitionIds(loaders.fetchDay)
+        console.log(`[league] ids de competição: ${JSON.stringify(bf)}`)
+      } catch (err) {
+        console.warn('[league] backfill falhou', err instanceof Error ? err.message : err)
       }
     }
+    for (const f of knownCompetitionFixtures()) noteFixtureLeague(f.fixtureId, null)
     for (const market of ['goals', 'corners'] as const) {
       for (const half of ['ht', 'ft'] as const) {
         observeAlerts(loaders.loadAlerts(market, half), market, half)
@@ -293,15 +314,17 @@ export function summarizeLeagueStats(min = 3): { market: Market; leagues: number
   return [...out].map(([market, leagues]) => ({ market, leagues }))
 }
 
-export function leagueStatsSnapshot(): { market: Market; league: string; green: number; settled: number }[] {
+export function leagueStatsSnapshot(): { market: Market; league: string; label: string; green: number; settled: number }[] {
   return [...buckets].map(([bucket, row]) => {
     const [market, ...rest] = bucket.split('|')
-    return { market: parseMarket(market), league: rest.join('|'), ...row }
+    const league = rest.join('|')
+    return { market: parseMarket(market), league, label: leagueLabels.get(league) ?? league, ...row }
   })
 }
 
 export function resetLeagueStatsForTests(opts: { primed?: boolean } = {}): void {
   fixtureLeague.clear()
+  leagueLabels.clear()
   contrib.clear()
   buckets.clear()
   unresolved.clear()

@@ -33,8 +33,8 @@ type RawMatch = {
 }
 
 type RawCompetitionBlock = {
-  competition: { name: string }
-  category: { name: string }
+  competition: { name: string; id?: string }
+  category: { name: string; id?: string }
   matches: RawMatch[]
 }
 
@@ -67,6 +67,7 @@ export function flattenFixtures(data: FixturesResponse): Fixture[] {
         team2Id: match.team2.id,
         competition: block.competition.name,
         category: block.category.name,
+        competitionId: block.competition.id != null ? String(block.competition.id) : null,
         status: match.status,
         state: match.state,
         dateSeconds: match.date?.seconds ?? 0,
