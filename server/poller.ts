@@ -98,7 +98,9 @@ import {
   overlayForFeedAlert,
   qualityOverlayEnabled,
 } from './qualityOverlay.ts'
-import type { LoggedAlert, PollerStatus } from './types.ts'
+import type { AlertSendSnapshot, LoggedAlert, PollerStatus } from './types.ts'
+import { noteTelegramOdds, trackTelegramOddsPending } from './telegramEdits.ts'
+import { marketTotalAt, scheduleVoidCheck } from './telegramVoid.ts'
 
 const status: PollerStatus = {
   enabled: POLLER_ENABLED,
@@ -421,14 +423,40 @@ function recordAlertLatency(fixture: Fixture, alert: FeedAlert): void {
   )
 }
 
+/** Feed state the alert was sent from: what the VOID re-check compares against. */
+export type SendContext = {
+  payload: Pick<MomentumPayload, 'events'>
+  clock: { min: number; period: number } | null | undefined
+}
+
+export function buildSendSnapshot(
+  market: Market,
+  alert: FeedAlert,
+  ctx: SendContext,
+  sentAt = new Date().toISOString(),
+): AlertSendSnapshot {
+  const tally = market === 'corners' ? alert.cornersTally : alert.goalsTally
+  const totalAtAlert = tally
+    ? tally.home + tally.away
+    : marketTotalAt(ctx.payload, market, { min: alert.min, period: alert.period })
+  return {
+    sentAt,
+    clockMin: ctx.clock?.min ?? null,
+    clockPeriod: ctx.clock?.period ?? null,
+    totalAtAlert,
+  }
+}
+
 async function noteTelegramDelivered(
   fixture: Fixture,
   market: Market,
   alert: FeedAlert,
   alertKey: string,
   telegramResult: TelegramSendResult,
+  ctx: SendContext,
 ): Promise<void> {
   recordAlertLatency(fixture, alert)
+  const snapshot = buildSendSnapshot(market, alert, ctx)
   if (telegramResult.messageId != null) {
     await withStoreLock(() => {
       markAlertTelegramMessage(
@@ -436,9 +464,29 @@ async function noteTelegramDelivered(
         telegramResult.messageId!,
         market,
         alert.cornerHalf,
+        { sendSnapshot: snapshot },
       )
     })
+    // Odds are attached after the send; their line is edited in later.
+    trackTelegramOddsPending(alertKey, Date.parse(snapshot.sentAt))
   }
+  // Annotation only: the check never changes what was sent or the gates.
+  scheduleVoidCheck({
+    alertKey,
+    market,
+    fixtureId: fixture.id,
+    alertId: alert.id,
+    snapshot,
+  })
+}
+
+/** Snapshot for a retry delivered after the tick: the poller's latest stored feed. */
+function latestSendContext(fixture: Fixture, market: Market): SendContext {
+  const stored = loadMatch(fixture.id)
+  if (!stored) return { payload: { events: [] }, clock: null }
+  const settings = currentSettings(market)
+  const points = normalizeTimeline(stored.payload, settings.sustainedThreshold)
+  return { payload: stored.payload, clock: points.at(-1) ?? null }
 }
 
 /**
@@ -476,7 +524,14 @@ async function completeLateTelegramDelivery(
   alertKey: string,
   telegramResult: TelegramSendResult,
 ): Promise<void> {
-  await noteTelegramDelivered(fixture, market, alert, alertKey, telegramResult)
+  await noteTelegramDelivered(
+    fixture,
+    market,
+    alert,
+    alertKey,
+    telegramResult,
+    latestSendContext(fixture, market),
+  )
   const loggedId = loggedAlertId(fixture.id, alert.id)
   await withStoreLock(() => {
     markAlertPushed(loggedId, market, alert.cornerHalf)
@@ -487,6 +542,7 @@ async function completeLateTelegramDelivery(
   await withStoreLock(() => {
     const logged = loadAlerts(market, alert.cornerHalf).find((a) => a.id === loggedId)
     const enriched = logged?.odds ? { ...alert, odds: logged.odds } : alert
+    noteTelegramOdds(market, fixture.id, [enriched])
     const odd = resolvedOddFromAlert(enriched)
     if (odd && !tipAlreadyOpen(fixture.id, alert.id, market)) {
       createTipFromAlert({ fixture, alert: enriched, odd })
@@ -498,6 +554,7 @@ async function dispatchClaimedAlerts(
   fixture: Fixture,
   market: Market,
   claimed: FeedAlert[],
+  ctx: SendContext,
 ): Promise<{ sent: number; notified: FeedAlert[] }> {
   let sent = 0
   const notified: FeedAlert[] = []
@@ -524,7 +581,7 @@ async function dispatchClaimedAlerts(
     const telegramResult: TelegramSendResult = await sendTelegram(telegramPayload)
     if (telegramResult.sent > 0) {
       notifiedOk = true
-      await noteTelegramDelivered(fixture, market, alert, alertKey, telegramResult)
+      await noteTelegramDelivered(fixture, market, alert, alertKey, telegramResult, ctx)
     } else if (!telegramResult.skipped) {
       // Transient failures retry in the background (bounded, lead-gated).
       const retrying = scheduleTelegramRetry(
@@ -590,6 +647,8 @@ async function attachOddsAndEnrich(args: {
   if (args.ingest) {
     ingestFeedAlerts(withOdds, args.settings, false, args.market)
   }
+  // Delivered alerts get their odds line edited in (never on the send path).
+  noteTelegramOdds(args.market, args.fixture.id, withOdds)
   if (!args.tipAlerts.length) return
   const byId = new Map(withOdds.map((alert) => [alert.id, alert]))
   for (const alert of args.tipAlerts) {
@@ -724,7 +783,10 @@ export async function processEvaluatedAlerts(
     )
   })
 
-  const { sent, notified } = await dispatchClaimedAlerts(fixture, market, claimed)
+  const { sent, notified } = await dispatchClaimedAlerts(fixture, market, claimed, {
+    payload,
+    clock: points.at(-1),
+  })
   scheduleTelegramOutcomeFlush()
   if (fresh.length) {
     scheduleOddsAttach(() =>
