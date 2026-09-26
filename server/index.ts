@@ -24,7 +24,7 @@ import {
   seedDemos,
   setFeedback,
 } from './learn.ts'
-import { getPollerStatus, startPoller } from './poller.ts'
+import { EVALUATED_MARKETS, getPollerStatus, startPoller } from './poller.ts'
 import { getTelegramStatus, sendTelegramAlert } from './telegram.ts'
 import { scheduleTelegramOutcomeFlush } from './telegramOutcomes.ts'
 import {
@@ -253,10 +253,22 @@ app.post('/api/tips/overlay/apply', (req, res) => {
   }
 })
 
+/**
+ * `market` here is the UI view preference (Goals|Cantos toggle) and the
+ * default for API calls that omit `?market=`. It no longer selects what the
+ * poller evaluates: both markets run every tick (`evaluatedMarkets`).
+ * PUT/POST stay accepted for older UIs and only store the preference.
+ */
+const MARKET_VIEW_NOTE =
+  'Preferência de vista apenas. O servidor avalia, alerta, liquida e aprende Golos e Cantos em todos os ticks.'
+
 app.get('/api/learn/market', (_req, res) => {
   const market = loadActiveMarket()
   res.json({
     market,
+    viewOnly: true,
+    evaluatedMarkets: EVALUATED_MARKETS,
+    note: MARKET_VIEW_NOTE,
     settings: currentSettings(market),
     locked: DEFINITIONS_LOCKED,
     halves: {
@@ -272,21 +284,23 @@ app.get('/api/learn/market', (_req, res) => {
   })
 })
 
-app.put('/api/learn/market', (req, res) => {
+function saveMarketView(req: express.Request, res: express.Response): void {
   const market = resolveMarket(
     (req.body as { market?: unknown } | undefined)?.market,
   )
   saveActiveMarket(market)
-  res.json({ market, settings: currentSettings(market) })
-})
+  res.json({
+    market,
+    settings: currentSettings(market),
+    viewOnly: true,
+    evaluatedMarkets: EVALUATED_MARKETS,
+    note: MARKET_VIEW_NOTE,
+  })
+}
 
-app.post('/api/learn/market', (req, res) => {
-  const market = resolveMarket(
-    (req.body as { market?: unknown } | undefined)?.market,
-  )
-  saveActiveMarket(market)
-  res.json({ market, settings: currentSettings(market) })
-})
+app.put('/api/learn/market', saveMarketView)
+
+app.post('/api/learn/market', saveMarketView)
 
 app.get('/api/learn/summary', (req, res) => {
   const market = marketFromReq(req)

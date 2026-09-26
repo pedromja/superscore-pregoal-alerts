@@ -54,7 +54,6 @@ import {
 } from './ss.ts'
 import {
   isPrimed,
-  loadActiveMarket,
   loadSent,
   loadSubscriptions,
   markAlertPushed,
@@ -122,9 +121,19 @@ type ProcessFixtureFn = (fixture: Fixture, signal?: AbortSignal) => Promise<numb
 type FetchFixturesFn = (signal?: AbortSignal) => Promise<Fixture[]>
 type WarmupFn = () => Promise<unknown>
 
+type FetchMomentumFn = typeof fetchMomentumServer
+
+/**
+ * Both markets are evaluated, alerted, settled and learned on every tick, each
+ * with its own locked definitions, windows, learning stores and dedupe keys.
+ * `data/market.json` (UI Goals|Cantos toggle) is a view preference only.
+ */
+export const EVALUATED_MARKETS: readonly Market[] = ['goals', 'corners']
+
 let processFixtureFn: ProcessFixtureFn = processFixture
 let fetchFixturesFn: FetchFixturesFn = defaultFetchFixtures
 let warmupFn: WarmupFn = warmupSokkerProBoard
+let fetchMomentumFn: FetchMomentumFn = fetchMomentumServer
 
 async function defaultFetchFixtures(signal?: AbortSignal): Promise<Fixture[]> {
   return fetchFixturesServer(lisbonDate(), POLLER_REGION, signal)
@@ -167,10 +176,12 @@ export function setPollerDepsForTests(deps: {
   processFixture?: ProcessFixtureFn | null
   fetchFixtures?: FetchFixturesFn | null
   warmup?: WarmupFn | null
+  fetchMomentum?: FetchMomentumFn | null
 } | null): void {
   processFixtureFn = deps?.processFixture ?? processFixture
   fetchFixturesFn = deps?.fetchFixtures ?? defaultFetchFixtures
   warmupFn = deps?.warmup ?? warmupSokkerProBoard
+  fetchMomentumFn = deps?.fetchMomentum ?? fetchMomentumServer
 }
 
 export function setPollerLimitsForTests(
@@ -211,6 +222,7 @@ export function resetPollerRuntimeForTests(): void {
   processFixtureFn = processFixture
   fetchFixturesFn = defaultFetchFixtures
   warmupFn = warmupSokkerProBoard
+  fetchMomentumFn = fetchMomentumServer
   status.lastTickAt = null
   status.lastError = null
   status.liveWatched = 0
@@ -251,7 +263,7 @@ export function lastErrorAfterFixtureFailures(
   return `${serious.length}/${targetCount} jogos: ${shown.message}`
 }
 
-function halvesBundle(market: ReturnType<typeof loadActiveMarket>) {
+function halvesBundle(market: Market) {
   return {
     ht: currentSettings(market, 'ht'),
     ft: currentSettings(market, 'ft'),
@@ -274,7 +286,7 @@ function scheduleOddsAttach(work: () => Promise<void>): void {
 
 function claimFreshAlerts(
   fixture: Fixture,
-  market: ReturnType<typeof loadActiveMarket>,
+  market: Market,
   settings: ReturnType<typeof currentSettings>,
   byHalf: CornersByHalf | undefined,
   fresh: FeedAlert[],
@@ -326,7 +338,7 @@ function recordAlertLatency(fixture: Fixture, alert: FeedAlert): void {
 
 async function dispatchClaimedAlerts(
   fixture: Fixture,
-  market: ReturnType<typeof loadActiveMarket>,
+  market: Market,
   claimed: FeedAlert[],
 ): Promise<{ sent: number; notified: FeedAlert[] }> {
   let sent = 0
@@ -562,16 +574,8 @@ export async function processEvaluatedAlerts(
   return sent
 }
 
-async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<number> {
-  const payload = await fetchMomentumServer(fixture.id, signal)
-  if (signal?.aborted) {
-    throw signal.reason instanceof Error ? signal.reason : new Error('abortado')
-  }
-  lastMomentumOkAt.set(fixture.id, Date.now())
-  jsonBackoff.noteSuccess(fixture.id)
-  const finished = fixture.state === 2 || fixture.status >= 100
-
-  const market = loadActiveMarket()
+/** One market's evaluate on a payload — unchanged rules/windows per market. */
+function evaluateMarket(payload: MomentumPayload, market: Market) {
   const settings = currentSettings(market)
   const byHalf = halvesBundle(market)
   const { points, alerts: rawAlerts } = evaluateAlerts(
@@ -585,46 +589,69 @@ async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<n
   )
   const events = extractMarketEvents(payload, points, market)
   const eventKeys = new Set(events.map((g) => `${g.period}-${g.min}-${g.index}`))
-  const primedId = primedKey(market, fixture.id)
+  return { market, settings, byHalf, points, alerts, events, eventKeys }
+}
 
-  const first = await withStoreLock(() => {
+async function processFixture(fixture: Fixture, signal?: AbortSignal): Promise<number> {
+  const payload = await fetchMomentumFn(fixture.id, signal)
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error ? signal.reason : new Error('abortado')
+  }
+  lastMomentumOkAt.set(fixture.id, Date.now())
+  jsonBackoff.noteSuccess(fixture.id)
+  const finished = fixture.state === 2 || fixture.status >= 100
+
+  const evaluated = EVALUATED_MARKETS.map((market) => evaluateMarket(payload, market))
+
+  // One snapshot per fixture; each market primes separately (primedKey is
+  // market-unique), so a market's first sight of a live match never pushes.
+  const firsts = await withStoreLock(() => {
     saveMatch({
       fixture,
       payload,
       finished,
       updatedAt: new Date().toISOString(),
     })
-    const isFirst = !isPrimed(primedId)
-    if (isFirst) primeFixture(primedId)
-    return isFirst
+    return evaluated.map(({ market }) => {
+      const primedId = primedKey(market, fixture.id)
+      const isFirst = !isPrimed(primedId)
+      if (isFirst) primeFixture(primedId)
+      return isFirst
+    })
   })
 
-  const fresh: FeedAlert[] = alerts.map((alert) =>
-    withMatchTallies(
-      {
-        ...alert,
-        fixtureId: fixture.id,
-        matchLabel: `${fixture.team1} vs ${fixture.team2}`,
-        firedAt: new Date().toISOString(),
-        coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+  // Markets run side by side: claims serialise on the store lock, Telegram
+  // sends go out concurrently so one market never delays the other.
+  const sent = await Promise.all(
+    evaluated.map(({ market, settings, byHalf, points, alerts, events, eventKeys }, i) => {
+      const fresh: FeedAlert[] = alerts.map((alert) =>
+        withMatchTallies(
+          {
+            ...alert,
+            fixtureId: fixture.id,
+            matchLabel: `${fixture.team1} vs ${fixture.team2}`,
+            firedAt: new Date().toISOString(),
+            coincident: eventKeys.has(`${alert.period}-${alert.min}-${alert.index}`),
+            market,
+          },
+          payload,
+        ),
+      )
+      return processEvaluatedAlerts({
+        fixture,
         market,
-      },
-      payload,
-    ),
+        settings,
+        byHalf,
+        fresh,
+        first: firsts[i]!,
+        finished,
+        payload,
+        events,
+        points,
+      })
+    }),
   )
-
-  return processEvaluatedAlerts({
-    fixture,
-    market,
-    settings,
-    byHalf,
-    fresh,
-    first,
-    finished,
-    payload,
-    events,
-    points,
-  })
+  return sent.reduce((sum, n) => sum + n, 0)
 }
 
 function clearWatchdog(): void {
@@ -716,7 +743,8 @@ export async function tick(): Promise<void> {
     jsonBackoff.prune(new Set(fixtures.map((f) => f.id)))
     const { inWindow, fill } = selectLiveTargets({
       live,
-      market: loadActiveMarket(),
+      // Corners are always evaluated now, so their pre-window boost always applies.
+      market: EVALUATED_MARKETS.includes('corners') ? 'corners' : 'goals',
       limit: liveLimit,
       now,
       tickIndex,

@@ -194,6 +194,7 @@ export async function seedLearnDemos(
   if (!res.ok) throw new Error('Falha a importar amostras')
 }
 
+/** Stores the view preference only; the server evaluates both markets regardless. */
 export async function putActiveMarket(market: Market): Promise<void> {
   await fetch('/api/learn/market', {
     method: 'PUT',

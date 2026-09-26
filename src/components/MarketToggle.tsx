@@ -12,7 +12,8 @@ export function MarketToggle({
     <div
       className="inline-flex rounded-full border border-line bg-pitch p-0.5"
       role="tablist"
-      aria-label="Mercado"
+      aria-label="Mercado (vista)"
+      title="Filtra o que a app mostra. O servidor avalia sempre Golos e Cantos."
     >
       {MARKETS.map((id) => {
         const active = market === id
