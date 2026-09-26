@@ -310,7 +310,8 @@ export function computeMetrics(
   const market = parseMarket(settings.market)
   const half = parseCornerHalf(settings.cornerHalf)
   const matches = listMatches()
-  const alerts = loadAlerts(market, half).filter((a) => !a.coincident)
+  // VOID alerts (line already beaten at send) stay stored for audit only.
+  const alerts = loadAlerts(market, half).filter((a) => !a.coincident && !a.void)
   const goals = loadGoals(market, half)
   const nMatches = Math.max(1, new Set(matches.map((m) => m.fixture.id)).size)
   const horizonShort = settings.evaluationWindow || HORIZON_SHORT

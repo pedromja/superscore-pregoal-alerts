@@ -32,7 +32,7 @@ function TipRow({ tip }: { tip: Tip }) {
           <p className="mt-0.5 text-xs text-emerald-100/50">{tip.league}</p>
         </div>
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>
-          {statusLabel(tip.status)}
+          {tip.void ? `VOID · ${statusLabel(tip.status)}` : statusLabel(tip.status)}
         </span>
       </div>
       <p className="mt-2 font-mono text-xs text-lime">

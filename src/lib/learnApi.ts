@@ -74,6 +74,9 @@ export type LoggedAlert = {
   coincident: boolean
   ts: string
   overlay?: AlertOverlay
+  /** Line already beaten when the Telegram alert went out: excluded from stats. */
+  void?: boolean
+  voidReason?: string
 }
 
 export type LearnPayload = {
