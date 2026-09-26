@@ -105,7 +105,7 @@ import {
   qualityOverlayEnabled,
 } from './qualityOverlay.ts'
 import type { AlertSendSnapshot, LoggedAlert, PollerStatus } from './types.ts'
-import { noteTelegramOdds, trackTelegramOddsPending } from './telegramEdits.ts'
+import { noteTelegramOdds, runSpacedEdits, stripLegacyOddsLines, trackTelegramOddsPending } from './telegramEdits.ts'
 import { marketTotalAt, scheduleVoidCheck } from './telegramVoid.ts'
 
 const status: PollerStatus = {
@@ -1100,6 +1100,12 @@ async function bootBetSettlement(): Promise<void> {
   const byKey = alertsByKeys(editKeys)
   const edits = await runResettleEdits(editKeys, (key) => byKey.get(key) ?? null)
   console.log(`[bet] edições de correção: ${JSON.stringify(edits)}`)
+  // Odds lines from the old picker (wrong market/period/line) come off the messages.
+  const legacyOdds = await withStoreLock(() => stripLegacyOddsLines())
+  if (legacyOdds.length) {
+    const oddsEdits = await runSpacedEdits(legacyOdds, 'odds-legacy')
+    console.log(`[odds] linhas antigas removidas de ${legacyOdds.length} mensagens: ${JSON.stringify(oddsEdits)}`)
+  }
   try {
     writeFileSync(
       join(DATA_DIR, 'bet_resettle_report.json'),

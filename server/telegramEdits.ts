@@ -220,11 +220,46 @@ export function noteTelegramOdds(
     const line = formatTelegramOddsLine(alert.odds, market)
     if (!line) continue // try again on the next attach until the window closes
     awaitingOdds.delete(key)
-    upsertTelegramMessage(key, { oddsLine: line, oddsAt: new Date(now).toISOString() })
+    upsertTelegramMessage(key, { oddsLine: line, oddsAt: new Date(now).toISOString(), oddsRule: ODDS_LINE_RULE })
     void requestTelegramAlertEdit(key, 'odds')
     queued.push(key)
   }
   return queued
+}
+
+/** Odds lines captured with the strict picker (alert's period + exact +0.5 line). */
+export const ODDS_LINE_RULE = 'strict-v1'
+
+/**
+ * Odds lines captured by the old picker (team totals, other periods, alt
+ * lines — e.g. the Penarol "Over 3.5 @10.50") are dropped from records sent in
+ * the window, keeping them as `legacyOddsLine`. Returns the keys to re-edit.
+ */
+export function stripLegacyOddsLines(opts: { nowMs?: number; windowMs?: number } = {}): string[] {
+  const nowMs = opts.nowMs ?? Date.now()
+  const windowMs = opts.windowMs ?? 48 * 60 * 60_000
+  const keys: string[] = []
+  for (const [key, rec] of Object.entries(loadTelegramMessages())) {
+    if (!rec?.oddsLine || rec.oddsRule === ODDS_LINE_RULE || !telegramRecordEditable(rec)) continue
+    const at = Date.parse(rec.sentAt)
+    if (!Number.isFinite(at) || nowMs - at > windowMs) continue
+    upsertTelegramMessage(key, { oddsLine: null, legacyOddsLine: rec.oddsLine })
+    keys.push(key)
+  }
+  return keys
+}
+
+/** Re-edit these messages one at a time (~1/s); edits only, never new messages. */
+export async function runSpacedEdits(keys: string[], why: string, delayMs = 1_100): Promise<{ edited: number; unchanged: number; failed: number }> {
+  const out = { edited: 0, unchanged: 0, failed: 0 }
+  for (const key of keys) {
+    const res = await requestTelegramAlertEdit(key, why)
+    if (res.kind === 'unchanged') out.unchanged += 1
+    else if (alertEditSucceeded(res)) out.edited += 1
+    else out.failed += 1
+    if (res.kind !== 'unchanged') await new Promise((r) => setTimeout(r, delayMs))
+  }
+  return out
 }
 
 export async function waitForTelegramEditsForTests(): Promise<void> {
