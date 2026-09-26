@@ -50,6 +50,21 @@ import {
   telegramOutcomeAlreadySent,
   upsertAlerts,
 } from '../server/store.ts'
+import type { BetOutcome } from '../src/lib/betOutcome.ts'
+
+function testBetOutcome(status: 'green' | 'red'): BetOutcome {
+  return {
+    status,
+    rule: 'half-end-v1',
+    baseline: 0,
+    total: status === 'green' ? 1 : 0,
+    targetPeriod: 1,
+    event: status === 'green' ? { min: 40, period: 1, side: 'home' } : null,
+    endMin: 47,
+    reason: status === 'green' ? 'event' : 'period-over',
+    decidedAt: new Date().toISOString(),
+  }
+}
 import type { LoggedAlert } from '../server/types.ts'
 
 // Base delivery pipeline with sample alerts the quality overlay would filter;
@@ -472,6 +487,15 @@ try {
       telegramMessageId: 77,
       telegramOutcomeSentAt: null,
       ...extra,
+      // GREEN/RED shown on Telegram = bet outcome (end of the half); mirror the sample's label.
+      betOutcome:
+        'betOutcome' in extra
+          ? extra.betOutcome
+          : !('hit5' in extra)
+            ? testBetOutcome('green')
+            : extra.hit5 == null
+              ? undefined
+              : testBetOutcome(extra.hit5 ? 'green' : 'red'),
     }
   }
 

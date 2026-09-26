@@ -1,10 +1,6 @@
-import {
-  HORIZON_LONG_CAP,
-  horizonOptionsForHalf,
-  longDeadlineMin,
-  periodEndMin,
-} from '../src/lib/horizons.ts'
-import { parseMarket } from '../src/lib/market.ts'
+import { HORIZON_LONG_CAP } from '../src/lib/horizons.ts'
+import { MARKET_EVENT_TYPE, parseMarket } from '../src/lib/market.ts'
+import { applyBetToTip, decideBetForTip } from './betDecide.ts'
 import {
   quoteFromIngestBody,
   ROBOBET_MATCH_WINDOW_MS,
@@ -22,7 +18,6 @@ import {
   formatOddPt,
   halfOfAlert,
   TEAM_MATCH_MIN,
-  tipPnl,
   type Tip,
 } from '../src/lib/tips.ts'
 import {
@@ -47,8 +42,10 @@ import type {
   Fixture,
   GoalEvent,
   Market,
+  MomentumPayload,
+  RawMomentumEvent,
 } from '../src/lib/types.ts'
-import { cornerHalfOf } from '../src/lib/windows.ts'
+import type { StoredMatch } from './types.ts'
 import { loggedAlertId, tipIdFor } from './alertKeys.ts'
 import { loadSuperbetEvent, resolveSuperScoreMaisUm, snapshotsFromEvent } from './odds.ts'
 import {
@@ -153,7 +150,12 @@ export async function resolveTipOdd(args: {
     }
   }
   const rb = matchRobobetQuote(args.fixture, args.market)
-  if (rb?.odd) {
+  if (
+    rb?.odd &&
+    (rb.half == null || rb.half === args.half) &&
+    rb.linha != null &&
+    Math.abs(rb.linha - (args.currentTotal + 0.5)) < 1e-6
+  ) {
     return {
       odd: rb.odd,
       line: rb.linha,
@@ -184,8 +186,11 @@ async function attachOddsToAlertsImpl(args: {
         ? (alert.cornersTally?.home ?? 0) + (alert.cornersTally?.away ?? 0)
         : (alert.goalsTally?.home ?? 0) + (alert.goalsTally?.away ?? 0)
     const snaps = snapshotsFromEvent(event, market, half, currentTotal)
+    // RoboBet only for the alert's period and the exact "+0.5" line.
     const robobet =
-      rb?.odd && rb.odd > 1 ? { odd: rb.odd, line: rb.linha } : null
+      rb?.odd && rb.odd > 1 && (rb.half == null || rb.half === half) && rb.linha != null && Math.abs(rb.linha - (currentTotal + 0.5)) < 1e-6
+        ? { odd: rb.odd, line: rb.linha }
+        : null
     const spro = pickFromSokkerProMatch(sproBundle, market, half, currentTotal)
     const obs: OddsObservation = composeOddsObservation({
       partial: {
@@ -430,26 +435,11 @@ export function tipNotificationCopy(tip: Tip): { title: string; body: string } {
   return { title, body }
 }
 
-function eventAfterTip(
-  event: GoalEvent,
-  tip: Tip,
-  deadlineMin: number,
-  sameWindowOnly: boolean,
-): boolean {
-  if (event.period !== tip.period) {
-    if (event.period < tip.period) return false
-    if (sameWindowOnly) return false
-  } else if (event.min <= tip.minute) {
-    return false
-  }
-  if (event.min > deadlineMin) return false
-  if (sameWindowOnly) {
-    const eventHalf = cornerHalfOf(event.min, event.period)
-    if (eventHalf !== tip.half) return false
-  }
-  return true
-}
-
+/**
+ * Open tips settle by the bet rule (src/lib/betOutcome.ts): one more event of
+ * the market (both teams) by the end of the half incl. stoppage ⇒ won; lost
+ * only once the half is confirmed over. `payload` = raw momentum (preferred).
+ */
 export function settleTipsForMatch(args: {
   fixture: Fixture
   events: GoalEvent[]
@@ -458,59 +448,32 @@ export function settleTipsForMatch(args: {
   finished: boolean
   clockMin?: number
   clockPeriod?: number
+  payload?: MomentumPayload
 }): Tip[] {
   const tips = loadTips()
+  const type = MARKET_EVENT_TYPE[parseMarket(args.market)]
+  const events: RawMomentumEvent[] =
+    args.payload?.events ??
+    args.events.map((e) => ({ type, side: e.side === 'away' ? 2 : 1, min: e.min, period: e.period }))
+  const match: StoredMatch = {
+    fixture: args.fixture,
+    payload: {
+      timeline: args.points.map((p) => ({ min: p.min, period: p.period, value: { value: 0 } })),
+      events,
+    } as MomentumPayload,
+    finished: args.finished,
+    updatedAt: new Date().toISOString(),
+  }
   let changed = false
-  const now = new Date().toISOString()
+  const nowIso = new Date().toISOString()
   const updated = tips.map((tip) => {
     if (tip.status !== 'open') return tip
     if (tip.fixtureId !== args.fixture.id) return tip
     if (parseMarket(tip.market) !== parseMarket(args.market)) return tip
-    const horizon = horizonOptionsForHalf(tip.market === 'corners' ? tip.half : null)
-    const deadline = longDeadlineMin(
-      tip.minute,
-      tip.period,
-      args.points,
-      horizon.deadlineCap,
-    )
-    const hit = args.events.some((event) =>
-      eventAfterTip(event, tip, deadline, Boolean(horizon.sameWindowOnly)),
-    )
-    if (hit) {
-      changed = true
-      return {
-        ...tip,
-        status: 'won' as const,
-        pnl: tipPnl(tip.odd, 'won'),
-        settledAt: now,
-        longDeadline: deadline,
-      }
-    }
-    const clockPast =
-      args.clockMin !== undefined &&
-      args.clockPeriod !== undefined &&
-      (args.clockPeriod > tip.period ||
-        (args.clockPeriod === tip.period && args.clockMin > deadline))
-    const periodOver =
-      args.finished ||
-      (args.clockPeriod !== undefined &&
-        args.clockPeriod > tip.period &&
-        periodEndMin(args.points, tip.period) <= deadline)
-    if (clockPast || periodOver || args.finished) {
-      changed = true
-      return {
-        ...tip,
-        status: 'lost' as const,
-        pnl: tipPnl(tip.odd, 'lost'),
-        settledAt: now,
-        longDeadline: deadline,
-      }
-    }
-    if (tip.longDeadline !== deadline) {
-      changed = true
-      return { ...tip, longDeadline: deadline }
-    }
-    return tip
+    const next = applyBetToTip(tip, decideBetForTip(tip, match), nowIso)
+    if (!next) return tip
+    changed = true
+    return next
   })
   if (changed) saveTips(updated)
   return updated

@@ -80,7 +80,7 @@ function ssObservation(alert: FeedAlert, fixture: Fixture): OddsObservation {
     },
     limit: {
       kind: 'limit',
-      marketName: 'Over/Under 0.5',
+      marketName: 'Total goluri',
       line: 0.5,
       prices: [{ name: 'Over', price: 1.85, line: 0.5, side: 'over' }],
     },

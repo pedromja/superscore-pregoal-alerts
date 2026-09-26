@@ -106,6 +106,6 @@ export function snapshotsFromEvent(
 ): { limit: ReturnType<typeof pickLimitSnapshot>; asian: ReturnType<typeof pickAsianSnapshot> } {
   return {
     limit: pickLimitSnapshot(event, market, half, currentTotal),
-    asian: pickAsianSnapshot(event, market, half),
+    asian: pickAsianSnapshot(event, market, half, currentTotal),
   }
 }

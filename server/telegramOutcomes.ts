@@ -1,3 +1,4 @@
+import { isBetDecided } from '../src/lib/betOutcome.ts'
 import type { CornerHalf, Market } from '../src/lib/types.ts'
 import { loggedAlertKey } from './alertKeys.ts'
 import { telegramEnabled } from './config.ts'
@@ -24,20 +25,26 @@ import {
 import type { LoggedAlert } from './types.ts'
 
 const pending = new Set<string>()
+/** Live GREEN/RED only for alerts sent within this window. */
+const OUTCOME_NOTICE_MAX_AGE_MS = 12 * 60 * 60_000
 let flushScheduled = false
 let flushTail = Promise.resolve()
 
-export function alertOutcomeSettled(alert: Pick<LoggedAlert, 'hit5' | 'hitLong'>): boolean {
-  return alert.hit5 !== null || alert.hitLong !== null
+/**
+ * The Telegram GREEN/RED follows the bet outcome (end of the half, see
+ * src/lib/betOutcome.ts), not the learning labels (hit5/hitLong).
+ */
+export function alertOutcomeSettled(alert: Pick<LoggedAlert, 'betOutcome'>): boolean {
+  return isBetDecided(alert.betOutcome)
 }
 
 export function alertOutcomeNewlySettled(
-  prev: Pick<LoggedAlert, 'hit5' | 'hitLong'> | undefined,
-  next: Pick<LoggedAlert, 'hit5' | 'hitLong'>,
+  prev: Pick<LoggedAlert, 'betOutcome'> | undefined,
+  next: Pick<LoggedAlert, 'betOutcome'>,
 ): boolean {
   if (!alertOutcomeSettled(next)) return false
   if (!prev) return true
-  return prev.hit5 === null && prev.hitLong === null
+  return !alertOutcomeSettled(prev)
 }
 
 export function enqueueTelegramOutcome(alertKey: string): void {
@@ -125,6 +132,10 @@ async function sendOutcomeForKey(alertKey: string): Promise<void> {
   const found = findLoggedAlert(alertKey)
   if (!found || !alertOutcomeSettled(found.alert)) return
   if (found.alert.void) return
+  // Old alerts (re-settled from stored data) are corrected by the rate-limited
+  // re-settle edits, never by live notices/replies.
+  const sentAt = Date.parse(found.alert.telegramSentAt ?? found.alert.ts)
+  if (Number.isFinite(sentAt) && Date.now() - sentAt > OUTCOME_NOTICE_MAX_AGE_MS) return
 
   const rec = getTelegramMessage(alertKey)
   const messageId = found.alert.telegramMessageId ?? rec?.messageId

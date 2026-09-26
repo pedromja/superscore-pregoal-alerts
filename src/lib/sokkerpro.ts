@@ -107,6 +107,8 @@ export function parseSokkerProOddsKey(rawKey: string): SokkerProParsedKey | null
   const periodRaw = (m[3] ?? '').toUpperCase()
   const line = decodeSokkerProLine(m[5])
   if (line === null) return null
+  // 2nd-half-only keys are neither the HT nor the full-match line.
+  if (periodRaw === '2T') return null
   const period: CornerHalf =
     periodRaw === 'HT' || periodRaw === '1T' || periodRaw === '1ST' ? 'ht' : 'ft'
   return {
@@ -303,9 +305,11 @@ function lookupExact(
     half: CornerHalf
   },
 ): RankedQuote | null {
+  // HT alerts only take 1st-half keys, FT alerts only full-match keys.
   const periods: Array<CornerHalf | undefined> =
-    args.half === 'ht' ? ['ht', undefined] : [undefined]
-  const lives = [true, false]
+    args.half === 'ht' ? ['ht'] : [undefined]
+  // Live keys only: a pre-match price for "current total + 0.5" is stale.
+  const lives = [true]
   for (const period of periods) {
     for (const live of lives) {
       const key = buildSokkerProOddsKey({
@@ -352,10 +356,8 @@ function pickSide(args: {
   currentTotal: number
   wanted: number
 }): RankedQuote | null {
+  // Only the exact next line (current total + 0.5) of the alert's period.
   const lines = [args.wanted]
-  if (args.family === 'corners' && !Number.isInteger(args.wanted)) {
-    lines.push(Math.ceil(args.wanted))
-  }
   for (const line of lines) {
     if (line <= args.currentTotal) continue
     const exact = lookupExact(args.odds, {
@@ -371,7 +373,9 @@ function pickSide(args: {
   for (const quote of quotesFromMap(args.odds)) {
     if (quote.family !== args.family || quote.side !== args.side) continue
     if (quote.line <= args.currentTotal) continue
-    if (args.half === 'ft' && quote.period === 'ht') continue
+    if (quote.period !== args.half) continue
+    if (!quote.live) continue
+    if (Math.abs(quote.line - args.wanted) > 1e-6) continue
     const rank = rankQuote(quote, args.half, args.wanted)
     if (!best || betterRank(rank, best.rank)) best = { quote, rank }
   }
@@ -407,7 +411,8 @@ export function pickSokkerProMaisUm(
         q.family === family &&
         q.side === 'under' &&
         Math.abs(q.line - over.line) < 1e-6 &&
-        (half === 'ht' || q.period !== 'ht'),
+        q.period === half &&
+        q.live,
     ) ??
     null
   return {

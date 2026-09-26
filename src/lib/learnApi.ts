@@ -77,6 +77,7 @@ export type LoggedAlert = {
   /** Line already beaten when the Telegram alert went out: excluded from stats. */
   void?: boolean
   voidReason?: string
+  betOutcome?: import('./betOutcome').BetOutcome
 }
 
 export type LearnPayload = {

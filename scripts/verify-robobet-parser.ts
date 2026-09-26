@@ -123,10 +123,9 @@ const limitGoals = pickLimitSnapshot(event, 'goals', 'ft', 1)
 if (!limitGoals?.prices.some((p) => p.side === 'over' && p.line === 1.5 && p.price === 1.95)) {
   fail.push(`limit goals ${JSON.stringify(limitGoals)}`)
 }
-const asianGoals = pickAsianSnapshot(event, 'goals', 'ft')
-if (!asianGoals || asianGoals.marketName !== 'Handicap asiatic') {
-  fail.push(`asian goals ${JSON.stringify(asianGoals)}`)
-}
+// A handicap is not the Asian total of the "one more goal" bet.
+const asianGoals = pickAsianSnapshot(event, 'goals', 'ft', 1)
+if (asianGoals) fail.push(`asian goals must ignore handicaps ${JSON.stringify(asianGoals)}`)
 
 const score = fixtureMatchesQuote('FC Porto', 'SL Benfica', 'Porto', 'Benfica')
 if (score < 0.58) fail.push(`fuzzy score ${score}`)

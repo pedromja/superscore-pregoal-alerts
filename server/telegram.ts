@@ -1,3 +1,4 @@
+import { formatBetDetail, isBetDecided, type BetOutcome } from '../src/lib/betOutcome.ts'
 import { marketCopy, parseMarket } from '../src/lib/market.ts'
 import type { CornerHalf, Market } from '../src/lib/types.ts'
 import { createHash } from 'node:crypto'
@@ -63,6 +64,7 @@ export type TelegramOutcomeInput = {
   cornerHalf?: CornerHalf | null
   matchLabel?: string
   minute?: number | null
+  betOutcome?: BetOutcome | null
 }
 
 export type TelegramStatus = {
@@ -134,8 +136,9 @@ export function formatTelegramHtml(payload: TelegramPayload): string {
 }
 
 export function telegramOutcomeIsHit(
-  alert: Pick<TelegramOutcomeInput, 'hit5' | 'hitLong'>,
+  alert: Pick<TelegramOutcomeInput, 'hit5' | 'hitLong' | 'betOutcome'>,
 ): boolean {
+  if (alert.betOutcome && isBetDecided(alert.betOutcome)) return alert.betOutcome.status === 'green'
   return alert.hit5 === true || alert.hitLong === true
 }
 
@@ -156,6 +159,10 @@ export function formatTelegramOutcomeHtml(alert: TelegramOutcomeInput): string {
       ? `${alert.minute}'`
       : null,
   ].filter((bit): bit is string => Boolean(bit))
+  if (alert.betOutcome && isBetDecided(alert.betOutcome)) {
+    const detail = formatBetDetail(alert.betOutcome, parseMarket(alert.market))
+    if (detail) bits.push(detail)
+  }
   return `<b>${badge}</b> · ${bits.map(escapeTelegramHtml).join(' · ')}`
 }
 

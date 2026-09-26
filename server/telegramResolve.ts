@@ -31,7 +31,12 @@ import {
   enqueueTelegramOutcome,
   scheduleTelegramOutcomeFlush,
 } from './telegramOutcomes.ts'
-import type { LoggedAlert } from './types.ts'
+import type { LoggedAlert, StoredMatch } from './types.ts'
+import { isBetDecided } from '../src/lib/betOutcome.ts'
+import { decideBetForAlert, settleTipsByBet } from './betSettle.ts'
+
+/** Toast when the half is still being played (no extra event yet). */
+export const PART_IN_PROGRESS_TEXT = 'ainda sem resolução (parte a decorrer)'
 import { VOID_LINE_TEXT } from './telegramCompose.ts'
 import { inlineEditsActive, telegramRecordEditable } from './telegramEdits.ts'
 import { loggedAlertKey } from './alertKeys.ts'
@@ -118,21 +123,19 @@ export function evaluatePayloadForAlert(
 
 async function loadLivePayload(
   fixtureId: string,
-): Promise<{ payload: MomentumPayload; finished: boolean } | null> {
+): Promise<{ payload: MomentumPayload; finished: boolean; match: StoredMatch | null } | null> {
   const stored = loadMatch(fixtureId)
   try {
     const payload = await fetchMomentum(fixtureId)
+    let match: StoredMatch | null = null
     if (stored) {
-      saveMatch({
-        ...stored,
-        payload,
-        updatedAt: new Date().toISOString(),
-      })
+      match = { ...stored, payload, updatedAt: new Date().toISOString() }
+      saveMatch(match)
     }
-    return { payload, finished: stored?.finished ?? false }
+    return { payload, finished: stored?.finished ?? false, match }
   } catch {
     if (!stored) return null
-    return { payload: stored.payload, finished: stored.finished }
+    return { payload: stored.payload, finished: stored.finished, match: stored }
   }
 }
 
@@ -178,22 +181,35 @@ export async function resolveAlertNow(alertKey: string): Promise<{
     return { kind: 'pending', alert: found.alert, text: PENDING_RESOLVE_TEXT }
   }
 
+  // Learning labels (≤5 / 15 min horizons) keep their own rule.
   const decision = evaluatePayloadForAlert(
     found.alert,
     live.payload,
     live.finished,
   )
-  if (decision.kind === 'pending') {
-    return { kind: 'pending', alert: found.alert, text: PENDING_RESOLVE_TEXT }
-  }
+  let alert = found.alert
+  if (decision.kind !== 'pending') alert = persistResolvedLabels(found.alert, decision.outcome)
 
-  const labeled = persistResolvedLabels(found.alert, decision.outcome)
-  enqueueTelegramOutcome(loggedAlertKey(labeled))
+  // GREEN/RED shown on Telegram = bet outcome (end of the half, both teams).
+  const bet =
+    alert.betOutcome ??
+    (() => {
+      const d = decideBetForAlert(alert, live.match, { market: found.market, half: found.half })
+      return d && isBetDecided(d) ? d : null
+    })()
+  if (!bet) {
+    return { kind: 'pending', alert, text: PART_IN_PROGRESS_TEXT }
+  }
+  if (!alert.betOutcome) {
+    alert = patchLoggedAlert(loggedAlertKey(alert), { betOutcome: bet }) ?? { ...alert, betOutcome: bet }
+    if (live.match) settleTipsByBet(new Map([[alert.fixtureId, live.match]]))
+  }
+  enqueueTelegramOutcome(loggedAlertKey(alert))
   scheduleTelegramOutcomeFlush()
   return {
-    kind: decision.kind,
-    alert: labeled,
-    text: formatTelegramOutcomeHtml(labeled),
+    kind: bet.status,
+    alert,
+    text: formatTelegramOutcomeHtml(alert),
   }
 }
 
@@ -217,6 +233,8 @@ export function resolveToastText(kind: ResolveNowKind): string {
       return ALREADY_RESOLVED_TEXT
     case 'void':
       return VOID_LINE_TEXT
+    case 'pending':
+      return PART_IN_PROGRESS_TEXT
     default:
       return PENDING_RESOLVE_TEXT
   }

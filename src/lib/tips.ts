@@ -37,6 +37,10 @@ export type Tip = {
    */
   void?: boolean
   voidReason?: string
+  /** Bet-rule decision (end of the half); status/pnl follow it. */
+  betOutcome?: import('./betOutcome').BetOutcome
+  /** Status before the half-end re-settle, when it changed (audit). */
+  legacyStatus?: TipStatus
 }
 
 export type RoiRow = {

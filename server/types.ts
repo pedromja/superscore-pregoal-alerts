@@ -1,3 +1,4 @@
+import type { BetOutcome } from '../src/lib/betOutcome.ts'
 import type { OddsObservation } from '../src/lib/oddsObserve.ts'
 import type {
   AlertOverlay,
@@ -62,6 +63,12 @@ export type LoggedAlert = {
   voidReason?: string
   voidAt?: string
   odds?: OddsObservation
+  /**
+   * Bet outcome (+0.5 on the market total, both teams, to the end of the half
+   * incl. stoppage). Drives Telegram GREEN/RED and every counted stat; the
+   * learning labels (hit5/hitLong) stay separate. Absent while pending.
+   */
+  betOutcome?: BetOutcome
   /** Quality overlay decision; absent on alerts stored before the overlay. */
   overlay?: AlertOverlay
 }
@@ -123,6 +130,15 @@ export type DualMetrics = {
   wLong: RuleMetrics
 }
 
+export type BetSummary = {
+  settled: number
+  green: number
+  red: number
+  pending: number
+  voided: number
+  hitRate: number | null
+}
+
 export type LearnSummary = {
   market?: Market
   half?: CornerHalf
@@ -135,6 +151,8 @@ export type LearnSummary = {
   unlabeled: number
   lastRecalcAt: string | null
   scoreNote: string
+  /** GREEN/RED by the bet rule (end of the half), VOID excluded. */
+  bet?: BetSummary
 }
 
 export type ParamVersion = {
@@ -186,6 +204,8 @@ export type PollerStatus = {
   tickInFlight: boolean
   lastTickDurationMs: number | null
   lastHangAt: string | null
+  /** Duration of the per-tick bet-outcome settle batch (ms). */
+  lastBetSettleMs?: number
   lastFixtureError: PollerFixtureError | null
   liveProcessed: number
   pushSubscribers: number

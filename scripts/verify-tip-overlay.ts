@@ -89,16 +89,41 @@ const under = limit?.prices.find((p) => p.side === 'under' && p.line === 1.5)
 if (!over || over.price !== 1.95) fail.push('limit over 1.5')
 if (!under || under.price !== 1.8) fail.push('limit under 1.5')
 
-const asian = pickAsianSnapshot(event, 'goals', 'ft')
-if (!asian || asian.marketName !== 'Handicap asiatic') {
+// Handicaps are not the "one more event" market: no Asian from them.
+if (pickAsianSnapshot(event, 'goals', 'ft', 1)) fail.push('handicap must not be the goals Asian')
+if (pickAsianSnapshot(event, 'corners', 'ht', 4)) fail.push('corner handicap must not be the corners Asian')
+const asianEvent = {
+  event_id: 3,
+  markets: [
+    ...(event.markets ?? []),
+    {
+      name: 'Total goluri asiatice',
+      odds: [
+        { price: 1.9, metadata: { name: 'Peste 1.25' }, status: 1, display: true },
+        { price: 1.95, metadata: { name: 'Sub 1.25' }, status: 1, display: true },
+        { price: 2.4, metadata: { name: 'Peste 1.75' }, status: 1, display: true },
+        { price: 1.1, metadata: { name: 'Peste 0.75' }, status: 1, display: true },
+      ],
+    },
+    {
+      name: 'Prima repriză - Total cornere asiatice',
+      odds: [
+        { price: 1.8, metadata: { name: 'Peste 4.25' }, status: 1, display: true },
+        { price: 2.0, metadata: { name: 'Sub 4.25' }, status: 1, display: true },
+      ],
+    },
+  ],
+}
+const asian = pickAsianSnapshot(asianEvent, 'goals', 'ft', 1)
+if (!asian || asian.marketName !== 'Total goluri asiatice') {
   fail.push(`asian goals ${JSON.stringify(asian)}`)
 }
-if (!asian?.prices.some((p) => p.side === 'home' && p.line === -0.5 && p.price === 1.92)) {
-  fail.push('asian home -0.5')
+if (asian?.line !== 1.25 || asian.prices.length !== 2 || asian.prices[0].side !== 'over' || asian.prices[0].price !== 1.9) {
+  fail.push(`asian goals pair over/under 1.25 ${JSON.stringify(asian?.prices)}`)
 }
-
-const cornersAsian = pickAsianSnapshot(event, 'corners', 'ht')
-if (!cornersAsian || !/cornere/.test(cornersAsian.marketName)) {
+if (pickAsianSnapshot(asianEvent, 'goals', 'ht', 1)) fail.push('full-match Asian must not serve an HT alert')
+const cornersAsian = pickAsianSnapshot(asianEvent, 'corners', 'ht', 4)
+if (!cornersAsian || cornersAsian.line !== 4.25) {
   fail.push(`asian corners ${JSON.stringify(cornersAsian)}`)
 }
 

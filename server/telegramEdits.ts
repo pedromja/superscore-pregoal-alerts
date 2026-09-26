@@ -11,6 +11,7 @@
  */
 import type { FeedAlert, Market } from '../src/lib/types.ts'
 import { alertKeyFor } from './alertKeys.ts'
+import type { LoggedAlert } from './types.ts'
 import { telegramEnabled, telegramInlineEditsEnabled, telegramOddsEditMaxMs } from './config.ts'
 import {
   findLoggedAlert,
@@ -62,10 +63,11 @@ export function telegramRecordEditable(
 
 export function alertMessageState(
   alertKey: string,
+  alertHint?: Pick<LoggedAlert, 'void' | 'market' | 'voidCheck'> | null,
 ): { rec: TelegramMessageRecord; state: AlertMessageState } | null {
   const rec = getTelegramMessage(alertKey)
   if (!telegramRecordEditable(rec)) return null
-  const alert = findLoggedAlert(alertKey)?.alert
+  const alert = alertHint ?? findLoggedAlert(alertKey)?.alert
   const voidLine = alert?.void
     ? formatTelegramVoidLine({ market: alert.market, event: alert.voidCheck?.event ?? null })
     : null
@@ -94,21 +96,23 @@ export function setEditRetryDelaysForTests(delays: number[] | null): void {
   editRetryDelays = delays ?? EDIT_RETRY_DELAYS_MS
 }
 
-async function runEdit(alertKey: string, why: string): Promise<AlertEditOutcome> {
-  let outcome = await runEditOnce(alertKey, why)
+async function runEdit(alertKey: string, why: string, hint?: EditHint): Promise<AlertEditOutcome> {
+  let outcome = await runEditOnce(alertKey, why, hint)
   for (const delay of editRetryDelays) {
     if (outcome.kind !== 'failed' || !outcome.retryable) break
     const wait = Math.min(outcome.retryAfterMs ?? delay, EDIT_RETRY_AFTER_CAP_MS)
     await new Promise((r) => setTimeout(r, wait))
-    outcome = await runEditOnce(alertKey, `${why} (retry)`)
+    outcome = await runEditOnce(alertKey, `${why} (retry)`, hint)
   }
   return outcome
 }
 
-async function runEditOnce(alertKey: string, why: string): Promise<AlertEditOutcome> {
+type EditHint = { alert?: Pick<LoggedAlert, 'void' | 'market' | 'voidCheck'> | null }
+
+async function runEditOnce(alertKey: string, why: string, hint?: EditHint): Promise<AlertEditOutcome> {
   try {
     if (!inlineEditsActive()) return { kind: 'disabled' }
-    const snap = alertMessageState(alertKey)
+    const snap = alertMessageState(alertKey, hint?.alert)
     if (!snap) return { kind: 'no-message' }
     const text = composeTelegramAlertText(snap.state)
     const final = composedMessageIsFinal(snap.state)
@@ -154,11 +158,12 @@ const chains = new Map<string, Promise<AlertEditOutcome>>()
 export function requestTelegramAlertEdit(
   alertKey: string,
   why = 'edit',
+  hint?: EditHint,
 ): Promise<AlertEditOutcome> {
   const prev = chains.get(alertKey) ?? Promise.resolve<AlertEditOutcome>({ kind: 'unchanged' })
   const run = prev.then(
-    () => runEdit(alertKey, why),
-    () => runEdit(alertKey, why),
+    () => runEdit(alertKey, why, hint),
+    () => runEdit(alertKey, why, hint),
   )
   chains.set(alertKey, run)
   void run.then(() => {

@@ -6,6 +6,7 @@ import {
   type SokkerProPick,
 } from './sokkerpro'
 import { entryTypeOf, type EntryType, type TipSource } from './tips'
+import { isMatchTotalMarket, marketPeriodMatches } from './oddsMarkets'
 
 export type OddsPriceSide = 'over' | 'under' | 'home' | 'away' | 'other'
 
@@ -75,44 +76,64 @@ function ssLimitOf(obs: OddsObservation): OddsSnapshot | null {
   return obs.limit
 }
 
+/** The "+0.5" line of the alert: current market total + 0.5. */
+export function maisUmWantedLine(obs: Pick<OddsObservation, 'currentTotal'>): number | null {
+  return Number.isFinite(obs.currentTotal) ? Math.max(0, obs.currentTotal) + 0.5 : null
+}
+
+function sameLine(a: number | null | undefined, b: number | null): boolean {
+  return a != null && b != null && Math.abs(a - b) < 1e-6
+}
+
+/**
+ * SuperScore snapshot is the match total of the alert's market for the alert's
+ * period (HT → 1st-half market, FT → full match). Also re-checks observations
+ * stored before the strict picker (team totals, other periods, alt lines).
+ */
+export function ssSnapshotValid(obs: OddsObservation, snap: OddsSnapshot | null | undefined, kind: 'limit' | 'asian'): boolean {
+  if (!snap) return false
+  return isMatchTotalMarket(snap.marketName, obs.market, kind) && marketPeriodMatches(snap.marketName, obs.half)
+}
+
+/**
+ * The over price of exactly "one more event" for the alert's period
+ * (SuperScore → SokkerPro → RoboBet). Anything else — another line, another
+ * period, a team total, a pre-match price — returns null (no odd shown).
+ */
 export function maisUmPriceOf(obs: OddsObservation | null | undefined): MaisUmPrice | null {
   if (!obs) return null
-  const ssOver = ssLimitOf(obs)?.prices.find((p) => p.side === 'over' && p.price > 1)
+  const want = maisUmWantedLine(obs)
+  if (want == null) return null
+  const ss = ssLimitOf(obs)
+  const ssOver = ssSnapshotValid(obs, ss, 'limit')
+    ? ss?.prices.find((p) => p.side === 'over' && p.price > 1 && sameLine(p.line, want))
+    : null
   if (ssOver) {
-    return {
-      odd: ssOver.price,
-      line: ssOver.line ?? obs.limit?.line ?? null,
-      source: 'superscore',
-    }
+    return { odd: ssOver.price, line: want, source: 'superscore' }
   }
   const spro = obs.sokkerpro
-  if (spro && spro.odd > 1) {
-    return { odd: spro.odd, line: spro.line, source: SOKKERPRO_SOURCE }
+  if (spro && spro.odd > 1 && spro.period === obs.half && spro.live !== false && sameLine(spro.line, want)) {
+    return { odd: spro.odd, line: want, source: SOKKERPRO_SOURCE }
   }
-  const sproOver = isSokkerProSnapshot(obs.limit)
-    ? obs.limit?.prices.find((p) => p.side === 'over' && p.price > 1)
-    : null
-  if (sproOver) {
-    return {
-      odd: sproOver.price,
-      line: sproOver.line ?? obs.limit?.line ?? null,
-      source: SOKKERPRO_SOURCE,
-    }
-  }
-  if (obs.robobet?.odd && obs.robobet.odd > 1) {
-    return { odd: obs.robobet.odd, line: obs.robobet.line, source: 'robobet' }
-  }
-  const rbOver = isRobobetSnapshot(obs.limit)
-    ? obs.limit?.prices.find((p) => p.side === 'over' && p.price > 1)
-    : null
-  if (rbOver) {
-    return {
-      odd: rbOver.price,
-      line: rbOver.line ?? obs.limit?.line ?? null,
-      source: 'robobet',
-    }
+  if (obs.robobet?.odd && obs.robobet.odd > 1 && sameLine(obs.robobet.line, want)) {
+    return { odd: obs.robobet.odd, line: want, source: 'robobet' }
   }
   return null
+}
+
+/** Asian total pair for the alert's period (over/under just above the current total). */
+export function asianPricesOf(obs: OddsObservation | null | undefined): OddsPrice[] {
+  if (!obs?.asian || !ssSnapshotValid(obs, obs.asian, 'asian')) return []
+  const total = obs.currentTotal
+  if (!Number.isFinite(total)) return []
+  return obs.asian.prices.filter(
+    (p) =>
+      p.price > 1 &&
+      (p.side === 'over' || p.side === 'under') &&
+      p.line != null &&
+      p.line > total &&
+      p.line <= total + 1 + 1e-6,
+  )
 }
 
 export function formatObservationLine(obs: OddsObservation | null | undefined): string | null {

@@ -14,7 +14,7 @@
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist-server/index.mjs --packages=external --target=node20",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify && npm run test:sokkerpro && npm run test:delivery && npm run test:lock && npm run test:telegram && npm run test:notify-lead && npm run test:market-keys && npm run test:both-markets && npm run test:telegram-retry && npm run test:poller-enabled && npm run test:quality-overlay && npm run test:telegram-inline-edits && npm run test:telegram-league-stats",
+    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify && npm run test:sokkerpro && npm run test:delivery && npm run test:lock && npm run test:telegram && npm run test:notify-lead && npm run test:market-keys && npm run test:both-markets && npm run test:telegram-retry && npm run test:poller-enabled && npm run test:quality-overlay && npm run test:telegram-inline-edits && npm run test:telegram-league-stats && npm run test:telegram-bet-outcome",
     "test:market-keys": "tsx scripts/verify-market-keys.ts",
     "test:both-markets": "tsx scripts/verify-both-markets.ts",
     "test:telegram-retry": "tsx scripts/verify-telegram-retry.ts",
@@ -31,7 +31,8 @@
     "test:poller-enabled": "tsx scripts/verify-poller-enabled.ts",
     "test:quality-overlay": "tsx scripts/verify-quality-overlay.ts",
     "test:telegram-inline-edits": "tsx scripts/verify-telegram-inline-edits.ts",
-    "test:telegram-league-stats": "tsx scripts/verify-telegram-league-stats.ts"
+    "test:telegram-league-stats": "tsx scripts/verify-telegram-league-stats.ts",
+    "test:telegram-bet-outcome": "tsx scripts/verify-telegram-bet-outcome.ts"
   },
   "engines": {
     "node": ">=20"
