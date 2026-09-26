@@ -367,18 +367,31 @@ export function listMatches(): StoredMatch[] {
     .filter((m): m is StoredMatch => m !== null)
 }
 
+/** Compare two stored alerts ignoring `ts` (bumped on every re-evaluation). */
+function sameStoredAlert(a: LoggedAlert, b: LoggedAlert): boolean {
+  return JSON.stringify({ ...a, ts: '' }) === JSON.stringify({ ...b, ts: '' })
+}
+
+/**
+ * Merge re-evaluated alerts into the per-market/half store. The poller calls
+ * this for every in-window fixture on every tick with the match's full alert
+ * list, so a no-op merge (only `ts` would move) skips the rewrite of what can
+ * be a 12 MB file. `preloaded` avoids a second parse when the caller already
+ * read the store.
+ */
 export function upsertAlerts(
   incoming: LoggedAlert[],
   market: Market = 'goals',
   half?: CornerHalf | null,
+  preloaded?: LoggedAlert[],
 ): LoggedAlert[] {
   const h = parseCornerHalf(half)
-  const alerts = loadAlerts(market, h)
+  const alerts = preloaded ?? loadAlerts(market, h)
   const byId = new Map(alerts.map((a) => [a.id, a]))
+  let changed = false
   for (const item of incoming) {
     const prev = byId.get(item.id)
-    byId.set(
-      item.id,
+    const merged: LoggedAlert =
       prev
         ? {
             ...item,
@@ -405,9 +418,13 @@ export function upsertAlerts(
             market,
             cornerHalf: h ?? item.cornerHalf,
           }
-        : { ...item, market, cornerHalf: h ?? item.cornerHalf },
-    )
+        : { ...item, market, cornerHalf: h ?? item.cornerHalf }
+    if (!prev || !sameStoredAlert(prev, merged)) {
+      byId.set(item.id, merged)
+      changed = true
+    }
   }
+  if (!changed) return alerts
   const next = [...byId.values()]
   saveAlerts(next, market, h)
   return next

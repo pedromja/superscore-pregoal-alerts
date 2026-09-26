@@ -1,4 +1,6 @@
-import { POLLER_INTERVAL_MS } from '../server/config.ts'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { DATA_DIR, POLLER_INTERVAL_MS } from '../server/config.ts'
 import {
   getPollerStatus,
   lastErrorAfterFixtureFailures,
@@ -306,6 +308,25 @@ try {
     loadAlerts('goals', 'ft').find((a) => a.id === ftSample.id)?.sentPush === true,
     'markAlertPushed sets sentPush on goals FT',
   )
+  // Re-evaluation every tick: a merge where only `ts` would move must not
+  // rewrite the store (alerts_corners_ht.json is ~12 MB in production).
+  const stored1 = loadAlerts('goals', 'ft').find((a) => a.id === ftSample.id)
+  let writes = 0
+  const ftFile = join(DATA_DIR, 'alerts_goals_ft.json')
+  // Rewrite the file compact; saveAlerts writes indented JSON, so any
+  // rewrite is visible regardless of mtime granularity.
+  const counted = (fn: () => void) => {
+    const compact = JSON.stringify(JSON.parse(readFileSync(ftFile, 'utf8')))
+    writeFileSync(ftFile, compact)
+    fn()
+    if (readFileSync(ftFile, 'utf8') !== compact) writes += 1
+  }
+  counted(() => upsertAlerts([{ ...ftSample, sentPush: false, ts: '2030-01-01T00:00:00.000Z' }], 'goals', 'ft'))
+  check(writes === 0, 'no-op re-ingest (only ts differs) skips the write')
+  check(loadAlerts('goals', 'ft').find((a) => a.id === ftSample.id)?.ts === stored1?.ts, 'no-op keeps stored ts')
+  counted(() => upsertAlerts([{ ...ftSample, sentPush: false, matchLabel: 'Changed vs Label' }], 'goals', 'ft'))
+  check(writes === 1, 'real change is written')
+  check(loadAlerts('goals', 'ft').find((a) => a.id === ftSample.id)?.matchLabel === 'Changed vs Label', 'real change persisted')
 } finally {
   saveAlerts(previousFt.filter((a) => a.id !== `${sample.id}-ft`), 'goals', 'ft')
 }

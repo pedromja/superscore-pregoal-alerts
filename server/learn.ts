@@ -743,7 +743,9 @@ export function ingestFeedAlerts(
     )
     const prev = loadAlerts(m, h)
     const prevById = new Map(prev.map((a) => [a.id, a]))
-    const next = upsertAlerts(logged, m, h)
+    // upsert may mutate nothing (no-op merge skips the write); pass the list
+    // we already parsed. prevById keeps the pre-merge records for outcomes.
+    const next = upsertAlerts(logged, m, h, [...prev])
     stored.push(...next)
     const newly = next.filter((alert) =>
       alertOutcomeNewlySettled(prevById.get(alert.id), alert),
