@@ -1,0 +1,56 @@
+{
+  "name": "superscore-pregoal-alerts",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n web,api -c cyan,magenta \"vite\" \"tsx watch server/index.ts\"",
+    "dev:web": "vite",
+    "dev:api": "tsx watch server/index.ts",
+    "start": "node dist-server/index.mjs",
+    "start:prod": "npm run build && npm start",
+    "vapid:generate": "tsx server/vapid-generate.ts",
+    "build": "tsc -b && vite build && npm run build:server",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist-server/index.mjs --packages=external --target=node20",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify && npm run test:sokkerpro && npm run test:delivery && npm run test:lock && npm run test:telegram && npm run test:notify-lead",
+    "test:notify-lead": "tsx scripts/verify-notify-lead.ts",
+    "test:telegram": "tsx scripts/verify-telegram.ts",
+    "test:robobet": "tsx scripts/verify-robobet-parser.ts",
+    "test:windows": "tsx scripts/verify-corner-windows.ts",
+    "test:overlay": "tsx scripts/verify-tip-overlay.ts",
+    "test:poller": "tsx scripts/verify-poller-health.ts",
+    "test:notify": "tsx scripts/verify-notification-copy.ts",
+    "test:sokkerpro": "tsx scripts/verify-sokkerpro.ts",
+    "test:delivery": "tsx scripts/verify-odds-delivery.ts",
+    "test:lock": "tsx scripts/verify-lock-lead.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "concurrently": "^10.0.5",
+    "dotenv": "^18.0.0",
+    "express": "^5.2.1",
+    "lucide-react": "^0.544.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@types/web-push": "^3.6.4",
+    "@vitejs/plugin-react": "^6.1.1",
+    "esbuild": "^0.28.2",
+    "oxlint": "^1.81.0",
+    "tailwindcss": "^4.1.13",
+    "tsx": "^4.23.13",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}
