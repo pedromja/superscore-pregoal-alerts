@@ -505,7 +505,33 @@ export type TelegramMessageRecord = {
   callbackToken?: string
   /** Written since both markets run every tick; legacy records infer it from `text`. */
   market?: Market
+  /**
+   * Inline-edit state. `text` stays the base HTML sent with the alert; every
+   * edit is rebuilt as text + oddsLine + (VOID line | resultLine), so edits
+   * never clobber each other.
+   */
+  /** Odds line (HTML) once attachOdds found a price; null = window expired, none. */
+  oddsLine?: string | null
+  oddsAt?: string
+  /** GREEN/RED line (HTML), frozen when the outcome was claimed. */
+  resultLine?: string | null
+  /** Last text Telegram accepted via editMessageText (skip identical edits). */
+  lastEditText?: string
+  /** Keyboard removed (result or VOID shown). */
+  finalized?: boolean
+  editedAt?: string
+  lastEditError?: string | null
 }
+
+const TELEGRAM_EDIT_FIELDS = [
+  'oddsLine',
+  'oddsAt',
+  'resultLine',
+  'lastEditText',
+  'finalized',
+  'editedAt',
+  'lastEditError',
+] as const satisfies readonly (keyof TelegramMessageRecord)[]
 
 const TELEGRAM_SCOPES: { market: Market; half: CornerHalf }[] = [
   { market: 'goals', half: 'ht' },
@@ -597,7 +623,14 @@ export function upsertTelegramMessage(
   }
   const prev = otherMarket ? undefined : stored
   const market = patch.market ?? prev?.market
+  // Edit-state fields: an explicit value in the patch (null included) wins.
+  const editState: Partial<TelegramMessageRecord> = {}
+  for (const field of TELEGRAM_EDIT_FIELDS) {
+    const value = patch[field] !== undefined ? patch[field] : prev?.[field]
+    if (value !== undefined) (editState as Record<string, unknown>)[field] = value
+  }
   const next: TelegramMessageRecord = {
+    ...editState,
     messageId: patch.messageId ?? prev?.messageId ?? 0,
     chatId: patch.chatId ?? prev?.chatId ?? '',
     text: patch.text ?? prev?.text ?? '',
@@ -671,17 +704,19 @@ export function markAlertTelegramMessage(
   messageId: number,
   market?: Market,
   half?: CornerHalf | null,
+  extra: Partial<LoggedAlert> = {},
 ): boolean {
+  const patch: Partial<LoggedAlert> = { ...extra, telegramMessageId: messageId }
   if (market && parseCornerHalfOpt(half)) {
     const alerts = loadAlerts(market, half)
     const loggedId = parseAlertKey(alertId).loggedId
     const idx = alerts.findIndex((a) => a.id === loggedId)
     if (idx < 0) return false
-    alerts[idx] = { ...alerts[idx], telegramMessageId: messageId }
+    alerts[idx] = { ...alerts[idx], ...patch }
     saveAlerts(alerts, market, half)
     return true
   }
-  return patchLoggedAlert(alertId, { telegramMessageId: messageId }) !== null
+  return patchLoggedAlert(alertId, patch) !== null
 }
 
 export function telegramOutcomeAlreadySent(alertKey: string): boolean {

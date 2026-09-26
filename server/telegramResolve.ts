@@ -32,12 +32,14 @@ import {
   scheduleTelegramOutcomeFlush,
 } from './telegramOutcomes.ts'
 import type { LoggedAlert } from './types.ts'
+import { VOID_LINE_TEXT } from './telegramCompose.ts'
+import { inlineEditsActive, telegramRecordEditable } from './telegramEdits.ts'
 import { loggedAlertKey } from './alertKeys.ts'
 
-export type ResolveNowKind = 'green' | 'red' | 'pending' | 'missing' | 'already'
+export type ResolveNowKind = 'green' | 'red' | 'pending' | 'missing' | 'already' | 'void'
 
 export type ResolveNowDecision = {
-  kind: Exclude<ResolveNowKind, 'missing' | 'already'>
+  kind: Exclude<ResolveNowKind, 'missing' | 'already' | 'void'>
   outcome: HorizonOutcome
 }
 
@@ -160,6 +162,9 @@ export async function resolveAlertNow(alertKey: string): Promise<{
 }> {
   const found = findLoggedAlert(alertKey)
   if (!found) return { kind: 'missing', alert: null, text: PENDING_RESOLVE_TEXT }
+  if (found.alert.void) {
+    return { kind: 'void', alert: found.alert, text: VOID_LINE_TEXT }
+  }
   if (telegramOutcomeAlreadySent(alertKey)) {
     return {
       kind: 'already',
@@ -201,6 +206,30 @@ type TelegramCallbackQuery = {
   }
 }
 
+/** Toast shown when "Resolver agora" is pressed (answerCallbackQuery). */
+export function resolveToastText(kind: ResolveNowKind): string {
+  switch (kind) {
+    case 'green':
+      return 'Resolvido: GREEN'
+    case 'red':
+      return 'Resolvido: RED'
+    case 'already':
+      return ALREADY_RESOLVED_TEXT
+    case 'void':
+      return VOID_LINE_TEXT
+    default:
+      return PENDING_RESOLVE_TEXT
+  }
+}
+
+/** Telegram expects an answer within seconds; slower resolutions answer early. */
+const CALLBACK_ANSWER_MS = 8_000
+let callbackAnswerMs = CALLBACK_ANSWER_MS
+
+export function setCallbackAnswerMsForTests(ms: number | null): void {
+  callbackAnswerMs = ms ?? CALLBACK_ANSWER_MS
+}
+
 export async function handleCallbackQuery(
   query: TelegramCallbackQuery,
 ): Promise<{ kind: ResolveNowKind | 'ignored'; alertKey?: string }> {
@@ -214,26 +243,53 @@ export async function handleCallbackQuery(
     return { kind: 'ignored' }
   }
 
-  if (query.id) {
+  const inline = inlineEditsActive() && telegramRecordEditable(getTelegramMessage(alertKey))
+  if (!inline && query.id) {
+    // Legacy flow (no editable message / inline edits off): unchanged.
     void answerTelegramCallback(query.id, 'A verificar…')
   }
 
-  const result = await resolveAlertNow(alertKey)
-  if (result.kind === 'already') {
-    return { kind: 'already', alertKey }
+  // Inline flow: one toast with the outcome (answered early if slow).
+  let answered = !inline
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const work = resolveAlertNow(alertKey)
+  if (inline && query.id) {
+    timer = setTimeout(() => {
+      if (answered) return
+      answered = true
+      void answerTelegramCallback(query.id!, 'A verificar…')
+    }, callbackAnswerMs)
   }
-  if (result.kind === 'pending' || result.kind === 'missing') {
-    const rec = getTelegramMessage(alertKey)
-    const replyTo =
-      query.message?.message_id ??
-      (rec?.messageId && rec.messageId > 0 ? rec.messageId : undefined)
-    await sendTelegramText({
-      alertKey,
-      text: PENDING_RESOLVE_TEXT,
-      replyToMessageId: replyTo,
-    })
+  let result: Awaited<ReturnType<typeof resolveAlertNow>>
+  try {
+    result = await work
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+  if (!answered && query.id) {
+    answered = true
+    void answerTelegramCallback(query.id, resolveToastText(result.kind))
+  }
+
+  if (result.kind === 'already' || result.kind === 'void') {
     return { kind: result.kind, alertKey }
   }
+  if (result.kind === 'pending' || result.kind === 'missing') {
+    // Too early: inline flow keeps it as a toast only (no edit, no message).
+    if (!inline) {
+      const rec = getTelegramMessage(alertKey)
+      const replyTo =
+        query.message?.message_id ??
+        (rec?.messageId && rec.messageId > 0 ? rec.messageId : undefined)
+      await sendTelegramText({
+        alertKey,
+        text: PENDING_RESOLVE_TEXT,
+        replyToMessageId: replyTo,
+      })
+    }
+    return { kind: result.kind, alertKey }
+  }
+  // GREEN/RED: the outcome flush edits the alert (or replies for legacy alerts).
   return { kind: result.kind, alertKey }
 }
 

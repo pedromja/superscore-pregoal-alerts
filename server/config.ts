@@ -120,6 +120,34 @@ export const TELEGRAM_RETRY_MAX_ATTEMPTS = positiveIntEnv('TELEGRAM_RETRY_MAX_AT
 export const TELEGRAM_RETRY_BASE_MS = positiveIntEnv('TELEGRAM_RETRY_BASE_MS', 2000)
 export const TELEGRAM_RETRY_MAX_AGE_MS = positiveIntEnv('TELEGRAM_RETRY_MAX_AGE_MS', 60_000)
 
+/**
+ * Inline Telegram edits (result / odds / VOID appended to the original alert
+ * message instead of new messages). `TELEGRAM_INLINE_EDITS=0|off` restores the
+ * old reply behaviour. Read live so tests/ops can flip it.
+ */
+export function telegramInlineEditsEnabled(): boolean {
+  return parseEnabledFlag(process.env.TELEGRAM_INLINE_EDITS, true)
+}
+
+/**
+ * Odds line edit: odds found by attachOdds later than this after the send are
+ * not appended (the message is left without an odds line — least noisy).
+ */
+export function telegramOddsEditMaxMs(): number {
+  return positiveIntEnv('TELEGRAM_ODDS_EDIT_MAX_MS', 90_000)
+}
+
+/** Quick VOID check after a delivered alert. `VOID_CHECK=0|off` disables it. */
+export function voidCheckEnabled(): boolean {
+  return parseEnabledFlag(process.env.VOID_CHECK, true)
+}
+
+/** Delay between a delivered alert and its VOID re-check (default 15 s, clamped 1–120 s). */
+export function voidCheckDelayMs(): number {
+  const n = positiveIntEnv('VOID_CHECK_DELAY_MS', 15_000)
+  return Math.min(120_000, Math.max(1_000, n))
+}
+
 /** Live push floor: tips need ≥1′ of clock. Override with `MIN_NOTIFY_LEAD_MIN`. */
 export const MIN_NOTIFY_LEAD_MIN = parseMinNotifyLeadMin(
   process.env.MIN_NOTIFY_LEAD_MIN,
