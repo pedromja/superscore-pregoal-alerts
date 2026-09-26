@@ -32,6 +32,7 @@ import {
   scheduleTelegramOutcomeFlush,
 } from './telegramOutcomes.ts'
 import type { LoggedAlert } from './types.ts'
+import { loggedAlertKey } from './alertKeys.ts'
 
 export type ResolveNowKind = 'green' | 'red' | 'pending' | 'missing' | 'already'
 
@@ -139,7 +140,7 @@ function persistResolvedLabels(
 ): LoggedAlert {
   const hit5 = outcome.hit5
   const hitLong = outcome.hitLong
-  const next = patchLoggedAlert(alert.id, {
+  const next = patchLoggedAlert(loggedAlertKey(alert), {
     hit: hit5,
     hit5,
     hitLong,
@@ -182,7 +183,7 @@ export async function resolveAlertNow(alertKey: string): Promise<{
   }
 
   const labeled = persistResolvedLabels(found.alert, decision.outcome)
-  enqueueTelegramOutcome(labeled.id)
+  enqueueTelegramOutcome(loggedAlertKey(labeled))
   scheduleTelegramOutcomeFlush()
   return {
     kind: decision.kind,

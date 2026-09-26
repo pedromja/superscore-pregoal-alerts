@@ -1,4 +1,5 @@
 import type { CornerHalf, Market } from '../src/lib/types.ts'
+import { loggedAlertKey } from './alertKeys.ts'
 import { telegramEnabled } from './config.ts'
 import {
   claimTelegramOutcome,
@@ -39,9 +40,11 @@ export function enqueueSettledTelegramOutcomes(alerts: LoggedAlert[]): string[] 
   const keys: string[] = []
   for (const alert of alerts) {
     if (!alertOutcomeSettled(alert)) continue
-    if (telegramOutcomeAlreadySent(alert.id)) continue
-    enqueueTelegramOutcome(alert.id)
-    keys.push(alert.id)
+    // Market-qualified: a goals and a corners alert may share `alert.id`.
+    const key = loggedAlertKey(alert)
+    if (telegramOutcomeAlreadySent(key)) continue
+    enqueueTelegramOutcome(key)
+    keys.push(key)
   }
   return keys
 }

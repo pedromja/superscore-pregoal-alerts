@@ -73,6 +73,7 @@ import {
   tipAlreadyOpen,
 } from './tips.ts'
 import { warmupSokkerProBoard } from './sokkerpro.ts'
+import { alertKeyFor, loggedAlertId } from './alertKeys.ts'
 import type { PollerStatus } from './types.ts'
 
 const status: PollerStatus = {
@@ -332,8 +333,11 @@ async function dispatchClaimedAlerts(
   const notified: FeedAlert[] = []
   for (const alert of claimed) {
     const copy = alertNotificationCopy(alert)
-    const alertKey = `${fixture.id}:${alert.id}`
-    const monitorUrl = `/#/monitor?alert=${encodeURIComponent(alertKey)}`
+    // UI deep link / learning-store id stay `fixture:alert`; the Telegram side
+    // map + outcome/callback key is market-qualified (corners prefixed).
+    const loggedId = loggedAlertId(fixture.id, alert.id)
+    const alertKey = alertKeyFor(market, fixture.id, alert.id)
+    const monitorUrl = `/#/monitor?alert=${encodeURIComponent(loggedId)}`
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     let notifiedOk = false
     const telegramResult: TelegramSendResult = await sendTelegram({
@@ -342,6 +346,7 @@ async function dispatchClaimedAlerts(
       url: monitorUrl,
       alertKey,
       ruleLabel: alert.ruleName,
+      market,
     })
     if (telegramResult.sent > 0) {
       notifiedOk = true
@@ -368,7 +373,7 @@ async function dispatchClaimedAlerts(
         title: copy.title,
         body: copy.body,
         url: monitorUrl,
-        alertKey,
+        alertKey: loggedId,
         tag: pushTagFor(market, key),
       })
       if (result.sent > 0) {
@@ -383,7 +388,7 @@ async function dispatchClaimedAlerts(
     }
     if (notifiedOk) {
       await withStoreLock(() => {
-        markAlertPushed(alertKey, market, alert.cornerHalf)
+        markAlertPushed(loggedId, market, alert.cornerHalf)
       })
       notified.push(alert)
       sent += 1
@@ -413,7 +418,7 @@ async function attachOddsAndEnrich(args: {
   for (const alert of args.tipAlerts) {
     const enriched = byId.get(alert.id) ?? alert
     const odd = resolvedOddFromAlert(enriched)
-    if (odd && !tipAlreadyOpen(args.fixture.id, alert.id)) {
+    if (odd && !tipAlreadyOpen(args.fixture.id, alert.id, args.market)) {
       createTipFromAlert({ fixture: args.fixture, alert: enriched, odd })
     }
   }

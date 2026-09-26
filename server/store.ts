@@ -21,6 +21,7 @@ import {
 import type { OddsObservation } from '../src/lib/oddsObserve.ts'
 import { oddsLogKey } from '../src/lib/oddsObserve.ts'
 import type { GoalRecord, LoggedAlert, ParamVersion, PushSub, StoredMatch } from './types.ts'
+import { marketFromTelegramText, parseAlertKey } from './alertKeys.ts'
 
 const TIP_OVERLAY_FILE = 'tip_overlay.json'
 const TIP_OVERLAY_PROPOSAL_FILE = 'tip_overlay_proposal.json'
@@ -464,7 +465,8 @@ export function markAlertPushed(
   }
   const h = m === 'corners' ? parseCornerHalf(half) : undefined
   const alerts = loadAlerts(m, h)
-  const idx = alerts.findIndex((a) => a.id === alertId)
+  const loggedId = parseAlertKey(alertId).loggedId
+  const idx = alerts.findIndex((a) => a.id === loggedId)
   if (idx < 0) return false
   if (alerts[idx].sentPush) return true
   alerts[idx] = { ...alerts[idx], sentPush: true }
@@ -479,6 +481,8 @@ export type TelegramMessageRecord = {
   sentAt: string
   outcomeSentAt?: string | null
   callbackToken?: string
+  /** Written since both markets run every tick; legacy records infer it from `text`. */
+  market?: Market
 }
 
 const TELEGRAM_SCOPES: { market: Market; half: CornerHalf }[] = [
@@ -507,10 +511,38 @@ export function saveTelegramMessages(
   writeJson(TELEGRAM_MAP_FILE, capTelegramMap(map))
 }
 
+/** Market of a telegram_messages.json record (explicit, or inferred for legacy rows). */
+export function telegramRecordMarket(
+  rec: Pick<TelegramMessageRecord, 'market' | 'text'> | null | undefined,
+): Market | null {
+  if (!rec) return null
+  return rec.market ?? marketFromTelegramText(rec.text)
+}
+
+/**
+ * Storage key of an alert's record. Corners keys are `corners:`-prefixed now;
+ * records written before that live under the unprefixed key. Fall back to the
+ * legacy key only when that record is itself a corners record, so a goals
+ * record with the same fixture/alert id can never be picked up by corners.
+ */
+function telegramRecordKey(
+  map: Record<string, TelegramMessageRecord>,
+  alertKey: string,
+): string {
+  if (map[alertKey]) return alertKey
+  const { market, loggedId } = parseAlertKey(alertKey)
+  if (market && loggedId !== alertKey) {
+    const legacy = map[loggedId]
+    if (legacy && telegramRecordMarket(legacy) === market) return loggedId
+  }
+  return alertKey
+}
+
 export function getTelegramMessage(
   alertKey: string,
 ): TelegramMessageRecord | null {
-  return loadTelegramMessages()[alertKey] ?? null
+  const map = loadTelegramMessages()
+  return map[telegramRecordKey(map, alertKey)] ?? null
 }
 
 export function findAlertKeyByCallbackToken(token: string): string | null {
@@ -528,7 +560,21 @@ export function upsertTelegramMessage(
   patch: Partial<TelegramMessageRecord>,
 ): TelegramMessageRecord {
   const map = loadTelegramMessages()
-  const prev = map[alertKey]
+  const key = telegramRecordKey(map, alertKey)
+  const stored = map[key]
+  const storedMarket = telegramRecordMarket(stored)
+  const otherMarket = Boolean(
+    stored && patch.market && storedMarket && storedMarket !== patch.market,
+  )
+  // Never merge into a record of the other market. A legacy (unprefixed)
+  // corners record that a new goals alert collides with is kept under its
+  // qualified key so its outcome/callback still resolve.
+  if (otherMarket && storedMarket === 'corners' && !parseAlertKey(key).market) {
+    const qualified = `corners:${key}`
+    if (!map[qualified]) map[qualified] = { ...stored!, market: 'corners' }
+  }
+  const prev = otherMarket ? undefined : stored
+  const market = patch.market ?? prev?.market
   const next: TelegramMessageRecord = {
     messageId: patch.messageId ?? prev?.messageId ?? 0,
     chatId: patch.chatId ?? prev?.chatId ?? '',
@@ -539,30 +585,59 @@ export function upsertTelegramMessage(
         ? patch.outcomeSentAt
         : (prev?.outcomeSentAt ?? null),
     callbackToken: patch.callbackToken ?? prev?.callbackToken,
+    ...(market ? { market } : {}),
   }
-  map[alertKey] = next
+  map[key] = next
   saveTelegramMessages(map)
   return next
 }
 
+/**
+ * Scopes to search for an alert key: an explicit `corners:` prefix pins the
+ * market; an unprefixed key is goals (new format) or a legacy key of either
+ * market, so the stored Telegram record's market (if any) is tried first and
+ * the legacy goals→corners order is kept otherwise.
+ */
+function scopesForAlertKey(alertKey: string): {
+  loggedId: string
+  scopes: { market: Market; half: CornerHalf }[]
+} {
+  const { market, loggedId } = parseAlertKey(alertKey)
+  if (market) {
+    return { loggedId, scopes: TELEGRAM_SCOPES.filter((s) => s.market === market) }
+  }
+  const hint = telegramRecordMarket(loadTelegramMessages()[alertKey])
+  if (hint === 'corners') {
+    return {
+      loggedId,
+      scopes: [
+        ...TELEGRAM_SCOPES.filter((s) => s.market === 'corners'),
+        ...TELEGRAM_SCOPES.filter((s) => s.market !== 'corners'),
+      ],
+    }
+  }
+  return { loggedId, scopes: TELEGRAM_SCOPES }
+}
+
 export function findLoggedAlert(
-  alertId: string,
+  alertKey: string,
 ): { alert: LoggedAlert; market: Market; half: CornerHalf } | null {
-  for (const { market, half } of TELEGRAM_SCOPES) {
-    const alert = loadAlerts(market, half).find((a) => a.id === alertId)
+  const { loggedId, scopes } = scopesForAlertKey(alertKey)
+  for (const { market, half } of scopes) {
+    const alert = loadAlerts(market, half).find((a) => a.id === loggedId)
     if (alert) return { alert, market, half }
   }
   return null
 }
 
 export function patchLoggedAlert(
-  alertId: string,
+  alertKey: string,
   patch: Partial<LoggedAlert>,
 ): LoggedAlert | null {
-  const found = findLoggedAlert(alertId)
+  const found = findLoggedAlert(alertKey)
   if (!found) return null
   const alerts = loadAlerts(found.market, found.half)
-  const idx = alerts.findIndex((a) => a.id === alertId)
+  const idx = alerts.findIndex((a) => a.id === found.alert.id)
   if (idx < 0) return null
   alerts[idx] = { ...alerts[idx], ...patch }
   saveAlerts(alerts, found.market, found.half)
@@ -577,7 +652,8 @@ export function markAlertTelegramMessage(
 ): boolean {
   if (market && parseCornerHalfOpt(half)) {
     const alerts = loadAlerts(market, half)
-    const idx = alerts.findIndex((a) => a.id === alertId)
+    const loggedId = parseAlertKey(alertId).loggedId
+    const idx = alerts.findIndex((a) => a.id === loggedId)
     if (idx < 0) return false
     alerts[idx] = { ...alerts[idx], telegramMessageId: messageId }
     saveAlerts(alerts, market, half)

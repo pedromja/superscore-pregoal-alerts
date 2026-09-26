@@ -27,6 +27,8 @@ export type TelegramPayload = {
   url: string
   alertKey: string
   ruleLabel?: string
+  /** Stored on the telegram_messages.json record (both markets share that file). */
+  market?: Market
 }
 
 export type TelegramSendResult = {
@@ -172,6 +174,7 @@ function persistTelegramMessageId(
   alertKey: string,
   messageId: number,
   text: string,
+  market?: Market,
 ): void {
   const callback = buildResolveCallbackData(alertKey)
   const token = callback.startsWith(RESOLVE_CALLBACK_PREFIX)
@@ -183,6 +186,7 @@ function persistTelegramMessageId(
     text,
     sentAt: new Date().toISOString(),
     callbackToken: token !== alertKey ? token : undefined,
+    ...(market ? { market } : {}),
   })
   markAlertTelegramMessage(alertKey, messageId)
 }
@@ -284,7 +288,12 @@ export async function sendTelegramAlert(
       status.lastSendAt = new Date().toISOString()
       status.lastError = null
       if (parsed.messageId != null) {
-        persistTelegramMessageId(payload.alertKey, parsed.messageId, text)
+        persistTelegramMessageId(
+          payload.alertKey,
+          parsed.messageId,
+          text,
+          payload.market,
+        )
       }
       return { sent: 1, skipped: false, messageId: parsed.messageId }
     }

@@ -49,6 +49,7 @@ import type {
   Market,
 } from '../src/lib/types.ts'
 import { cornerHalfOf } from '../src/lib/windows.ts'
+import { tipIdFor } from './alertKeys.ts'
 import { loadSuperbetEvent, resolveSuperScoreMaisUm, snapshotsFromEvent } from './odds.ts'
 import {
   loadSokkerProMatchOdds,
@@ -312,9 +313,21 @@ export function logTipSkip(reason: string, extra: Record<string, unknown>): void
   appendTipSkip(entry)
 }
 
-export function tipAlreadyOpen(fixtureId: string, alertId: string): boolean {
+/**
+ * Tips of both markets share tips.json and the same rule-level `alertId`, so
+ * the market must match too. Legacy tips (unprefixed id) always carry `market`.
+ * Without `market` the legacy any-market check is kept.
+ */
+export function tipAlreadyOpen(
+  fixtureId: string,
+  alertId: string,
+  market?: Market,
+): boolean {
   return loadTips().some(
-    (t) => t.fixtureId === fixtureId && t.alertId === alertId,
+    (t) =>
+      t.fixtureId === fixtureId &&
+      t.alertId === alertId &&
+      (market === undefined || parseMarket(t.market) === market),
   )
 }
 
@@ -331,7 +344,7 @@ export function createTipFromAlert(args: {
     args.alert.cornerHalf,
   )
   const tip: Tip = {
-    id: `tip-${args.fixture.id}-${args.alert.id}`,
+    id: tipIdFor(market, args.fixture.id, args.alert.id),
     ts: args.alert.firedAt || new Date().toISOString(),
     league: args.odd.league || args.fixture.competition,
     home: args.fixture.team1,
