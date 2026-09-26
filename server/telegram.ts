@@ -32,6 +32,8 @@ export type TelegramPayload = {
   market?: Market
   /** Short line under the title, e.g. "✅ Filtro" when the quality overlay passed. */
   qualityLine?: string
+  /** League hit-rate line (e.g. "📊 Liga (golos): 4/6 · 67 %"), before the monitor link. */
+  leagueLine?: string
 }
 
 export type TelegramFailureKind =
@@ -118,6 +120,9 @@ export function formatTelegramHtml(payload: TelegramPayload): string {
   ]
   if (payload.ruleLabel) {
     lines.push(escapeTelegramHtml(payload.ruleLabel))
+  }
+  if (payload.leagueLine) {
+    lines.push(escapeTelegramHtml(payload.leagueLine))
   }
   const href = resolveMonitorUrl(payload.url)
   if (href) {

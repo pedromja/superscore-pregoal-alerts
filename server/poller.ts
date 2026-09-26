@@ -22,6 +22,7 @@ import type {
   MomentumPayload,
 } from '../src/lib/types.ts'
 import {
+  MATCHES_DIR,
   MIN_NOTIFY_LEAD_MIN,
   POLLER_CONCURRENCY,
   POLLER_ENABLED,
@@ -35,6 +36,7 @@ import {
   POLLER_TICK_WATCHDOG_MS,
   webPushEnabled,
 } from './config.ts'
+import { leagueLineForAlert, primeLeagueStats } from './leagueStats.ts'
 import { currentSettings, ingestFeedAlerts, labelMatch } from './learn.ts'
 import {
   resetTelegramOutcomesForTests,
@@ -576,6 +578,14 @@ async function dispatchClaimedAlerts(
       market,
       qualityLine:
         alert.overlay?.enforced && alert.overlay.pass ? QUALITY_FILTER_LINE : undefined,
+      leagueLine:
+        leagueLineForAlert({
+          market,
+          fixtureId: fixture.id,
+          competition: fixture.competition,
+          half: alert.cornerHalf,
+          alertId: loggedId,
+        }) ?? undefined,
     }
     const firstAttemptAt = telegramRetryNow()
     const telegramResult: TelegramSendResult = await sendTelegram(telegramPayload)
@@ -1059,6 +1069,10 @@ export async function tick(): Promise<void> {
 
 export function startPoller(): void {
   if (!POLLER_ENABLED) return
+  // League hit-rate index for the Telegram line: filled once, off the tick.
+  void primeLeagueStats({ matchesDir: MATCHES_DIR, loadAlerts }).catch((err) => {
+    console.warn('[league] index falhou', err instanceof Error ? err.message : err)
+  })
   void tick()
   setInterval(() => {
     void tick()
