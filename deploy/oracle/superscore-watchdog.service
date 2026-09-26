@@ -1,0 +1,5 @@
+[Unit]
+Description=SuperScore stale-tick watchdog
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/superscore-watchdog.sh

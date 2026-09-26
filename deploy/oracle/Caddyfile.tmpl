@@ -1,0 +1,9 @@
+# __HOST__ is <public-ip-with-dashes>.sslip.io (free wildcard DNS). Caddy gets a free Let's Encrypt cert.
+__HOST__ {
+	encode gzip
+	reverse_proxy 127.0.0.1:8080
+}
+# Plain http://<ip> also works (redirects to the HTTPS hostname).
+http://__IP__ {
+	redir https://__HOST__{uri} permanent
+}
