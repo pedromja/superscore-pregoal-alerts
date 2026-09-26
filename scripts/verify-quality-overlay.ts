@@ -302,8 +302,15 @@ try {
   expect(store.loadGoals('goals', 'ht').some((g) => g.fixtureId === FID && g.min === 31), 'goal learned')
   const fixtureTips = store.loadTips().filter((t) => t.fixtureId === FID)
   expect(fixtureTips.length === 3, `tips only for notified alerts (25' goals, 37' corners, 78' goals), got ${fixtureTips.length}`)
+  // Outcomes are appended to the delivered alert messages (inline edits).
+  const outcomeEdits = new Set(
+    calls
+      .filter((c) => c.method === 'editMessageText' && /GREEN|RED/.test(String(c.body.text)))
+      .map((c) => c.body.message_id),
+  )
+  expect(outcomeEdits.size === 3, `outcome edits only for delivered alerts, got ${outcomeEdits.size}`)
   const outcomeSends = calls.filter((c) => c.method === 'sendMessage' && /GREEN|RED/.test(String(c.body.text)))
-  expect(outcomeSends.length === 3, `outcome notices only for delivered alerts, got ${outcomeSends.length}`)
+  expect(outcomeSends.length === 0, `no outcome messages (edited inline), got ${outcomeSends.length}`)
 
   // Stats: overlay vs base per market×half.
   const s = qo.overlayStats('goals', 'ht')
