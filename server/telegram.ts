@@ -178,9 +178,7 @@ export function parseResolveCallbackData(data: string): string | null {
   return findAlertKeyByCallbackToken(rest) ?? rest
 }
 
-export function resolveNowKeyboard(alertKey: string): {
-  inline_keyboard: { text: string; callback_data: string }[][]
-} {
+export function resolveNowKeyboard(alertKey: string): InlineKeyboard {
   return {
     inline_keyboard: [
       [{ text: RESOLVE_NOW_LABEL, callback_data: buildResolveCallbackData(alertKey) }],
@@ -198,15 +196,20 @@ function persistTelegramMessageId(
   const token = callback.startsWith(RESOLVE_CALLBACK_PREFIX)
     ? callback.slice(RESOLVE_CALLBACK_PREFIX.length)
     : undefined
+  const chatId = telegramChatId()
+  const sentAt = new Date().toISOString()
   upsertTelegramMessage(alertKey, {
     messageId,
-    chatId: telegramChatId(),
+    chatId,
     text,
-    sentAt: new Date().toISOString(),
+    sentAt,
     callbackToken: token !== alertKey ? token : undefined,
     ...(market ? { market } : {}),
   })
-  markAlertTelegramMessage(alertKey, messageId)
+  markAlertTelegramMessage(alertKey, messageId, undefined, undefined, {
+    telegramChatId: chatId,
+    telegramSentAt: sentAt,
+  })
 }
 
 export function getTelegramStatus(): TelegramStatus {
@@ -460,6 +463,65 @@ export async function sendTelegramOutcomeNotice(args: {
     return { sent: 1, skipped: false, messageId: fresh.parsed.messageId }
   }
   return recordFailure(alertKey, reasonFromApi(fresh.parsed, token))
+}
+
+export type TelegramEditResult = {
+  ok: boolean
+  /** Telegram answered "message is not modified" (treated as success). */
+  notModified?: boolean
+  skipped?: boolean
+  reason?: string
+}
+
+export function isTelegramNotModified(description: string): boolean {
+  return /message is not modified/i.test(description)
+}
+
+export type InlineKeyboard = {
+  inline_keyboard: { text: string; callback_data: string }[][]
+}
+
+/**
+ * editMessageText on an alert message (HTML, previews off). `replyMarkup`
+ * keeps the "Resolver agora" button; `{ inline_keyboard: [] }` removes it.
+ * Never throws; "message is not modified" counts as success. No retries here
+ * (callers serialise per message and never loop).
+ */
+export async function editTelegramMessage(args: {
+  alertKey: string
+  chatId?: string
+  messageId: number
+  text: string
+  replyMarkup?: InlineKeyboard
+}): Promise<TelegramEditResult> {
+  if (!telegramEnabled()) {
+    return { ok: false, skipped: true, reason: telegramConfigured() ? 'desligado' : 'não configurado' }
+  }
+  const token = telegramBotToken()
+  try {
+    const parsed = await callTelegramApi('editMessageText', {
+      chat_id: args.chatId || telegramChatId(),
+      message_id: args.messageId,
+      text: args.text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...(args.replyMarkup ? { reply_markup: args.replyMarkup } : {}),
+    })
+    if (parsed.ok) return { ok: true }
+    if (isTelegramNotModified(parsed.description)) return { ok: true, notModified: true }
+    const reason = reasonFromApi(parsed, token)
+    console.warn('[telegram] edit falhou', args.alertKey, reason)
+    return { ok: false, reason }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const failure = classifyTelegramThrown(err)
+    const reason = sanitizeError(
+      failure.failureKind === 'timeout' ? `timeout ${TELEGRAM_TIMEOUT_MS}ms` : message,
+      token,
+    )
+    console.warn('[telegram] edit falhou', args.alertKey, reason)
+    return { ok: false, reason }
+  }
 }
 
 export async function answerTelegramCallback(

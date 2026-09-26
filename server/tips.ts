@@ -49,7 +49,7 @@ import type {
   Market,
 } from '../src/lib/types.ts'
 import { cornerHalfOf } from '../src/lib/windows.ts'
-import { tipIdFor } from './alertKeys.ts'
+import { loggedAlertId, tipIdFor } from './alertKeys.ts'
 import { loadSuperbetEvent, resolveSuperScoreMaisUm, snapshotsFromEvent } from './odds.ts'
 import {
   loadSokkerProMatchOdds,
@@ -59,6 +59,7 @@ import {
 import {
   appendOddsObservation,
   appendTipSkip,
+  loadAlerts,
   loadOddsObservations,
   loadRobobetQuotes,
   loadTipOverlay,
@@ -373,10 +374,35 @@ export function createTipFromAlert(args: {
     settledAt: null,
     longDeadline: null,
   }
+  // Tip rules unchanged (still needs an odd); a VOID alert's tip is only
+  // flagged so ROI / league follow-up skip it.
+  const logged = loadAlerts(market, half).find(
+    (a) => a.id === loggedAlertId(args.fixture.id, args.alert.id),
+  )
+  if (logged?.void) {
+    tip.void = true
+    tip.voidReason = logged.voidReason
+  }
   const tips = loadTips().filter((t) => t.id !== tip.id)
   tips.push(tip)
   saveTips(tips)
   return tip
+}
+
+/** VOID alert → flag its tip (if one was opened). Returns true when a tip changed. */
+export function markTipVoidForAlert(
+  market: Market,
+  fixtureId: string,
+  alertId: string,
+  reason: string,
+): boolean {
+  const id = tipIdFor(market, fixtureId, alertId)
+  const tips = loadTips()
+  const idx = tips.findIndex((t) => t.id === id)
+  if (idx < 0 || tips[idx].void) return false
+  tips[idx] = { ...tips[idx], void: true, voidReason: reason }
+  saveTips(tips)
+  return true
 }
 
 export function tipNotificationCopy(tip: Tip): { title: string; body: string } {

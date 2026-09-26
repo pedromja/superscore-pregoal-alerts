@@ -31,6 +31,12 @@ export type Tip = {
   cornersTally?: MatchTally
   settledAt: string | null
   longDeadline: number | null
+  /**
+   * Alert was VOID (line already beaten when it was sent). The tip stays for
+   * audit but is excluded from ROI and league follow-up.
+   */
+  void?: boolean
+  voidReason?: string
 }
 
 export type RoiRow = {
@@ -120,6 +126,7 @@ export function computeRoi(tips: Tip[]): RoiRow[] {
     ENTRY_ORDER.map((key) => [key, emptyRow(key)]),
   )
   for (const tip of tips) {
+    if (tip.void) continue
     const key = entryTypeOf(tip.market, tip.half)
     const row = byKey.get(key) ?? emptyRow(key)
     row.tips += 1
@@ -146,6 +153,7 @@ export function computeRoi(tips: Tip[]): RoiRow[] {
 export function computeLeagueFollowup(tips: Tip[]): LeagueRow[] {
   const by = new Map<string, LeagueRow>()
   for (const tip of tips) {
+    if (tip.void) continue
     const league = tip.league.trim() || 'Sem liga'
     const row = by.get(league) ?? {
       league,

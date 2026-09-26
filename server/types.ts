@@ -45,9 +45,48 @@ export type LoggedAlert = {
   telegramMessageId?: number
   /** ISO timestamp after the GREEN/RED outcome notice was sent (idempotency). */
   telegramOutcomeSentAt?: string | null
+  /** Chat the live Telegram alert went to (edits target chat_id + message_id). */
+  telegramChatId?: string
+  /** Wall-clock ISO time the live Telegram alert was delivered. */
+  telegramSentAt?: string
+  /** What the feed showed when the alert was sent (VOID re-check baseline). */
+  sendSnapshot?: AlertSendSnapshot
+  /** Last VOID re-check (audit trail, also when the alert stayed valid). */
+  voidCheck?: VoidCheckRecord
+  /**
+   * Line already beaten when the alert was sent. Kept for audit but excluded
+   * from every counted stat (precision/overlay/tips ROI/league) and never
+   * gets a GREEN/RED outcome.
+   */
+  void?: boolean
+  voidReason?: string
+  voidAt?: string
   odds?: OddsObservation
   /** Quality overlay decision; absent on alerts stored before the overlay. */
   overlay?: AlertOverlay
+}
+
+export type AlertSendSnapshot = {
+  /** Wall-clock ISO time of the successful send. */
+  sentAt: string
+  /** Latest momentum clock in the payload the alert was sent from. */
+  clockMin: number | null
+  clockPeriod: number | null
+  /** Market events (goals type 4 / corners type 14) at the alert minute = score in the message. */
+  totalAtAlert: number
+}
+
+export type VoidCheckResult = 'void' | 'clean' | 'same-minute' | 'no-data'
+
+export type VoidCheckRecord = {
+  checkedAt: string
+  result: VoidCheckResult
+  source: 'superscore-fresh' | 'superscore-stored' | 'none'
+  /** Market events strictly before the send clock minute in the fresh feed. */
+  totalBeforeSend: number | null
+  totalAtAlert: number
+  /** Event that beat the line (VOID) or the same-minute event (ambiguous). */
+  event?: { min: number; period: number; side: 'home' | 'away' } | null
 }
 
 export type GoalRecord = {

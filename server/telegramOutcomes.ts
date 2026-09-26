@@ -8,11 +8,19 @@ import {
   getTelegramMessage,
   loadAlerts,
   telegramOutcomeAlreadySent,
+  upsertTelegramMessage,
 } from './store.ts'
 import {
   formatTelegramOutcomeHtml,
   sendTelegramOutcomeNotice,
 } from './telegram.ts'
+import { formatTelegramResultLine } from './telegramCompose.ts'
+import {
+  alertEditSucceeded,
+  inlineEditsActive,
+  requestTelegramAlertEdit,
+  telegramRecordEditable,
+} from './telegramEdits.ts'
 import type { LoggedAlert } from './types.ts'
 
 const pending = new Set<string>()
@@ -40,6 +48,8 @@ export function enqueueSettledTelegramOutcomes(alerts: LoggedAlert[]): string[] 
   const keys: string[] = []
   for (const alert of alerts) {
     if (!alertOutcomeSettled(alert)) continue
+    // VOID alerts never get a GREEN/RED (not counted, not announced).
+    if (alert.void) continue
     // Market-qualified: a goals and a corners alert may share `alert.id`.
     const key = loggedAlertKey(alert)
     if (telegramOutcomeAlreadySent(key)) continue
@@ -91,12 +101,30 @@ function wasNotified(alert: LoggedAlert, messageId?: number): boolean {
   return Boolean(alert.sentPush || alert.telegramMessageId || messageId)
 }
 
+/**
+ * Inline path: append the GREEN/RED line to the original alert (edit, keyboard
+ * removed). Returns false when the edit did not land so the caller falls back
+ * to the legacy reply once (no retry loop).
+ */
+async function editOutcomeInline(alertKey: string, alert: LoggedAlert): Promise<boolean> {
+  upsertTelegramMessage(alertKey, { resultLine: formatTelegramResultLine(alert) })
+  const outcome = await requestTelegramAlertEdit(alertKey, 'resultado')
+  if (alertEditSucceeded(outcome)) return true
+  console.warn(
+    '[telegram] resultado inline falhou — a responder com mensagem',
+    alertKey,
+    outcome.reason || outcome.kind,
+  )
+  return false
+}
+
 async function sendOutcomeForKey(alertKey: string): Promise<void> {
   if (!telegramEnabled()) return
   if (telegramOutcomeAlreadySent(alertKey)) return
 
   const found = findLoggedAlert(alertKey)
   if (!found || !alertOutcomeSettled(found.alert)) return
+  if (found.alert.void) return
 
   const rec = getTelegramMessage(alertKey)
   const messageId = found.alert.telegramMessageId ?? rec?.messageId
@@ -106,17 +134,24 @@ async function sendOutcomeForKey(alertKey: string): Promise<void> {
 
   if (!claimTelegramOutcome(alertKey)) return
 
+  const inline = inlineEditsActive() && telegramRecordEditable(rec)
+  if (inline && (await editOutcomeInline(alertKey, found.alert))) return
+
+  // Legacy path (alerts without an editable message, inline edits off, or a
+  // failed edit): reply to the alert. After a failed inline edit we do not try
+  // a second edit inside the legacy notice.
   const text = formatTelegramOutcomeHtml(found.alert)
   const replyTo = messageId && messageId > 0 ? messageId : undefined
   const result = await sendTelegramOutcomeNotice({
     alertKey,
     text,
     replyToMessageId: replyTo,
-    originalText: rec?.text,
+    originalText: inline ? undefined : rec?.text,
   })
 
   if (result.skipped || result.sent < 1) {
     clearTelegramOutcomeClaim(alertKey)
+    if (inline) upsertTelegramMessage(alertKey, { resultLine: null })
     if (!result.skipped) {
       console.warn(
         '[telegram] outcome não enviado',

@@ -224,7 +224,12 @@ async function runAlert(fixtureId: string): Promise<number> {
 function scriptedFetch(steps: (() => Response | Promise<Response>)[]) {
   const calls: Record<string, unknown>[] = []
   let messageId = 7000
-  telegram.setTelegramFetchForTests(async (_input, init) => {
+  telegram.setTelegramFetchForTests(async (input, init) => {
+    // Only live-alert sends are scripted/counted; the later odds-line edit
+    // (editMessageText) of a delivered alert is answered OK and not counted.
+    if (!String(input).endsWith('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 })
+    }
     calls.push(JSON.parse(String(init?.body ?? '{}')))
     const step = steps[Math.min(calls.length - 1, steps.length - 1)]!
     const res = await step()

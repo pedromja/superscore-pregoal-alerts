@@ -98,10 +98,14 @@ export type OverlayScopeStats = {
   /** Passed + claimed for notification (the cap counts these). */
   overlayNotified: OverlayBucket
   blockReasons: Record<string, number>
+  /** Primary alerts flagged VOID (line beaten at send) — excluded from every bucket. */
+  voided: number
 }
 
 export function overlayStatsFor(alerts: LoggedAlert[], market: Market, half: CornerHalf): OverlayScopeStats {
-  const primary = alerts.filter((a) => a.ruleId === 'primary')
+  const allPrimary = alerts.filter((a) => a.ruleId === 'primary')
+  // VOID alerts stay stored (audit) but never count as won/settled.
+  const primary = allPrimary.filter((a) => !a.void)
   const withOverlay = primary.filter((a) => a.overlay)
   const blockReasons: Record<string, number> = {}
   for (const a of withOverlay) {
@@ -117,6 +121,7 @@ export function overlayStatsFor(alerts: LoggedAlert[], market: Market, half: Cor
     delivered: bucket(withOverlay.filter((a) => a.sentPush)),
     overlayNotified: bucket(withOverlay.filter((a) => a.overlay!.pass && a.overlay!.notified)),
     blockReasons,
+    voided: allPrimary.length - primary.length,
   }
 }
 

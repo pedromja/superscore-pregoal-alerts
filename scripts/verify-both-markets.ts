@@ -193,7 +193,7 @@ try {
   expect(calls.filter((c) => c.method === 'sendMessage').length === 2, 'no duplicate sends on re-tick')
 
   // Tick 4 — full time: a corner at 40' (lead 2) and no goal.
-  // Corners → GREEN, goals → RED, each replied to its own message.
+  // Corners → GREEN, goals → RED, each appended to its own message.
   current = payload(90, true)
   currentFixture = fixture(true)
   await poller.tick()
@@ -207,14 +207,27 @@ try {
   expect(store.loadGoals('corners', 'ht').some((g) => g.fixtureId === FID && g.min === 40), 'corner event learned (corners store)')
   expect(!store.loadGoals('goals', 'ht').some((g) => g.fixtureId === FID), 'no goal event in goals store')
 
-  const outcomeSends = calls.slice(2).filter((c) => c.method === 'sendMessage')
-  const red = outcomeSends.find((c) => String(c.body.text).includes('RED'))
-  const green = outcomeSends.find((c) => String(c.body.text).includes('GREEN'))
-  expect(outcomeSends.length === 2, `two outcome notices, got ${outcomeSends.length}`)
-  expect(Boolean(red && String(red.body.text).includes('Golo')), 'RED is the goals outcome')
-  expect(Boolean(green && String(green.body.text).includes('Canto')), 'GREEN is the corners outcome')
-  expect(red?.body.reply_to_message_id === gRec?.messageId, 'RED replies to the goals message')
-  expect(green?.body.reply_to_message_id === cRec?.messageId, 'GREEN replies to the corners message')
+  // Inline edits: the result is appended to each market's own alert message
+  // (editMessageText, keyboard removed) — no new message per outcome.
+  expect(
+    calls.filter((c) => c.method === 'sendMessage').length === 2,
+    `outcomes do not send new messages, got ${calls.filter((c) => c.method === 'sendMessage').length} sendMessage`,
+  )
+  const edits = calls.filter((c) => c.method === 'editMessageText')
+  const lastEditOf = (messageId: number | undefined) =>
+    edits.filter((c) => c.body.message_id === messageId).at(-1)
+  const red = lastEditOf(gRec?.messageId)
+  const green = lastEditOf(cRec?.messageId)
+  expect(Boolean(red && String(red.body.text).startsWith('<b>Golo')), 'RED edits the goals message')
+  expect(Boolean(green && String(green.body.text).startsWith('<b>Canto')), 'GREEN edits the corners message')
+  expect(String(red?.body.text).trimEnd().split('\n').at(-1)?.includes('🔴 RED') === true, `RED appended last, got ${red?.body.text}`)
+  expect(String(green?.body.text).trimEnd().split('\n').at(-1)?.includes('🟢 GREEN') === true, `GREEN appended last, got ${green?.body.text}`)
+  expect(String(red?.body.text).includes('💰 Odd'), 'goals odds line kept under the result')
+  expect(
+    (red?.body.reply_markup as { inline_keyboard?: unknown[] } | undefined)?.inline_keyboard?.length === 0 &&
+      (green?.body.reply_markup as { inline_keyboard?: unknown[] } | undefined)?.inline_keyboard?.length === 0,
+    'final edit removes the Resolver agora button',
+  )
 
   const settledTips = store.loadTips().filter((t) => t.fixtureId === FID)
   expect(settledTips.find((t) => t.market === 'corners')?.status === 'won', 'corners tip won')

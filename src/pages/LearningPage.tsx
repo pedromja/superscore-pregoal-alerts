@@ -372,6 +372,11 @@ function LearnBody({
                   {alert.matchLabel} · {alert.minute}' · {alert.ruleId}
                   {alert.cornerHalf ? ` · ${alert.cornerHalf.toUpperCase()}` : ''}
                 </p>
+                {alert.void ? (
+                  <p className="font-mono text-[11px] text-emerald-100/70" title={alert.voidReason}>
+                    ⚪ VOID · linha já batida ao enviar (fora das estatísticas)
+                  </p>
+                ) : null}
                 <p className="font-mono text-[11px] text-emerald-100/45">
                   v {alert.features.v} · {shortLabel}{' '}
                   {yn(alert.hit5 ?? alert.hit)}
