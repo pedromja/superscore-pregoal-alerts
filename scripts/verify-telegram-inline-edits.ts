@@ -470,6 +470,32 @@ try {
   expect(fb.length === 1 && fb[0]?.body.reply_to_message_id === s8.messageId, 'failed edit → one reply fallback (old behaviour)')
   expect(Boolean(store.getTelegramMessage(s8.key)?.lastEditError), 'edit error recorded on the record')
 
+  // Transient edit failures (fetch failed / 5xx) retry with backoff, bounded.
+  edits.setEditRetryDelaysForTests([1, 1])
+  let flaky = 2
+  editHandler = () => {
+    if (flaky > 0) {
+      flaky -= 1
+      throw new TypeError('fetch failed')
+    }
+    return json({ ok: true, result: true })
+  }
+  store.upsertTelegramMessage(s8.key, { lastEditText: undefined, oddsLine: '💰 Odd +0.5 golos: 1.75 (RoboBet)' })
+  const before8c = calls.length
+  const flakyRes = await edits.requestTelegramAlertEdit(s8.key, 'test')
+  expect(flakyRes.kind === 'edited' && editsOf(s8.messageId, before8c).length === 3, `network error retried until edited (3 calls), got ${flakyRes.kind} / ${editsOf(s8.messageId, before8c).length}`)
+  editHandler = () => json({ ok: false, error_code: 502, description: 'Bad Gateway' }, 502)
+  store.upsertTelegramMessage(s8.key, { lastEditText: undefined, oddsLine: '💰 Odd +0.5 golos: 1.80 (RoboBet)' })
+  const before8d = calls.length
+  const down = await edits.requestTelegramAlertEdit(s8.key, 'test')
+  expect(down.kind === 'failed' && editsOf(s8.messageId, before8d).length === 3, `5xx: bounded to 3 calls, got ${editsOf(s8.messageId, before8d).length}`)
+  editHandler = () => json({ ok: false, error_code: 400, description: "Bad Request: can't parse entities" }, 400)
+  store.upsertTelegramMessage(s8.key, { lastEditText: undefined, oddsLine: '💰 Odd +0.5 golos: 1.90 (RoboBet)' })
+  const before8e = calls.length
+  await edits.requestTelegramAlertEdit(s8.key, 'test')
+  expect(editsOf(s8.messageId, before8e).length === 1, '400 is final: one call')
+  edits.setEditRetryDelaysForTests(null)
+
   // ── 9. VOID: event before the send ⇒ VOID, edited, excluded from stats ──
   setup()
   voidMod.setVoidCheckForTests({

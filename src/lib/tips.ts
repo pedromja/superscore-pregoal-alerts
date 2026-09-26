@@ -150,11 +150,16 @@ export function computeRoi(tips: Tip[]): RoiRow[] {
   })
 }
 
+/** League key shared by the league follow-up and the Telegram league line. */
+export function leagueKeyOf(league: string | null | undefined): string {
+  return (league ?? '').trim() || 'Sem liga'
+}
+
 export function computeLeagueFollowup(tips: Tip[]): LeagueRow[] {
   const by = new Map<string, LeagueRow>()
   for (const tip of tips) {
     if (tip.void) continue
-    const league = tip.league.trim() || 'Sem liga'
+    const league = leagueKeyOf(tip.league)
     const row = by.get(league) ?? {
       league,
       tips: 0,

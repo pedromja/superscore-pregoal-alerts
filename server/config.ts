@@ -137,6 +137,16 @@ export function telegramOddsEditMaxMs(): number {
   return positiveIntEnv('TELEGRAM_ODDS_EDIT_MAX_MS', 90_000)
 }
 
+/** League hit-rate line on Telegram alerts. `TELEGRAM_LEAGUE_STATS=0|off` disables it. */
+export function telegramLeagueStatsEnabled(): boolean {
+  return parseEnabledFlag(process.env.TELEGRAM_LEAGUE_STATS, true)
+}
+
+/** Minimum settled, non-VOID alerts of the league+market before the line shows. */
+export function telegramLeagueStatsMin(): number {
+  return positiveIntEnv('TELEGRAM_LEAGUE_STATS_MIN', 3)
+}
+
 /** Quick VOID check after a delivered alert. `VOID_CHECK=0|off` disables it. */
 export function voidCheckEnabled(): boolean {
   return parseEnabledFlag(process.env.VOID_CHECK, true)
