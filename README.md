@@ -101,6 +101,19 @@ Quando a aprendizagem marca `hit5` / `hitLong` (`true`|`false`), o servidor tent
 
 Cada aviso leva um botão **Resolver agora**. O clique reavalia o alerta contra o momentum SuperScore actual (ou o último snapshot em disco). Se já houver evento no horizonte → 🟢/🔴 e marca settled. Se ainda for cedo / sem evento → reply `ainda sem resolução` (**nunca** marca vermelho prematuro). O handler é async (webhook `POST /api/telegram/webhook` com `X-Telegram-Bot-Api-Secret-Token`, ou long-poll se o webhook falhar). Chats desconhecidos são ignorados. A validação em lote nas horas mortas (~04:01 PT) continua à parte e não-prioritária.
 
+### Filtro de qualidade (overlay de notificação)
+
+`QUALITY_OVERLAY=on|off` (default **on**). Camada **por cima** das definições locked: a regra Primária continua a gerar, gravar, liquidar e aprender **todos** os alertas exactamente como antes; o overlay só decide quais Primárias vão para Telegram/push (backtest sobre avisos reais entregues, 26/set). Sem bans de liga e sem filtros de odd.
+
+| Âmbito | Notifica só se |
+|---|---|
+| Cantos HT (32–42) | minuto ≤ 38 |
+| Golos HT (20–42) | \|v\| ≥ 85 ∧ (\|Δ1\| ≥ 70 ∨ Sustained \|v\|≥30 ×4) ∧ \|diferença de golos\| ≤ 1 (mesmas métricas da Primária locked) |
+| Golos FT / Cantos FT | o lado que pressiona (sinal do momentum do alerta) **não** está a ganhar; lado desconhecido → não notifica (`side-unknown`) |
+| Todos | no máximo **1** aviso notificado por jogo × mercado × parte (conta só alertas que passaram o overlay e foram notificados; deriva dos alertas gravados, sobrevive a restarts) |
+
+Cada alerta grava `overlay: { version, pass, reasons[], enforced, notified }`. Um alerta bloqueado consome a sent-key (não é reconsiderado a cada tick) mas continua na aprendizagem e é liquidado como os outros. Com `QUALITY_OVERLAY=off` tudo é enviado como antes e a decisão continua gravada (para comparar). Avisos que passaram levam a linha **✅ Filtro** por baixo do título. Stats (ganhos/liquidados por mercado×parte, base vs overlay vs entregues): `GET /api/learn/overlay` e `qualityOverlay` em `GET /api/learn/summary`; lista com decisão: `GET /api/learn/alerts?market=goals&half=ht&overlay=pass|block&fixture=…&limit=…`.
+
 Health: `GET /api/telegram/status` (`configured`, `enabled`, `lastSendAt`, `lastError` — **sem secrets**). O mesmo bloco entra em `GET /api/poller/status`.
 
 ### Variáveis no Railway

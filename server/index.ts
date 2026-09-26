@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import express from 'express'
 import { alertNotificationCopy, sampleFeedAlert } from '../src/lib/tally.ts'
 import type { CornerHalf, Market } from '../src/lib/types.ts'
-import { parseCornerHalfOpt } from '../src/lib/windows.ts'
+import { parseCornerHalf, parseCornerHalfOpt } from '../src/lib/windows.ts'
 import { DEFINITIONS_LOCKED } from '../src/lib/lock.ts'
 import {
   LEARN_AUTO_APPLY,
@@ -53,6 +53,7 @@ import {
   proposeTipOverlay,
   tipsPayload,
 } from './tips.ts'
+import { overlayConfig, overlayStats, overlayStatsFor } from './qualityOverlay.ts'
 import type { PushSub } from './types.ts'
 
 const app = express()
@@ -78,6 +79,7 @@ function halfFromReq(req: express.Request): CornerHalf | undefined {
 
 function learnPayload(market: Market, half?: CornerHalf) {
   const settings = currentSettings(market, half)
+  const alerts = loadAlerts(market, half)
   return {
     market,
     half: settings.cornerHalf,
@@ -85,7 +87,11 @@ function learnPayload(market: Market, half?: CornerHalf) {
     settings,
     proposal: loadProposal(market, half),
     history: loadHistory(market, half).slice(-12).reverse(),
-    recentAlerts: loadAlerts(market, half).slice(-40).reverse(),
+    recentAlerts: alerts.slice(-40).reverse(),
+    qualityOverlay: {
+      ...overlayConfig(),
+      stats: overlayStatsFor(alerts, market, parseCornerHalf(settings.cornerHalf)),
+    },
     autoAfter: LEARN_AUTO_MIN_OUTCOMES,
     autoApply: false,
     confirmRequired: true,
@@ -314,6 +320,33 @@ app.get('/api/learn/summary', (req, res) => {
     return
   }
   res.json(learnPayload(market, half))
+})
+
+/** Quality overlay: switch + won/settled per market×half, overlay vs base. */
+app.get('/api/learn/overlay', (_req, res) => {
+  const scopes = EVALUATED_MARKETS.flatMap((market) =>
+    (['ht', 'ft'] as const).map((half) => overlayStats(market, half)),
+  )
+  res.json({ ...overlayConfig(), scopes })
+})
+
+/** Stored alerts (newest first) with their overlay decision. */
+app.get('/api/learn/alerts', (req, res) => {
+  const market = marketFromReq(req)
+  const half = halfFromReq(req) ?? 'ht'
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 1000)
+  const fixture = typeof req.query.fixture === 'string' ? req.query.fixture : ''
+  const overlayQ = typeof req.query.overlay === 'string' ? req.query.overlay : ''
+  let alerts = loadAlerts(market, half)
+  if (fixture) alerts = alerts.filter((a) => a.fixtureId === fixture)
+  if (overlayQ === 'pass') alerts = alerts.filter((a) => a.overlay?.pass)
+  if (overlayQ === 'block') alerts = alerts.filter((a) => a.overlay && !a.overlay.pass)
+  res.json({
+    market,
+    half,
+    total: alerts.length,
+    alerts: alerts.slice(-limit).reverse(),
+  })
 })
 
 app.post('/api/learn/alerts', (req, res) => {
