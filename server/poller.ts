@@ -1,7 +1,12 @@
 import { pushTagFor } from '../src/lib/market.ts'
 import { ruleNotifyEnabled } from '../src/lib/notifications.ts'
 import { notifySuppressReason } from '../src/lib/notifyLead.ts'
-import { evaluateAlerts, extractMarketEvents, settingsForAlert } from '../src/lib/rules.ts'
+import {
+  evaluateAlerts,
+  extractMarketEvents,
+  normalizeTimeline,
+  settingsForAlert,
+} from '../src/lib/rules.ts'
 import { inMarketClockWindow } from '../src/lib/windows.ts'
 import { alertNotificationCopy, withMatchTallies } from '../src/lib/tally.ts'
 import type {
@@ -53,7 +58,10 @@ import {
   UpstreamJsonError,
 } from './ss.ts'
 import {
+  getTelegramMessage,
   isPrimed,
+  loadAlerts,
+  loadMatch,
   loadSent,
   loadSubscriptions,
   markAlertPushed,
@@ -63,7 +71,13 @@ import {
   primeFixture,
   saveMatch,
   sentKey,
+  telegramRecordMarket,
 } from './store.ts'
+import {
+  resetTelegramRetryForTests,
+  scheduleTelegramRetry,
+  telegramRetryNow,
+} from './telegramRetry.ts'
 import {
   attachOddsToAlerts,
   createTipFromAlert,
@@ -166,10 +180,14 @@ export function setPollerSendTelegramForTests(fn: SendTelegramFn | null): void {
   sendTelegram = fn ?? sendTelegramAlert
 }
 
-export async function waitForOddsAttachForTests(): Promise<void> {
+async function settleOddsAttach(): Promise<void> {
   while (pendingOddsAttach.size) {
     await Promise.all([...pendingOddsAttach])
   }
+}
+
+export async function waitForOddsAttachForTests(): Promise<void> {
+  await settleOddsAttach()
 }
 
 export function setPollerDepsForTests(deps: {
@@ -239,6 +257,7 @@ export function resetPollerRuntimeForTests(): void {
   status.telegram = getTelegramStatus()
   sendTelegram = sendTelegramAlert
   resetTelegramOutcomesForTests()
+  resetTelegramRetryForTests()
 }
 
 export type FixtureTickError = {
@@ -336,6 +355,79 @@ function recordAlertLatency(fixture: Fixture, alert: FeedAlert): void {
   )
 }
 
+async function noteTelegramDelivered(
+  fixture: Fixture,
+  market: Market,
+  alert: FeedAlert,
+  alertKey: string,
+  telegramResult: TelegramSendResult,
+): Promise<void> {
+  recordAlertLatency(fixture, alert)
+  if (telegramResult.messageId != null) {
+    await withStoreLock(() => {
+      markAlertTelegramMessage(
+        alertKey,
+        telegramResult.messageId!,
+        market,
+        alert.cornerHalf,
+      )
+    })
+  }
+}
+
+/**
+ * Lead gate for a retry, on the latest stored snapshot (the poller saves it
+ * every tick): same notifySuppressReason as the live path, plus "period
+ * changed / match over". Also stops if the alert is already delivered.
+ */
+function telegramRetryDropReason(
+  fixture: Fixture,
+  market: Market,
+  alert: FeedAlert,
+  alertKey: string,
+): string | null {
+  const rec = getTelegramMessage(alertKey)
+  if (rec && rec.messageId > 0 && (telegramRecordMarket(rec) ?? market) === market) {
+    return 'já entregue'
+  }
+  const stored = loadMatch(fixture.id)
+  if (!stored) return null
+  if (stored.finished) return 'jogo terminado'
+  const settings = currentSettings(market)
+  const points = normalizeTimeline(stored.payload, settings.sustainedThreshold)
+  const clock = points.at(-1)
+  if (clock && clock.period !== alert.period) return 'parte terminou'
+  const events = extractMarketEvents(stored.payload, points, market)
+  const reason = notifySuppressReason(alert, events, clock, MIN_NOTIFY_LEAD_MIN)
+  return reason ? `lead: ${reason}` : null
+}
+
+/** A retry delivered after the tick: same bookkeeping as an inline delivery. */
+async function completeLateTelegramDelivery(
+  fixture: Fixture,
+  market: Market,
+  alert: FeedAlert,
+  alertKey: string,
+  telegramResult: TelegramSendResult,
+): Promise<void> {
+  await noteTelegramDelivered(fixture, market, alert, alertKey, telegramResult)
+  const loggedId = loggedAlertId(fixture.id, alert.id)
+  await withStoreLock(() => {
+    markAlertPushed(loggedId, market, alert.cornerHalf)
+  })
+  status.alertsSent += 1
+  // Tips open only for delivered alerts; use the odds the attach step stored.
+  await settleOddsAttach()
+  await withStoreLock(() => {
+    const logged = loadAlerts(market, alert.cornerHalf).find((a) => a.id === loggedId)
+    const enriched = logged?.odds ? { ...alert, odds: logged.odds } : alert
+    const odd = resolvedOddFromAlert(enriched)
+    if (odd && !tipAlreadyOpen(fixture.id, alert.id, market)) {
+      createTipFromAlert({ fixture, alert: enriched, odd })
+    }
+  })
+}
+
 async function dispatchClaimedAlerts(
   fixture: Fixture,
   market: Market,
@@ -352,32 +444,37 @@ async function dispatchClaimedAlerts(
     const monitorUrl = `/#/monitor?alert=${encodeURIComponent(loggedId)}`
     const key = sentKey(market, fixture.id, alert.id, alert.cornerHalf)
     let notifiedOk = false
-    const telegramResult: TelegramSendResult = await sendTelegram({
+    const telegramPayload = {
       title: copy.title,
       body: copy.body,
       url: monitorUrl,
       alertKey,
       ruleLabel: alert.ruleName,
       market,
-    })
+    }
+    const firstAttemptAt = telegramRetryNow()
+    const telegramResult: TelegramSendResult = await sendTelegram(telegramPayload)
     if (telegramResult.sent > 0) {
       notifiedOk = true
-      recordAlertLatency(fixture, alert)
-      if (telegramResult.messageId != null) {
-        await withStoreLock(() => {
-          markAlertTelegramMessage(
-            alertKey,
-            telegramResult.messageId,
-            market,
-            alert.cornerHalf,
-          )
-        })
-      }
+      await noteTelegramDelivered(fixture, market, alert, alertKey, telegramResult)
     } else if (!telegramResult.skipped) {
+      // Transient failures retry in the background (bounded, lead-gated).
+      const retrying = scheduleTelegramRetry(
+        {
+          key: alertKey,
+          firstAttemptAt,
+          send: () => sendTelegram(telegramPayload),
+          dropReason: () => telegramRetryDropReason(fixture, market, alert, alertKey),
+          onDelivered: (result) =>
+            completeLateTelegramDelivery(fixture, market, alert, alertKey, result),
+        },
+        telegramResult,
+      )
       console.error(
         '[poller] telegram não enviado',
         alertKey,
         telegramResult.reason || 'sem detalhe',
+        retrying ? '(retry agendado)' : '',
       )
     }
     if (webPushEnabled()) {

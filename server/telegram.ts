@@ -14,6 +14,7 @@ import {
   markAlertTelegramMessage,
   upsertTelegramMessage,
 } from './store.ts'
+import { getTelegramRetryStats, type TelegramRetryStats } from './telegramRetry.ts'
 
 export const RESOLVE_NOW_LABEL = 'Resolver agora'
 export const PENDING_RESOLVE_TEXT = 'ainda sem resolução'
@@ -31,11 +32,24 @@ export type TelegramPayload = {
   market?: Market
 }
 
+export type TelegramFailureKind =
+  | 'network'
+  | 'timeout'
+  | 'rate-limit'
+  | 'server'
+  | 'client'
+
 export type TelegramSendResult = {
   sent: number
   skipped: boolean
   reason?: string
   messageId?: number
+  /** Failure classification (unset on success/skip). */
+  failureKind?: TelegramFailureKind
+  /** Transient: network error, 429 or 5xx. Timeouts/other 4xx are final. */
+  retryable?: boolean
+  /** From Telegram's 429 `parameters.retry_after` (seconds → ms). */
+  retryAfterMs?: number
 }
 
 export type TelegramOutcomeInput = {
@@ -52,6 +66,7 @@ export type TelegramStatus = {
   enabled: boolean
   lastSendAt: string | null
   lastError: string | null
+  retry?: TelegramRetryStats
 }
 
 const status: TelegramStatus = {
@@ -196,6 +211,7 @@ export function getTelegramStatus(): TelegramStatus {
     ...status,
     configured: telegramConfigured(),
     enabled: telegramEnabled(),
+    retry: getTelegramRetryStats(),
   }
 }
 
@@ -204,10 +220,47 @@ function sanitizeError(message: string, token: string): string {
   return message.split(token).join('<token>')
 }
 
-function recordFailure(alertKey: string, reason: string): TelegramSendResult {
+function recordFailure(
+  alertKey: string,
+  reason: string,
+  failure: Pick<TelegramSendResult, 'failureKind' | 'retryable' | 'retryAfterMs'> = {},
+): TelegramSendResult {
   status.lastError = reason
   console.error('[telegram] falhou', alertKey, reason)
-  return { sent: 0, skipped: false, reason }
+  return { sent: 0, skipped: false, reason, ...failure }
+}
+
+/** 429 → rate-limit (retry after `retry_after`); 5xx → server (retry); else final. */
+export function classifyTelegramApiFailure(
+  parsed: Pick<TelegramApiParsed, 'httpStatus' | 'retryAfterSec'>,
+): Pick<TelegramSendResult, 'failureKind' | 'retryable' | 'retryAfterMs'> {
+  if (parsed.httpStatus === 429) {
+    return {
+      failureKind: 'rate-limit',
+      retryable: true,
+      retryAfterMs:
+        parsed.retryAfterSec != null && parsed.retryAfterSec >= 0
+          ? parsed.retryAfterSec * 1000
+          : undefined,
+    }
+  }
+  if (parsed.httpStatus >= 500) return { failureKind: 'server', retryable: true }
+  return { failureKind: 'client', retryable: false }
+}
+
+/**
+ * Thrown by fetch: a timeout is final (the request may have been delivered);
+ * anything else (`fetch failed`, DNS, connect/reset) is a transient network error.
+ */
+export function classifyTelegramThrown(
+  err: unknown,
+): Pick<TelegramSendResult, 'failureKind' | 'retryable'> {
+  const message = err instanceof Error ? err.message : String(err)
+  const timedOut =
+    err instanceof Error &&
+    (err.name === 'TimeoutError' || /timeout|aborted/i.test(message))
+  if (timedOut) return { failureKind: 'timeout', retryable: false }
+  return { failureKind: 'network', retryable: true }
 }
 
 export type TelegramApiParsed = {
@@ -216,6 +269,7 @@ export type TelegramApiParsed = {
   messageId?: number
   httpStatus: number
   result?: unknown
+  retryAfterSec?: number
 }
 
 export async function callTelegramApi(
@@ -237,14 +291,17 @@ export async function callTelegramApi(
       ok?: boolean
       description?: string
       result?: { message_id?: number } | unknown[]
+      parameters?: { retry_after?: number }
     }
     const messageId = parsed.result?.message_id
+    const retryAfter = parsed.parameters?.retry_after
     return {
       ok: parsed.ok === true,
       description: parsed.description || '',
       messageId: typeof messageId === 'number' ? messageId : undefined,
       httpStatus: res.status,
       result: parsed.result,
+      ...(typeof retryAfter === 'number' ? { retryAfterSec: retryAfter } : {}),
     }
   } catch {
     return {
@@ -297,17 +354,19 @@ export async function sendTelegramAlert(
       }
       return { sent: 1, skipped: false, messageId: parsed.messageId }
     }
-    return recordFailure(payload.alertKey, reasonFromApi(parsed, token))
+    return recordFailure(
+      payload.alertKey,
+      reasonFromApi(parsed, token),
+      classifyTelegramApiFailure(parsed),
+    )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    const timedOut =
-      err instanceof Error &&
-      (err.name === 'TimeoutError' || /timeout|aborted/i.test(message))
+    const failure = classifyTelegramThrown(err)
     const reason = sanitizeError(
-      timedOut ? `timeout ${TELEGRAM_TIMEOUT_MS}ms` : message,
+      failure.failureKind === 'timeout' ? `timeout ${TELEGRAM_TIMEOUT_MS}ms` : message,
       token,
     )
-    return recordFailure(payload.alertKey, reason)
+    return recordFailure(payload.alertKey, reason, failure)
   }
 }
 

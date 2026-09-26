@@ -88,6 +88,23 @@ export function webPushEnabled(): boolean {
 
 export const TELEGRAM_TIMEOUT_MS = Number(process.env.TELEGRAM_TIMEOUT_MS || 9000)
 
+function positiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw == null || raw.trim() === '') return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback
+}
+
+/**
+ * Live-alert retry (transient failures only: network `fetch failed`, 429
+ * honouring retry_after, 5xx). Total attempts incl. the first; backoff base ×3
+ * per retry (2s, 6s, 18s); no attempt starts later than MAX_AGE after the
+ * first one, so a late message cannot arrive after its lead has gone.
+ */
+export const TELEGRAM_RETRY_MAX_ATTEMPTS = positiveIntEnv('TELEGRAM_RETRY_MAX_ATTEMPTS', 4)
+export const TELEGRAM_RETRY_BASE_MS = positiveIntEnv('TELEGRAM_RETRY_BASE_MS', 2000)
+export const TELEGRAM_RETRY_MAX_AGE_MS = positiveIntEnv('TELEGRAM_RETRY_MAX_AGE_MS', 60_000)
+
 /** Live push floor: tips need ≥1′ of clock. Override with `MIN_NOTIFY_LEAD_MIN`. */
 export const MIN_NOTIFY_LEAD_MIN = parseMinNotifyLeadMin(
   process.env.MIN_NOTIFY_LEAD_MIN,
