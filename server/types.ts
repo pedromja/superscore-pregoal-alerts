@@ -1,5 +1,6 @@
 import type { OddsObservation } from '../src/lib/oddsObserve.ts'
 import type {
+  AlertOverlay,
   AlertSettings,
   CornerHalf,
   Fixture,
@@ -45,6 +46,8 @@ export type LoggedAlert = {
   /** ISO timestamp after the GREEN/RED outcome notice was sent (idempotency). */
   telegramOutcomeSentAt?: string | null
   odds?: OddsObservation
+  /** Quality overlay decision; absent on alerts stored before the overlay. */
+  overlay?: AlertOverlay
 }
 
 export type GoalRecord = {

@@ -1,4 +1,5 @@
 import type {
+  AlertOverlay,
   AlertSettings,
   CornerHalf,
   FeedAlert,
@@ -72,6 +73,7 @@ export type LoggedAlert = {
   feedback: 'up' | 'down' | null
   coincident: boolean
   ts: string
+  overlay?: AlertOverlay
 }
 
 export type LearnPayload = {

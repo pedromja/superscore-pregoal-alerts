@@ -398,6 +398,10 @@ export function upsertAlerts(
             leadTimeLong: item.leadTimeLong ?? prev.leadTimeLong,
             longDeadline: item.longDeadline ?? prev.longDeadline,
             odds: item.odds ?? prev.odds,
+            // First overlay decision sticks (cap/notified are patched later).
+            ...(prev.overlay ?? item.overlay
+              ? { overlay: prev.overlay ?? item.overlay }
+              : {}),
             market,
             cornerHalf: h ?? item.cornerHalf,
           }

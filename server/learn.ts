@@ -182,6 +182,7 @@ export function toLoggedAlert(
     telegramMessageId: undefined,
     telegramOutcomeSentAt: null,
     odds: alert.odds,
+    ...(alert.overlay ? { overlay: alert.overlay } : {}),
   }
 }
 

@@ -174,6 +174,19 @@ export type MatchTally = {
   away: number
 }
 
+/**
+ * Quality overlay decision (notification filter on top of the locked rules).
+ * `pass` = would be notified by the overlay; `reasons` = why not (empty on pass).
+ * `notified` = claimed for Telegram/push while passing (drives the per-half cap).
+ */
+export type AlertOverlay = {
+  version: string
+  pass: boolean
+  reasons: string[]
+  enforced?: boolean
+  notified?: boolean
+}
+
 export type FeedAlert = FiredAlert & {
   fixtureId: string
   matchLabel: string
@@ -184,4 +197,5 @@ export type FeedAlert = FiredAlert & {
   goalsTally?: MatchTally
   cornersTally?: MatchTally
   odds?: OddsObservation
+  overlay?: AlertOverlay
 }
