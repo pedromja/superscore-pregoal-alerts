@@ -1,0 +1,1627 @@
+diff --git a/.env.example b/.env.example
+index bea5abf..4288861 100644
+--- a/.env.example
++++ b/.env.example
+@@ -37,8 +37,13 @@ DATA_DIR=data
+ 
+ # Odds SokkerPro (público, sem login). Default ON. 0 desliga. Timeouts/404 nunca partem o poller.
+ SOKKERPRO_ODDS=1
++# Mini board as a fast live-score gate before Telegram (golos). Default ON. 0 = SuperScore only.
++# SOKKERPRO_LIVE_SCORE=1
++# Optional SuperScore events re-read for cantos (ms). 0 = reuse the evaluate payload.
++# FAST_CORNER_REFETCH_MS=800
+ # SOKKERPRO_M2_URL=https://m2.sokkerpro.com
+ # Mini board ~1 MB: 25s. Preodds por jogo: 8s.
+ # SOKKERPRO_BOARD_TIMEOUT_MS=25000
+ # SOKKERPRO_PREODDS_TIMEOUT_MS=8000
+ # SOKKERPRO_BOARD_CACHE_MS=90000
++# SOKKERPRO_LIVE_STALE_MS=180000
+diff --git a/README.md b/README.md
+index 0bdafd2..2259aba 100644
+--- a/README.md
++++ b/README.md
+@@ -26,7 +26,7 @@ Isto é um **overlay futuro** em `data/tip_overlay.json`, **separado** de `param
+ Fontes SuperScore (não 1X2):
+ 
+ 1. **SuperScore (primário)** — o protobuf `OddsApiModel` em `GET /v2/public/stats/offer/market/item?match_id=&app_market=&app_variant=superscore` só traz 1X2 (`name` 1/X/2: `uuid`, `outcome_id`, `price`). Isso **não** é a odd da tip. O `event_id` desse modelo (o mesmo das `odds[]` no fixture) abre os mercados que a UI SuperScore mostra nos tabs de odds, via Superbet offer: `GET https://production-superbet-offer-{ro|pl|br}.freetls.fastly.net/v3/{locale}/events?events={event_id}&includeOnly=fixture,markets,superbets` (SSE em `/v3/subscription/...`). Daí extraímos **Over current+0,5** em Total goluri / Prima repriză - Total goluri, ou Total cornere / Prima repriză - Total cornere. Não se usa 1X2 (`Final`).
+-2. **SokkerPro O/U (a seguir)** — API pública m2, **sem login**. Não é mercado next-goal / next-canto; é referência Over/Under. Golos: Over `total actual + 0,5` (`BET365_GOLS_OVER_2_5`, valor `1.90#0` → `1.90`). Cantos: Over `total actual + 0,5` ou a linha **CANTO** inteira mais próxima acima (`BET365_CANTO_OVER_9`). O `preodds` vem como lista de snapshots (`created_at`); usamos o mais recente. Prefere `*_LIVE` quando existir. O mini board (~1 MB) tem timeout 25s e cache ~90s, partilhado por todos os jogos do tick; ontem só se hoje carregou e o jogo não estiver lá. Timeouts/404 falham em silêncio (um warn por tick no mini) e o poller continua. `source: sokkerpro` / rótulo `SokkerPro O/U`.
++2. **SokkerPro O/U (a seguir)** — API pública m2, **sem login**. Não é mercado next-goal / next-canto; é referência Over/Under. Golos: Over `total actual + 0,5` (`BET365_GOLS_OVER_2_5`, valor `1.90#0` → `1.90`). Cantos: Over `total actual + 0,5` ou a linha **CANTO** inteira mais próxima acima (`BET365_CANTO_OVER_9`). O `preodds` vem como lista de snapshots (`created_at`); usamos o mais recente. Prefere `*_LIVE` quando existir. O mini board (~1 MB) tem timeout 25s e cache ~90s, partilhado por todos os jogos do tick; ontem só se hoje carregou e o jogo não estiver lá. Timeouts/404 falham em silêncio (um warn por tick no mini) e o poller continua. `source: sokkerpro` / rótulo `SokkerPro O/U`. O mesmo mini board (já quente no caminho de odds) é o **marcador rápido** que barre o Telegram quando o golo já bateu — ver abaixo.
+ 3. **RoboBet Telegram (último fallback de observação)** — linha `Odd Ao Vivo:` (vírgula ou ponto). **Nunca** `Pre-jogo:` nem `Ao Vivo:` (1X2).
+ 4. Sem odd nas três fontes → o alerta e o Telegram **saem na mesma**; só não há linha de tip/ROI.
+ 
+@@ -101,6 +101,25 @@ Cada aviso leva um botão **Resolver agora**. O clique reavalia o alerta contra
+ 
+ Health: `GET /api/telegram/status` (`configured`, `enabled`, `lastSendAt`, `lastError` — **sem secrets**). O mesmo bloco entra em `GET /api/poller/status`.
+ 
++### Gate «já bateu» (SokkerPro + tally SuperScore)
++
++O momentum SuperScore (`type=4` golos / `type=14` cantos) chega atrasado. Antes do `sendMessage`, **depois** do suppress de lead &lt;1′ / coincidente, o poller consulta o mini board SokkerPro **só em memória** (`getFastScore` — sem HTTP no caminho crítico; board já aquecido para as odds).
++
++**Emparelhamento:** `team1`/`team2` SuperScore ↔ `localTeamName`/`visitorTeamName` (Jaccard, mesmo que o de odds). Se houver dois jogos com o mesmo nome, o `dateSeconds` vs `startingAtTimestamp` desempata. Casa/fora trocados invertem o marcador e o `is_goal_team`.
++
++**Golos — SokkerPro é a fonte rápida**
++
++| Motivo | Quando |
++|---|---|
++| `already-hit-fast-score` | Total SokkerPro (`scoresLocalTeam`+`scoresVisitorTeam`) **já maior** que o tally SuperScore no texto do alerta / eventos extraídos |
++| `already-hit-is-goal` | `is_goal` preenchido (golo acabou de sair) **e** não se consegue provar lead ≥1′ no relógio SokkerPro (`minute` − `alert.min`). Sem minuto → suprime (menos sinais tardios) |
++
++Se o board não estiver quente ou o jogo não emparelhar, **não bloqueia** — o alerta sai.
++
++**Cantos — o mini board não tem cantos.** Mantém-se o suppress SuperScore `type=14` (mesmo minuto / lead &lt;1). Extra: se o tally de cantos no **último** snapshot de momentum (reuso do payload, ou um re-read curto opcional `FAST_CORNER_REFETCH_MS`) já subiu vs o tally à hora do alerta → `already-hit-corner-tally`. Cantos continuam a depender dos eventos SuperScore.
++
++Contador no health: `suppressedAlreadyHit` (+ `lastAlreadyHitReason`). Janelas e limiares locked **não mudam**. Web Push continua dormente.
++
+ ### Variáveis no Railway
+ 
+ No serviço `web` → Variables (nunca no git):
+@@ -138,7 +157,7 @@ Smoke local sem token: `npm test` (o script `scripts/verify-telegram.ts` faz moc
+ 
+ ## Web Push (dormente)
+ 
+-O poller no servidor (intervalo default **15s**, região `ro`) inclui **todos** os jogos ao vivo que estejam numa janela activa (Golos HT 20–42 / FT 70–90 e/ou Cantos HT 32–42 / FT 82–87) **antes** de qualquer rotação. O `POLLER_LIVE_LIMIT` (default **32**) só limita o fill fora de janela. Jogos em janela correm **primeiro**, com concorrência mais alta (`POLLER_IN_WINDOW_CONCURRENCY`, default **12**); o resto usa `POLLER_CONCURRENCY` (default **8**). Telegram sai assim que o evaluate de cada jogo encontra um alerta — não espera pelo batch nem pelo attach de odds. Timeout por jogo. Corre as regras do **mercado activo** e envia **Telegram primeiro** **sem filtro de odd**. Web Push só corre se `WEB_PUSH_ENABLED=1` **e** existirem subscritores. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia aviso. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**. A prioridade da regra (Primária / Secundária / Reserva) vai no cartão da app e, no Telegram, numa linha extra. Health: `GET /api/poller/status` (`intervalMs`, `inWindowThisTick`, `lastAlertLatencyHint`, `tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`, `telegram`).
++O poller no servidor (intervalo default **15s**, região `ro`) inclui **todos** os jogos ao vivo que estejam numa janela activa (Golos HT 20–42 / FT 70–90 e/ou Cantos HT 32–42 / FT 82–87) **antes** de qualquer rotação. O `POLLER_LIVE_LIMIT` (default **32**) só limita o fill fora de janela. Jogos em janela correm **primeiro**, com concorrência mais alta (`POLLER_IN_WINDOW_CONCURRENCY`, default **12**); o resto usa `POLLER_CONCURRENCY` (default **8**). Telegram sai assim que o evaluate de cada jogo encontra um alerta — não espera pelo batch nem pelo attach de odds. Timeout por jogo. Corre as regras do **mercado activo** e envia **Telegram primeiro** **sem filtro de odd**. Web Push só corre se `WEB_PUSH_ENABLED=1` **e** existirem subscritores. No mesmo instante observa limite e asiático e grava-os. Deduplica por `fixtureId:alertId` (cantos prefixam `corners:`). O primeiro snapshot de um jogo **não** envia aviso. O título começa pelo mercado em singular (`Golo` / `Canto`) e o marcador **Golos casa-fora · Cantos casa-fora**. A prioridade da regra (Primária / Secundária / Reserva) vai no cartão da app e, no Telegram, numa linha extra. Health: `GET /api/poller/status` (`intervalMs`, `inWindowThisTick`, `lastAlertLatencyHint`, `tickInFlight`, `lastTickAt`, `lastHangAt`, `liveProcessed`, `pushSubscribers`, `suppressedAlreadyHit`, `telegram`).
+ 
+ ### Gerar VAPID
+ 
+@@ -233,6 +252,9 @@ Gerar chaves uma vez (`npm run vapid:generate`) e colar as mesmas no host. Sem `
+ | `LEARN_AUTO_MIN_OUTCOMES` | `50` | Limiar informativo de elegibilidade (não aplica sozinho) |
+ | `DATA_DIR` | `data` | Subscriptions, alertas, histórico, `tip_overlay.json` |
+ | `SOKKERPRO_ODDS` | `1` | `0` desliga o fallback SokkerPro. Timeouts/404 não partem o poller |
++| `SOKKERPRO_LIVE_SCORE` | `1` | `0` desliga o gate de marcador rápido no Telegram (golos). Board em falta = fall through |
++| `FAST_CORNER_REFETCH_MS` | `800` | Re-read opcional de eventos SuperScore para cantos. `0` = só o payload do evaluate |
++| `SOKKERPRO_LIVE_STALE_MS` | `180000` | Idade máxima do mini em cache para o gate (não dispara HTTP) |
+ | `SOKKERPRO_BOARD_TIMEOUT_MS` | `25000` | Timeout do mini board (~1 MB). Não herda o antigo 6s |
+ | `SOKKERPRO_PREODDS_TIMEOUT_MS` | `8000` | Timeout por fixture `/preodds`. Alias: `SOKKERPRO_TIMEOUT_MS` |
+ | `SOKKERPRO_BOARD_CACHE_MS` | `90000` | Cache in-memory do mini de hoje, partilhado no tick |
+@@ -245,7 +267,7 @@ Health check: `GET /api/push/status` (JSON `{ subscribers, hasVapid }`). Telegra
+ 
+ 1. Criar projecto em [railway.app](https://railway.app) → New → GitHub/Origin repo.
+ 2. O `railway.toml` escolhe o `Dockerfile` e health check `/api/push/status`.
+-3. Variables → colar `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` (ver secção Telegram). Opcional: `PUBLIC_URL`, `POLLER_REGION=ro`. `SOKKERPRO_ODDS` default ON (`0` desliga). VAPID só se quiserem `WEB_PUSH_ENABLED=1`.
++3. Variables → colar `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` (ver secção Telegram). Opcional: `PUBLIC_URL`, `POLLER_REGION=ro`. `SOKKERPRO_ODDS` e `SOKKERPRO_LIVE_SCORE` default ON (`0` desliga). VAPID só se quiserem `WEB_PUSH_ENABLED=1`.
+ 4. Deploy. Railway define `PORT`. Os avisos saem no Telegram; o URL público (`*.up.railway.app`) serve o monitor e o link das mensagens.
+ 5. Opcional: volume persistente montado em `/app/data` para sent-keys, histórico e (se reactivarem) subscriptions sobreviverem a redeploys.
+ 
+diff --git a/package.json b/package.json
+index 4323220..65aa363 100644
+--- a/package.json
++++ b/package.json
+@@ -14,7 +14,8 @@
+     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist-server/index.mjs --packages=external --target=node20",
+     "lint": "oxlint",
+     "preview": "vite preview",
+-    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify && npm run test:sokkerpro && npm run test:delivery && npm run test:lock && npm run test:telegram && npm run test:notify-lead",
++    "test": "npm run test:robobet && npm run test:windows && npm run test:overlay && npm run test:poller && npm run test:notify && npm run test:sokkerpro && npm run test:delivery && npm run test:lock && npm run test:telegram && npm run test:notify-lead && npm run test:fast-score",
++    "test:fast-score": "tsx scripts/verify-fast-score.ts",
+     "test:notify-lead": "tsx scripts/verify-notify-lead.ts",
+     "test:telegram": "tsx scripts/verify-telegram.ts",
+     "test:robobet": "tsx scripts/verify-robobet-parser.ts",
+diff --git a/scripts/fixtures/sokkerpro-mini-sample.json b/scripts/fixtures/sokkerpro-mini-sample.json
+new file mode 100644
+index 0000000..72801e2
+--- /dev/null
++++ b/scripts/fixtures/sokkerpro-mini-sample.json
+@@ -0,0 +1,126 @@
++{
++  "success": true,
++  "data": {
++    "dateKey": "fixtures_sample:2026-09-19:utc",
++    "fixtures_total": 10,
++    "sortedCategorizedFixtures": [
++      {
++        "leagueName": "Saved mini-board sample",
++        "fixtures": [
++          {
++            "is_goal": "",
++            "is_goal_team": "",
++            "fixtureId": "19882016",
++            "status": "NS",
++            "minute": "",
++            "startingAtTimestamp": "1789815600",
++            "startingAtDateTime": "\"2026-09-19 11:00:00\"",
++            "startingAtDate": "2026-09-19",
++            "scoresLocalTeam": "",
++            "scoresVisitorTeam": "",
++            "localTeamName": "Kenya U20",
++            "visitorTeamName": "South Sudan U20"
++          },
++          {
++            "is_goal": "",
++            "is_goal_team": "",
++            "fixtureId": "19881495",
++            "status": "2nd",
++            "minute": "73",
++            "startingAtTimestamp": "1789822800",
++            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
++            "startingAtDate": "2026-09-19",
++            "scoresLocalTeam": "0",
++            "scoresVisitorTeam": "1",
++            "localTeamName": "Sudan U20",
++            "visitorTeamName": "Uganda U20"
++          },
++          {
++            "is_goal": "",
++            "is_goal_team": "",
++            "fixtureId": "19881964",
++            "status": "2nd",
++            "minute": "75",
++            "startingAtTimestamp": "1789822800",
++            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
++            "startingAtDate": "2026-09-19",
++            "scoresLocalTeam": "4",
++            "scoresVisitorTeam": "0",
++            "localTeamName": "Angola U20",
++            "visitorTeamName": "Swaziland U20"
++          },
++          {
++            "is_goal": "1789828478",
++            "is_goal_team": "away",
++            "fixtureId": "19736218",
++            "status": "2nd",
++            "minute": "79",
++            "startingAtTimestamp": "1789822800",
++            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
++            "startingAtDate": "2026-09-19",
++            "scoresLocalTeam": "4",
++            "scoresVisitorTeam": "1",
++            "localTeamName": "Slovan Liberec W",
++            "visitorTeamName": "Viktoria Plzeň W"
++          },
++          {
++            "is_goal": "1789828480",
++            "is_goal_team": "home",
++            "fixtureId": "19787721",
++            "status": "1st",
++            "minute": "29",
++            "startingAtTimestamp": "1789826400",
++            "startingAtDateTime": "\"2026-09-19 14:00:00\"",
++            "startingAtDate": "2026-09-19",
++            "scoresLocalTeam": "1",
++            "scoresVisitorTeam": "0",
++            "localTeamName": "Welwyn Garden City",
++            "visitorTeamName": "Stotfold FC"
++          },
++          {
++            "is_goal": "",
++            "is_goal_team": "",
++            "fixtureId": "4242-live",
++            "status": "2nd",
++            "minute": "67",
++            "startingAtTimestamp": "1789822800",
++            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
++            "startingAtDate": "2026-09-19",
++            "scoresLocalTeam": "1",
++            "scoresVisitorTeam": "0",
++            "localTeamName": "FC Porto",
++            "visitorTeamName": "SL Benfica"
++          },
++          {
++            "is_goal": "",
++            "is_goal_team": "",
++            "fixtureId": "4242-later",
++            "status": "NS",
++            "minute": "",
++            "startingAtTimestamp": "1789909200",
++            "startingAtDateTime": "\"2026-09-20 13:00:00\"",
++            "startingAtDate": "2026-09-20",
++            "scoresLocalTeam": "",
++            "scoresVisitorTeam": "",
++            "localTeamName": "FC Porto",
++            "visitorTeamName": "SL Benfica"
++          },
++          {
++            "is_goal": "",
++            "is_goal_team": "",
++            "fixtureId": "swap-1",
++            "status": "1st",
++            "minute": "38",
++            "startingAtTimestamp": "1789822800",
++            "startingAtDateTime": "\"2026-09-19 13:00:00\"",
++            "startingAtDate": "2026-09-19",
++            "scoresLocalTeam": "0",
++            "scoresVisitorTeam": "2",
++            "localTeamName": "Ferencváros",
++            "visitorTeamName": "Celtic"
++          }
++        ]
++      }
++    ]
++  }
++}
+diff --git a/scripts/verify-fast-score.ts b/scripts/verify-fast-score.ts
+new file mode 100644
+index 0000000..5ffc181
+--- /dev/null
++++ b/scripts/verify-fast-score.ts
+@@ -0,0 +1,606 @@
++/**
++ * Fast live-score gate: SokkerPro mini board for golos; SuperScore type=14
++ * tally re-check for cantos. Does not change locked windows / Web Push.
++ */
++import { readFileSync } from 'node:fs'
++import { dirname, join } from 'node:path'
++import { fileURLToPath } from 'node:url'
++import { defaultsFor } from '../src/lib/market.ts'
++import {
++  alreadyHitSuppressReason,
++  cornerAlreadyHitReason,
++  fastScoreFromBoard,
++  goalAlreadyHitReason,
++  latestCornerTotal,
++  provenLeadOnFastGoal,
++  superscoreCornerTotal,
++  superscoreGoalTotal,
++  type FastScore,
++} from '../src/lib/fastScore.ts'
++import { DEFINITIONS_LOCKED } from '../src/lib/lock.ts'
++import { MIN_NOTIFY_LEAD_MIN } from '../src/lib/notifyLead.ts'
++import {
++  flattenMiniFixtures,
++  matchSokkerProFixture,
++  matchSokkerProFixtureOriented,
++} from '../src/lib/sokkerpro.ts'
++import { sampleFeedAlert } from '../src/lib/tally.ts'
++import type { FeedAlert, Fixture, Market, MomentumPayload } from '../src/lib/types.ts'
++import {
++  CORNER_WINDOWS,
++  GOAL_WINDOWS,
++  REGULATION_END,
++} from '../src/lib/windows.ts'
++import {
++  getPollerStatus,
++  processEvaluatedAlerts,
++  resetPollerRuntimeForTests,
++  setPollerCornerRefetchForTests,
++  setPollerGetFastScoreForTests,
++  setPollerSendTelegramForTests,
++} from '../server/poller.ts'
++import {
++  getFastScore,
++  peekCachedSokkerProFixtures,
++  resetSokkerProStateForTests,
++  seedSokkerProBoardForTests,
++  setSokkerProLiveScoreEnabledForTests,
++  setSokkerProNowForTests,
++} from '../server/sokkerpro.ts'
++import { loadAlerts, loadSent, saveAlerts, saveSent } from '../server/store.ts'
++import { webPushEnabled } from '../server/config.ts'
++
++const fail: string[] = []
++
++function check(cond: boolean, msg: string) {
++  if (!cond) fail.push(msg)
++}
++
++const samplePath = join(
++  dirname(fileURLToPath(import.meta.url)),
++  'fixtures/sokkerpro-mini-sample.json',
++)
++const sampleRaw = JSON.parse(readFileSync(samplePath, 'utf8')) as unknown
++const board = flattenMiniFixtures(sampleRaw)
++
++check(board.length >= 7, `sample flattened ${board.length}`)
++
++const porto = board.find((f) => f.fixtureId === '4242-live')
++check(porto?.scoresLocalTeam === 1 && porto.scoresVisitorTeam === 0, 'Porto sample 1-0')
++check(porto?.minute === 67 && porto.status === '2nd', 'Porto clock 67 2nd')
++check(porto?.startingAtTimestamp === 1_789_822_800, 'Porto kickoff timestamp')
++
++const liberec = board.find((f) => f.fixtureId === '19736218')
++check(liberec?.isGoal === '1789828478', `is_goal timestamp, got ${liberec?.isGoal}`)
++check(liberec?.isGoalTeam === 'away', `is_goal_team away, got ${liberec?.isGoalTeam}`)
++check(liberec?.scoresLocalTeam === 4 && liberec.scoresVisitorTeam === 1, 'Liberec 4-1')
++
++const ns = board.find((f) => f.fixtureId === '19882016')
++check(ns?.minute === null, 'NS blank minute is null, not 0')
++check(ns?.isGoal === null, 'empty is_goal is null')
++check(ns?.scoresLocalTeam === 0 && ns.scoresVisitorTeam === 0, 'NS blank scores → 0-0')
++
++const byName = matchSokkerProFixture(board, 'Porto', 'Benfica')
++check(byName?.fixtureId === '4242-live', `live Porto preferred without kickoff, got ${byName?.fixtureId}`)
++
++const laterKick = matchSokkerProFixture(board, 'Porto', 'Benfica', 1_789_909_200)
++check(laterKick?.fixtureId === '4242-later', `kickoff picks later Porto, got ${laterKick?.fixtureId}`)
++
++const liveKick = matchSokkerProFixture(board, 'FC Porto', 'SL Benfica', 1_789_822_800)
++check(liveKick?.fixtureId === '4242-live', `kickoff picks live Porto, got ${liveKick?.fixtureId}`)
++
++const sudan = fastScoreFromBoard(board, {
++  team1: 'Sudan U20',
++  team2: 'Uganda U20',
++  dateSeconds: 1_789_822_800,
++})
++check(sudan?.source === 'sokkerpro', 'source sokkerpro')
++check(sudan?.home === 0 && sudan?.away === 1, `Sudan score ${sudan?.home}-${sudan?.away}`)
++check(sudan?.minute === 73 && sudan?.status === '2nd', 'Sudan clock')
++check(!sudan?.isGoal, 'Sudan is_goal unset')
++
++const swapped = fastScoreFromBoard(board, {
++  team1: 'Celtic',
++  team2: 'Ferencváros',
++  dateSeconds: 1_789_822_800,
++})
++check(swapped?.home === 2 && swapped?.away === 0, `swapped Celtic is home 2-0, got ${swapped?.home}-${swapped?.away}`)
++
++const orientedSwap = matchSokkerProFixtureOriented(board, 'Celtic', 'Ferencváros')
++check(orientedSwap?.swapped === true, 'Celtic/Ferenc is swapped vs SokkerPro')
++
++const angola = fastScoreFromBoard(board, {
++  team1: 'Angola U20',
++  team2: 'Swaziland U20',
++  dateSeconds: 1_789_822_800,
++})
++check(angola?.home === 4 && angola?.away === 0, 'Angola 4-0')
++
++check(
++  superscoreGoalTotal({ min: 35, period: 1, goalsTally: { home: 1, away: 0 } }) === 1,
++  'SS tally from alert copy',
++)
++check(
++  superscoreGoalTotal({ min: 35, period: 1 }, [
++    { min: 20, period: 1 },
++    { min: 40, period: 1 },
++  ]) === 1,
++  'SS tally from extracted events up to alert min',
++)
++
++check(
++  goalAlreadyHitReason({ ssGoals: 1, fast: angola!, alertMin: 75 }) ===
++    'already-hit-fast-score',
++  'SP 4 > SS 1 → already-hit-fast-score',
++)
++check(
++  goalAlreadyHitReason({ ssGoals: 4, fast: angola!, alertMin: 75 }) === null,
++  'equal totals and no is_goal → send',
++)
++check(
++  goalAlreadyHitReason({ ssGoals: 5, fast: angola!, alertMin: 75 }) === null,
++  'SP behind SuperScore → fall through',
++)
++check(
++  goalAlreadyHitReason({ ssGoals: 1, fast: null, alertMin: 75 }) === null,
++  'missing SokkerPro → fall through',
++)
++
++const justGoal: FastScore = {
++  home: 1,
++  away: 0,
++  minute: 29,
++  status: '1st',
++  isGoal: '1789828480',
++  isGoalTeam: 'home',
++  source: 'sokkerpro',
++}
++check(
++  goalAlreadyHitReason({ ssGoals: 1, fast: justGoal, alertMin: 29 }) ===
++    'already-hit-is-goal',
++  'is_goal at same minute → already-hit-is-goal',
++)
++check(
++  goalAlreadyHitReason({ ssGoals: 1, fast: justGoal, alertMin: 28 }) === null,
++  'is_goal with proven ≥1′ lead → send',
++)
++check(
++  !provenLeadOnFastGoal(29, 29),
++  'same-minute is_goal is not a proven lead',
++)
++check(provenLeadOnFastGoal(28, 29) === true, '1′ clock gap is a proven lead')
++check(provenLeadOnFastGoal(27, null) === false, 'no SokkerPro minute → cannot prove lead')
++
++const noClock: FastScore = { ...justGoal, minute: null }
++check(
++  goalAlreadyHitReason({ ssGoals: 1, fast: noClock, alertMin: 20 }) ===
++    'already-hit-is-goal',
++  'is_goal without minute defaults to suppress',
++)
++
++const liberecFast = fastScoreFromBoard(board, {
++  team1: 'Slovan Liberec W',
++  team2: 'Viktoria Plzeň W',
++  dateSeconds: 1_789_822_800,
++})
++check(
++  alreadyHitSuppressReason({
++    market: 'goals',
++    alert: { min: 77, period: 2, goalsTally: { home: 4, away: 0 } },
++    fast: liberecFast,
++  }) === 'already-hit-fast-score',
++  'Liberec SP 5 > SS 4',
++)
++check(
++  alreadyHitSuppressReason({
++    market: 'goals',
++    alert: { min: 79, period: 2, goalsTally: { home: 4, away: 1 } },
++    fast: liberecFast,
++  }) === 'already-hit-is-goal',
++  'Liberec equal score but is_goal at 79′ vs alert 79′',
++)
++check(
++  alreadyHitSuppressReason({
++    market: 'goals',
++    alert: { min: 77, period: 2, goalsTally: { home: 4, away: 1 } },
++    fast: liberecFast,
++  }) === null,
++  'Liberec equal score + 2′ lead on is_goal → send',
++)
++
++const cornerPayload: MomentumPayload = {
++  timeline: [],
++  events: [
++    { type: 14, side: 1, min: 34, period: 1 },
++    { type: 14, side: 2, min: 36, period: 1 },
++    { type: 14, side: 1, min: 39, period: 1 },
++  ],
++}
++check(latestCornerTotal(cornerPayload) === 3, 'latest corner tally counts all type=14')
++check(
++  superscoreCornerTotal({ cornersTally: { home: 1, away: 1 } }) === 2,
++  'alert-time corner tally',
++)
++check(
++  cornerAlreadyHitReason({ alertCorners: 2, latestCorners: 3 }) ===
++    'already-hit-corner-tally',
++  'later SuperScore corner → already-hit-corner-tally',
++)
++check(
++  alreadyHitSuppressReason({
++    market: 'corners',
++    alert: { min: 38, period: 1, cornersTally: { home: 1, away: 1 } },
++    fast: null,
++    latestCorners: 3,
++  }) === 'already-hit-corner-tally',
++  'corners gate ignores SokkerPro score',
++)
++check(
++  alreadyHitSuppressReason({
++    market: 'corners',
++    alert: { min: 38, period: 1, cornersTally: { home: 2, away: 1 } },
++    fast: angola,
++    latestCorners: 3,
++  }) === null,
++  'corners same tally → no extra suppress (even if SP has goals)',
++)
++check(
++  alreadyHitSuppressReason({
++    market: 'corners',
++    alert: { min: 38, period: 1, cornersTally: { home: 1, away: 1 } },
++    fast: null,
++    latestCorners: null,
++  }) === null,
++  'corners without latest tally → fall through',
++)
++
++resetSokkerProStateForTests()
++setSokkerProNowForTests(new Date('2026-09-19T15:00:00.000Z'))
++seedSokkerProBoardForTests('2026-09-19', board)
++check(peekCachedSokkerProFixtures().length === board.length, 'seeded board is peekable')
++const cached = getFastScore({
++  team1: 'Angola U20',
++  team2: 'Swaziland U20',
++  dateSeconds: 1_789_822_800,
++})
++check(cached?.home === 4 && cached.away === 0, 'getFastScore reads cache, no HTTP')
++
++setSokkerProLiveScoreEnabledForTests(false)
++check(
++  getFastScore({
++    team1: 'Angola U20',
++    team2: 'Swaziland U20',
++    dateSeconds: 1_789_822_800,
++  }) === null,
++  'live-score off → null',
++)
++setSokkerProLiveScoreEnabledForTests(true)
++check(
++  getFastScore({
++    team1: 'No Such',
++    team2: 'Team Pair',
++    dateSeconds: 1_789_822_800,
++  }) === null,
++  'name miss → null (fall through)',
++)
++
++function liveFixture(id: string, teams: { team1: string; team2: string }, kickoff = 1_789_822_800): Fixture {
++  return {
++    id,
++    team1: teams.team1,
++    team2: teams.team2,
++    team1Id: `${id}-h`,
++    team2Id: `${id}-a`,
++    competition: 'Fast score test',
++    category: 'test',
++    status: 1,
++    state: 1,
++    dateSeconds: kickoff,
++    liveElapsedSeconds: 75 * 60,
++    scoreHome: 0,
++    scoreAway: 0,
++    scoreIsFt: false,
++  }
++}
++
++function alertAt(
++  fixtureId: string,
++  opts: {
++    market?: Market
++    min: number
++    period: number
++    goals?: { home: number; away: number }
++    corners?: { home: number; away: number }
++    half?: 'ht' | 'ft'
++  },
++): FeedAlert {
++  const market = opts.market ?? 'goals'
++  const half = opts.half ?? (opts.period === 2 ? 'ft' : 'ht')
++  return {
++    ...sampleFeedAlert(market, half),
++    id: `primary-${opts.period}-${opts.min}-0`,
++    fixtureId,
++    matchLabel: 'Fast vs Score',
++    min: opts.min,
++    period: opts.period,
++    index: 0,
++    coincident: false,
++    market,
++    cornerHalf: market === 'corners' ? half : undefined,
++    goalsTally: opts.goals ?? { home: 0, away: 0 },
++    cornersTally: opts.corners ?? { home: 0, away: 0 },
++    firedAt: new Date().toISOString(),
++  }
++}
++
++const previousSent = loadSent()
++const previousGoalsHt = loadAlerts('goals', 'ht')
++const previousGoalsFt = loadAlerts('goals', 'ft')
++const previousCornersHt = loadAlerts('corners', 'ht')
++const previousCornersFt = loadAlerts('corners', 'ft')
++const suppressLogs: string[] = []
++const origInfo = console.info
++console.info = (...args: unknown[]) => {
++  const line = args.map(String).join(' ')
++  const match = line.match(
++    /suppress (already-hit-fast-score|already-hit-is-goal|already-hit-corner-tally)/,
++  )
++  if (match) suppressLogs.push(match[1]!)
++  origInfo.apply(console, args)
++}
++
++let telegramCalls = 0
++resetPollerRuntimeForTests()
++setPollerSendTelegramForTests(async () => {
++  telegramCalls += 1
++  return { sent: 1, skipped: false }
++})
++
++try {
++  seedSokkerProBoardForTests('2026-09-19', board)
++  setSokkerProNowForTests(new Date('2026-09-19T15:00:00.000Z'))
++
++  const lateId = `fs-late-${Date.now()}`
++  const lateSent = await processEvaluatedAlerts({
++    fixture: liveFixture(lateId, { team1: 'Angola U20', team2: 'Swaziland U20' }),
++    market: 'goals',
++    settings: defaultsFor('goals', 'ft'),
++    byHalf: undefined,
++    fresh: [
++      alertAt(lateId, {
++        min: 75,
++        period: 2,
++        goals: { home: 1, away: 0 },
++      }),
++    ],
++    first: false,
++    finished: false,
++    payload: { timeline: [], events: [] },
++    events: [],
++    points: [{ period: 2, min: 75 }],
++  })
++  check(lateSent === 0, `SP ahead of SS must not telegram, got ${lateSent}`)
++  check(telegramCalls === 0, 'already-hit-fast-score must not call sendTelegram')
++  check(suppressLogs.includes('already-hit-fast-score'), 'logs already-hit-fast-score')
++  check(getPollerStatus().suppressedAlreadyHit >= 1, 'status.suppressedAlreadyHit increments')
++  check(
++    getPollerStatus().lastAlreadyHitReason === 'already-hit-fast-score',
++    `lastAlreadyHitReason ${getPollerStatus().lastAlreadyHitReason}`,
++  )
++  check(
++    loadAlerts('goals', 'ft').some((a) => a.id === `${lateId}:primary-2-75-0`),
++    'late goal alert still ingested for learning',
++  )
++
++  const flagId = `fs-flag-${Date.now()}`
++  const beforeFlag = telegramCalls
++  const flagSent = await processEvaluatedAlerts({
++    fixture: liveFixture(flagId, {
++      team1: 'Welwyn Garden City',
++      team2: 'Stotfold FC',
++    }, 1_789_826_400),
++    market: 'goals',
++    settings: defaultsFor('goals', 'ht'),
++    byHalf: undefined,
++    fresh: [
++      alertAt(flagId, {
++        min: 29,
++        period: 1,
++        goals: { home: 1, away: 0 },
++        half: 'ht',
++      }),
++    ],
++    first: false,
++    finished: false,
++    payload: { timeline: [], events: [] },
++    events: [],
++    points: [{ period: 1, min: 29 }],
++  })
++  check(flagSent === 0, `is_goal same minute blocked, got ${flagSent}`)
++  check(telegramCalls === beforeFlag, 'already-hit-is-goal must not telegram')
++  check(suppressLogs.includes('already-hit-is-goal'), 'logs already-hit-is-goal')
++
++  const okId = `fs-ok-${Date.now()}`
++  const beforeOk = telegramCalls
++  const okSent = await processEvaluatedAlerts({
++    fixture: liveFixture(okId, { team1: 'Sudan U20', team2: 'Uganda U20' }),
++    market: 'goals',
++    settings: defaultsFor('goals', 'ft'),
++    byHalf: undefined,
++    fresh: [
++      alertAt(okId, {
++        min: 72,
++        period: 2,
++        goals: { home: 0, away: 1 },
++      }),
++    ],
++    first: false,
++    finished: false,
++    payload: { timeline: [], events: [] },
++    events: [],
++    points: [{ period: 2, min: 72 }],
++  })
++  check(okSent === 1, `equal SP/SS and no is_goal still sent, got ${okSent}`)
++  check(telegramCalls === beforeOk + 1, 'clean fast-score match still telegrams')
++
++  const missId = `fs-miss-${Date.now()}`
++  const beforeMiss = telegramCalls
++  const missSent = await processEvaluatedAlerts({
++    fixture: liveFixture(missId, { team1: 'Unknown FC', team2: 'Ghost United' }),
++    market: 'goals',
++    settings: defaultsFor('goals', 'ft'),
++    byHalf: undefined,
++    fresh: [
++      alertAt(missId, {
++        min: 75,
++        period: 2,
++        goals: { home: 0, away: 0 },
++      }),
++    ],
++    first: false,
++    finished: false,
++    payload: { timeline: [], events: [] },
++    events: [],
++    points: [{ period: 2, min: 75 }],
++  })
++  check(missSent === 1, `unmatched SokkerPro falls through, got ${missSent}`)
++  check(telegramCalls === beforeMiss + 1, 'name miss still telegrams')
++
++  setPollerGetFastScoreForTests(() => {
++    throw new Error('getFastScore must not run for corners')
++  })
++  const cornerId = `fs-cn-${Date.now()}`
++  const beforeCorner = telegramCalls
++  const cornerSent = await processEvaluatedAlerts({
++    fixture: liveFixture(cornerId, { team1: 'Angola U20', team2: 'Swaziland U20' }),
++    market: 'corners',
++    settings: defaultsFor('corners', 'ht'),
++    byHalf: {
++      ht: defaultsFor('corners', 'ht'),
++      ft: defaultsFor('corners', 'ft'),
++    },
++    fresh: [
++      alertAt(cornerId, {
++        market: 'corners',
++        min: 38,
++        period: 1,
++        corners: { home: 1, away: 1 },
++        half: 'ht',
++      }),
++    ],
++    first: false,
++    finished: false,
++    payload: cornerPayload,
++    events: [],
++    points: [{ period: 1, min: 38 }],
++  })
++  check(cornerSent === 0, `latest SuperScore corners 3>2 blocked, got ${cornerSent}`)
++  check(telegramCalls === beforeCorner, 'already-hit-corner-tally must not telegram')
++  check(suppressLogs.includes('already-hit-corner-tally'), 'logs already-hit-corner-tally')
++  setPollerGetFastScoreForTests(null)
++
++  const refetchId = `fs-cn-refetch-${Date.now()}`
++  let refetchCalls = 0
++  setPollerCornerRefetchForTests(async () => {
++    refetchCalls += 1
++    return {
++      timeline: [],
++      events: [
++        { type: 14, side: 1, min: 34, period: 1 },
++        { type: 14, side: 1, min: 40, period: 1 },
++      ],
++    }
++  })
++  const beforeRefetch = telegramCalls
++  const refetchSent = await processEvaluatedAlerts({
++    fixture: liveFixture(refetchId, { team1: 'RoPo', team2: 'Villan Pojat' }),
++    market: 'corners',
++    settings: defaultsFor('corners', 'ht'),
++    byHalf: {
++      ht: defaultsFor('corners', 'ht'),
++      ft: defaultsFor('corners', 'ft'),
++    },
++    fresh: [
++      alertAt(refetchId, {
++        market: 'corners',
++        min: 38,
++        period: 1,
++        corners: { home: 1, away: 0 },
++        half: 'ht',
++      }),
++    ],
++    first: false,
++    finished: false,
++    payload: { timeline: [], events: [{ type: 14, side: 1, min: 34, period: 1 }] },
++    events: [],
++    points: [{ period: 1, min: 38 }],
++  })
++  check(refetchCalls === 1, `optional corner refetch ran once, got ${refetchCalls}`)
++  check(refetchSent === 0, `refetch tally 2>1 blocked, got ${refetchSent}`)
++  check(telegramCalls === beforeRefetch, 'refetch already-hit must not telegram')
++  setPollerCornerRefetchForTests(null)
++
++  const failOpenId = `fs-failopen-${Date.now()}`
++  setPollerGetFastScoreForTests(() => null)
++  const beforeFailOpen = telegramCalls
++  const failOpenSent = await processEvaluatedAlerts({
++    fixture: liveFixture(failOpenId, { team1: 'Angola U20', team2: 'Swaziland U20' }),
++    market: 'goals',
++    settings: defaultsFor('goals', 'ft'),
++    byHalf: undefined,
++    fresh: [
++      alertAt(failOpenId, {
++        min: 75,
++        period: 2,
++        goals: { home: 0, away: 0 },
++      }),
++    ],
++    first: false,
++    finished: false,
++    payload: { timeline: [], events: [] },
++    events: [],
++    points: [{ period: 2, min: 75 }],
++  })
++  check(failOpenSent === 1, `SokkerPro unavailable must not block, got ${failOpenSent}`)
++  check(telegramCalls === beforeFailOpen + 1, 'fail-open still telegrams')
++  setPollerGetFastScoreForTests(null)
++
++  check(!webPushEnabled(), 'Web Push stays dormant')
++  check(DEFINITIONS_LOCKED, 'definitions stay locked')
++  check(GOAL_WINDOWS.ht.from === 20 && GOAL_WINDOWS.ht.to === 42, 'goals HT 20–42 unchanged')
++  check(GOAL_WINDOWS.ft.from === 70 && GOAL_WINDOWS.ft.to === 90, 'goals FT 70–90 unchanged')
++  check(GOAL_WINDOWS.ft.to === REGULATION_END[2], 'FT goals still ends at 90')
++  check(
++    CORNER_WINDOWS.ht.from === 32 && CORNER_WINDOWS.ht.to === 42,
++    'corners HT 32–42 unchanged',
++  )
++  check(
++    CORNER_WINDOWS.ft.from === 82 && CORNER_WINDOWS.ft.to === 87,
++    'corners FT 82–87 unchanged',
++  )
++  check(MIN_NOTIFY_LEAD_MIN === 1, 'notify lead floor unchanged')
++  check(
++    defaultsFor('goals', 'ht').spikeThreshold === 80,
++    'goals HT Spike threshold unchanged',
++  )
++} finally {
++  console.info = origInfo
++  setPollerSendTelegramForTests(null)
++  setPollerGetFastScoreForTests(null)
++  setPollerCornerRefetchForTests(null)
++  resetPollerRuntimeForTests()
++  resetSokkerProStateForTests()
++  saveSent(previousSent)
++  saveAlerts(previousGoalsHt, 'goals', 'ht')
++  saveAlerts(previousGoalsFt, 'goals', 'ft')
++  saveAlerts(previousCornersHt, 'corners', 'ht')
++  saveAlerts(previousCornersFt, 'corners', 'ft')
++}
++
++if (fail.length) {
++  console.error('FAIL', fail)
++  process.exit(1)
++}
++console.log(
++  'OK: SokkerPro fast score matches sample board; already-hit-fast-score / is-goal / corner-tally; fail-open; windows+push unchanged',
++)
+diff --git a/scripts/verify-sokkerpro.ts b/scripts/verify-sokkerpro.ts
+index d04b73b..0b908cf 100644
+--- a/scripts/verify-sokkerpro.ts
++++ b/scripts/verify-sokkerpro.ts
+@@ -85,6 +85,8 @@ const board = flattenMiniFixtures({
+ check(board.length === 2, `flatten board ${board.length}`)
+ const matched = matchSokkerProFixture(board, 'Porto', 'Benfica')
+ check(matched?.fixtureId === '4242', `fuzzy fixture match got ${matched?.fixtureId}`)
++check(matched?.scoresLocalTeam === 0 && matched?.scoresVisitorTeam === 0, 'missing scores default 0')
++check(matched?.isGoal === null && matched?.isGoalTeam === null, 'missing is_goal is null')
+ 
+ const nestedOdds = collectOddsMap({
+   data: {
+diff --git a/server/config.ts b/server/config.ts
+index b1ea0d3..a4ca0c3 100644
+--- a/server/config.ts
++++ b/server/config.ts
+@@ -54,6 +54,15 @@ export const POLLER_JSON_BACKOFF_MAX_MS = Number(
+ )
+ /** Public SokkerPro O/U odds. Default ON; set `SOKKERPRO_ODDS=0` to disable. Soft-fail. */
+ export const SOKKERPRO_ODDS = process.env.SOKKERPRO_ODDS !== '0'
++/**
++ * SokkerPro mini board as a fast live-score gate before Telegram (golos).
++ * Default ON. `0` falls through (SuperScore-only). Soft-fail; never blocks the tick.
++ */
++export const SOKKERPRO_LIVE_SCORE = process.env.SOKKERPRO_LIVE_SCORE !== '0'
++/** Optional extra SuperScore events re-read for cantos. 0 = reuse evaluate payload. */
++export const FAST_CORNER_REFETCH_MS = Number(
++  process.env.FAST_CORNER_REFETCH_MS || 800,
++)
+ export const LEARN_WINDOW = Number(process.env.LEARN_WINDOW || 5)
+ export const LEARN_AUTO_MIN_OUTCOMES = Number(
+   process.env.LEARN_AUTO_MIN_OUTCOMES || 50,
+diff --git a/server/poller.ts b/server/poller.ts
+index 54f82eb..fe2c1a1 100644
+--- a/server/poller.ts
++++ b/server/poller.ts
+@@ -14,6 +14,7 @@ import type {
+   MomentumPayload,
+ } from '../src/lib/types.ts'
+ import {
++  FAST_CORNER_REFETCH_MS,
+   MIN_NOTIFY_LEAD_MIN,
+   POLLER_CONCURRENCY,
+   POLLER_ENABLED,
+@@ -72,7 +73,15 @@ import {
+   settleTipsForMatch,
+   tipAlreadyOpen,
+ } from './tips.ts'
+-import { warmupSokkerProBoard } from './sokkerpro.ts'
++import {
++  alreadyHitSuppressReason,
++  latestCornerTotal,
++  type FastScore,
++} from '../src/lib/fastScore.ts'
++import {
++  getFastScore,
++  warmupSokkerProBoard,
++} from './sokkerpro.ts'
+ import type { PollerStatus } from './types.ts'
+ 
+ const status: PollerStatus = {
+@@ -92,6 +101,8 @@ const status: PollerStatus = {
+   liveProcessed: 0,
+   pushSubscribers: 0,
+   webPushEnabled: webPushEnabled(),
++  suppressedAlreadyHit: 0,
++  lastAlreadyHitReason: null,
+   telegram: getTelegramStatus(),
+ }
+ 
+@@ -120,10 +131,28 @@ const pendingOddsAttach = new Set<Promise<void>>()
+ type ProcessFixtureFn = (fixture: Fixture, signal?: AbortSignal) => Promise<number>
+ type FetchFixturesFn = (signal?: AbortSignal) => Promise<Fixture[]>
+ type WarmupFn = () => Promise<unknown>
++type GetFastScoreFn = (fixture: Fixture) => FastScore | null
++type CornerRefetchFn = (fixtureId: string) => Promise<MomentumPayload | null>
+ 
+ let processFixtureFn: ProcessFixtureFn = processFixture
+ let fetchFixturesFn: FetchFixturesFn = defaultFetchFixtures
+ let warmupFn: WarmupFn = warmupSokkerProBoard
++let getFastScoreFn: GetFastScoreFn = getFastScore
++/** Production tick enables a short SuperScore re-read; tests keep this null (reuse payload). */
++let cornerRefetchFn: CornerRefetchFn | null = null
++
++async function cheapCornerRefetch(fixtureId: string): Promise<MomentumPayload | null> {
++  if (FAST_CORNER_REFETCH_MS <= 0) return null
++  try {
++    return await withTimeout(
++      fetchMomentumServer(fixtureId),
++      FAST_CORNER_REFETCH_MS,
++      `Timeout ${FAST_CORNER_REFETCH_MS}ms (cantos refetch)`,
++    )
++  } catch {
++    return null
++  }
++}
+ 
+ async function defaultFetchFixtures(signal?: AbortSignal): Promise<Fixture[]> {
+   return fetchFixturesServer(lisbonDate(), POLLER_REGION, signal)
+@@ -172,6 +201,14 @@ export function setPollerDepsForTests(deps: {
+   warmupFn = deps?.warmup ?? warmupSokkerProBoard
+ }
+ 
++export function setPollerGetFastScoreForTests(fn: GetFastScoreFn | null): void {
++  getFastScoreFn = fn ?? getFastScore
++}
++
++export function setPollerCornerRefetchForTests(fn: CornerRefetchFn | null): void {
++  cornerRefetchFn = fn
++}
++
+ export function setPollerLimitsForTests(
+   opts: {
+     fixtureTimeoutMs?: number
+@@ -223,8 +260,12 @@ export function resetPollerRuntimeForTests(): void {
+   status.liveProcessed = 0
+   status.pushSubscribers = 0
+   status.webPushEnabled = webPushEnabled()
++  status.suppressedAlreadyHit = 0
++  status.lastAlreadyHitReason = null
+   status.telegram = getTelegramStatus()
+   sendTelegram = sendTelegramAlert
++  getFastScoreFn = getFastScore
++  cornerRefetchFn = null
+   resetTelegramOutcomesForTests()
+ }
+ 
+@@ -419,6 +460,67 @@ async function attachOddsAndEnrich(args: {
+   }
+ }
+ 
++function noteAlreadyHit(reason: string, alert: FeedAlert): void {
++  status.suppressedAlreadyHit += 1
++  status.lastAlreadyHitReason = reason
++  console.info(
++    `[poller] suppress ${reason} ${alert.min}' P${alert.period} ${alert.matchLabel}`,
++  )
++}
++
++async function latestCornersForGate(
++  fixtureId: string,
++  payload: MomentumPayload,
++): Promise<number> {
++  let latest = payload
++  if (cornerRefetchFn) {
++    try {
++      const fresh = await cornerRefetchFn(fixtureId)
++      if (fresh && Array.isArray(fresh.events)) latest = fresh
++    } catch {
++      latest = payload
++    }
++  }
++  return latestCornerTotal(latest)
++}
++
++/**
++ * After min-lead / coincident suppress. SokkerPro miss → fall through.
++ * In-memory board match; optional short corner events re-read.
++ */
++async function gateClaimedAlerts(args: {
++  fixture: Fixture
++  market: Market
++  claimed: FeedAlert[]
++  events: GoalEvent[]
++  payload: MomentumPayload
++}): Promise<FeedAlert[]> {
++  if (!args.claimed.length) return args.claimed
++  const fast =
++    args.market === 'goals' ? getFastScoreFn(args.fixture) : null
++  let latestCorners: number | null = null
++  if (args.market === 'corners') {
++    latestCorners = await latestCornersForGate(args.fixture.id, args.payload)
++  }
++  const kept: FeedAlert[] = []
++  for (const alert of args.claimed) {
++    const reason = alreadyHitSuppressReason({
++      market: args.market,
++      alert,
++      events: args.events,
++      fast,
++      latestCorners,
++      minLeadExclusive: MIN_NOTIFY_LEAD_MIN,
++    })
++    if (reason) {
++      noteAlreadyHit(reason, alert)
++      continue
++    }
++    kept.push(alert)
++  }
++  return kept
++}
++
+ export type EvaluatedAlertsTick = {
+   fixture: Fixture
+   market: Market
+@@ -540,7 +642,14 @@ export async function processEvaluatedAlerts(
+     )
+   })
+ 
+-  const { sent, notified } = await dispatchClaimedAlerts(fixture, market, claimed)
++  const gated = await gateClaimedAlerts({
++    fixture,
++    market,
++    claimed,
++    events,
++    payload,
++  })
++  const { sent, notified } = await dispatchClaimedAlerts(fixture, market, gated)
+   scheduleTelegramOutcomeFlush()
+   if (fresh.length) {
+     scheduleOddsAttach(() =>
+@@ -737,6 +846,7 @@ export async function tick(): Promise<void> {
+       )
+     }
+     // Prefetch SokkerPro mini in parallel; do not block evaluate/push on board/preodds HTTP.
++    if (!cornerRefetchFn) cornerRefetchFn = cheapCornerRefetch
+     void warmupFn()
+     const tickErrors: FixtureTickError[] = []
+     const runTargets = async (batch: Fixture[], workerLimit: number) =>
+diff --git a/server/sokkerpro.ts b/server/sokkerpro.ts
+index c697f9e..36d3dfc 100644
+--- a/server/sokkerpro.ts
++++ b/server/sokkerpro.ts
+@@ -1,3 +1,4 @@
++import { fastScoreFromBoard, type FastScore } from '../src/lib/fastScore.ts'
+ import {
+   collectOddsMap,
+   flattenMiniFixtures,
+@@ -10,8 +11,8 @@ import {
+   SOKKERPRO_BOARD_CACHE_MS,
+   SOKKERPRO_PREODDS_CACHE_MS,
+ } from '../src/lib/sokkerpro.ts'
+-import type { CornerHalf, Market } from '../src/lib/types.ts'
+-import { SOKKERPRO_ODDS } from './config.ts'
++import type { CornerHalf, Fixture, Market } from '../src/lib/types.ts'
++import { SOKKERPRO_LIVE_SCORE, SOKKERPRO_ODDS } from './config.ts'
+ 
+ const BASE = (process.env.SOKKERPRO_M2_URL || 'https://m2.sokkerpro.com').replace(/\/$/, '')
+ /** Mini board is ~1 MB and often slower than preodds. Do not inherit the old 6s default. */
+@@ -35,6 +36,9 @@ const boardInflight = new Map<string, Promise<SokkerProFixture[] | null>>()
+ let boardFailLoggedThisTick = false
+ let nowFn = (): Date => new Date()
+ let fetchFn: typeof fetch = globalThis.fetch.bind(globalThis)
++let liveScoreEnabled = SOKKERPRO_LIVE_SCORE
++/** Use a slightly stale board for live scores rather than blocking notify. */
++const LIVE_SCORE_STALE_MS = Number(process.env.SOKKERPRO_LIVE_STALE_MS || 180_000)
+ 
+ export type SokkerProMatchOdds = {
+   fixture: SokkerProFixture
+@@ -45,6 +49,14 @@ export function isSokkerProOddsEnabled(): boolean {
+   return SOKKERPRO_ODDS
+ }
+ 
++export function isSokkerProLiveScoreEnabled(): boolean {
++  return liveScoreEnabled
++}
++
++export function isSokkerProBoardEnabled(): boolean {
++  return isSokkerProOddsEnabled() || isSokkerProLiveScoreEnabled()
++}
++
+ /** New poller tick: retry a failed mini board once, keep a successful cache. */
+ export function beginSokkerProTick(): void {
+   boardFailLoggedThisTick = false
+@@ -54,7 +66,7 @@ export function beginSokkerProTick(): void {
+ }
+ 
+ export async function warmupSokkerProBoard(): Promise<SokkerProFixture[] | null> {
+-  if (!isSokkerProOddsEnabled()) return null
++  if (!isSokkerProBoardEnabled()) return null
+   beginSokkerProTick()
+   try {
+     return await fetchSokkerProBoard(todayKey())
+@@ -80,6 +92,50 @@ export function resetSokkerProStateForTests(): void {
+   boardFailLoggedThisTick = false
+   nowFn = () => new Date()
+   fetchFn = globalThis.fetch.bind(globalThis)
++  liveScoreEnabled = SOKKERPRO_LIVE_SCORE
++}
++
++export function setSokkerProLiveScoreEnabledForTests(on: boolean | null): void {
++  liveScoreEnabled = on ?? SOKKERPRO_LIVE_SCORE
++}
++
++/** Inject a flattened mini board (no HTTP) so notify-path tests stay in-memory. */
++export function seedSokkerProBoardForTests(
++  dateKey: string,
++  fixtures: SokkerProFixture[],
++): void {
++  boardCache.set(dateKey, { ts: Date.now(), value: fixtures })
++}
++
++/**
++ * Cache-only peek. Never starts a mini-board HTTP — notify must not wait
++ * on the ~1 MB download. Slightly stale successful boards are OK.
++ */
++export function peekCachedSokkerProFixtures(): SokkerProFixture[] {
++  const out: SokkerProFixture[] = []
++  const seen = new Set<string>()
++  for (const key of [todayKey(), yesterdayKey()]) {
++    const hit = boardCache.get(key)
++    if (!hit || !hit.value) continue
++    if (Date.now() - hit.ts >= LIVE_SCORE_STALE_MS) continue
++    for (const fixture of hit.value) {
++      if (seen.has(fixture.fixtureId)) continue
++      seen.add(fixture.fixtureId)
++      out.push(fixture)
++    }
++  }
++  return out
++}
++
++/**
++ * SuperScore fixture → SokkerPro live score. In-memory match against the
++ * warmed mini board. Missing board / name miss / disabled → `null` (fall through).
++ */
++export function getFastScore(
++  fixture: Pick<Fixture, 'team1' | 'team2' | 'dateSeconds'>,
++): FastScore | null {
++  if (!isSokkerProLiveScoreEnabled()) return null
++  return fastScoreFromBoard(peekCachedSokkerProFixtures(), fixture)
+ }
+ 
+ function todayKey(): string {
+diff --git a/server/types.ts b/server/types.ts
+index 7d6b890..12501c4 100644
+--- a/server/types.ts
++++ b/server/types.ts
+@@ -148,6 +148,9 @@ export type PollerStatus = {
+   liveProcessed: number
+   pushSubscribers: number
+   webPushEnabled: boolean
++  /** Telegram skipped because SokkerPro / latest SuperScore already showed the event. */
++  suppressedAlreadyHit: number
++  lastAlreadyHitReason: string | null
+   telegram: {
+     configured: boolean
+     enabled: boolean
+diff --git a/src/lib/fastScore.ts b/src/lib/fastScore.ts
+new file mode 100644
+index 0000000..05b0d34
+--- /dev/null
++++ b/src/lib/fastScore.ts
+@@ -0,0 +1,175 @@
++import { MARKET_EVENT_TYPE } from './market'
++import { MIN_NOTIFY_LEAD_MIN } from './notifyLead'
++import {
++  matchSokkerProFixtureOriented,
++  type SokkerProFixture,
++} from './sokkerpro'
++import { tallyEvents } from './tally'
++import type { FeedAlert, Fixture, GoalEvent, Market, MomentumPayload } from './types'
++
++/**
++ * Fast live-score overlay from the SokkerPro mini board (already warmed for
++ * odds). **Golos only** — the mini payload has no corner counts.
++ *
++ * Cantos still depend on SuperScore `type=14` events (same-minute / lead&lt;1
++ * plus a latest-tally check on the momentum snapshot).
++ */
++export const FAST_SCORE_SOURCE = 'sokkerpro' as const
++
++export type FastScore = {
++  home: number
++  away: number
++  minute: number | null
++  status: string
++  isGoal?: string
++  isGoalTeam?: 'home' | 'away'
++  source: 'sokkerpro'
++}
++
++export type AlreadyHitReason =
++  | 'already-hit-fast-score'
++  | 'already-hit-is-goal'
++  | 'already-hit-corner-tally'
++
++export function isRecentGoalFlag(isGoal?: string | null): boolean {
++  return Boolean(isGoal && String(isGoal).trim())
++}
++
++export function fastScoreFromMatch(
++  fixture: SokkerProFixture,
++  swapped: boolean,
++): FastScore | null {
++  const local = fixture.scoresLocalTeam
++  const visitor = fixture.scoresVisitorTeam
++  if (local == null || visitor == null) return null
++  const home = swapped ? visitor : local
++  const away = swapped ? local : visitor
++  let isGoalTeam = fixture.isGoalTeam
++  if (swapped && isGoalTeam) {
++    isGoalTeam = isGoalTeam === 'home' ? 'away' : 'home'
++  }
++  return {
++    home,
++    away,
++    minute: fixture.minute,
++    status: fixture.status,
++    ...(fixture.isGoal ? { isGoal: fixture.isGoal } : {}),
++    ...(isGoalTeam ? { isGoalTeam } : {}),
++    source: FAST_SCORE_SOURCE,
++  }
++}
++
++/** In-memory: SuperScore fixture → SokkerPro live row (no HTTP). */
++export function fastScoreFromBoard(
++  fixtures: SokkerProFixture[],
++  fixture: Pick<Fixture, 'team1' | 'team2' | 'dateSeconds'>,
++): FastScore | null {
++  if (!fixtures.length) return null
++  const matched = matchSokkerProFixtureOriented(
++    fixtures,
++    fixture.team1,
++    fixture.team2,
++    fixture.dateSeconds || null,
++  )
++  if (!matched) return null
++  return fastScoreFromMatch(matched.fixture, matched.swapped)
++}
++
++export function superscoreGoalTotal(
++  alert: Pick<FeedAlert, 'goalsTally' | 'min' | 'period'>,
++  events?: Array<Pick<GoalEvent, 'min' | 'period'>>,
++): number {
++  if (alert.goalsTally) return alert.goalsTally.home + alert.goalsTally.away
++  if (!events?.length) return 0
++  return events.filter(
++    (event) =>
++      event.period < alert.period ||
++      (event.period === alert.period && event.min <= alert.min),
++  ).length
++}
++
++export function superscoreCornerTotal(
++  alert: Pick<FeedAlert, 'cornersTally'>,
++): number {
++  if (!alert.cornersTally) return 0
++  return alert.cornersTally.home + alert.cornersTally.away
++}
++
++/** All type=14 events in the snapshot (not clipped to the alert minute). */
++export function latestCornerTotal(payload: MomentumPayload): number {
++  const tally = tallyEvents(payload, MARKET_EVENT_TYPE.corners, {
++    min: 10_000,
++    period: 99,
++  })
++  return tally.home + tally.away
++}
++
++/**
++ * `is_goal` is a "goal just fired" flag. We only let the alert through when
++ * SokkerPro's clock is at least `minLead` after the spike. No clock → suppress
++ * (Pedro prefers fewer late signals).
++ */
++export function provenLeadOnFastGoal(
++  alertMin: number,
++  fastMinute: number | null | undefined,
++  minLeadExclusive: number = MIN_NOTIFY_LEAD_MIN,
++): boolean {
++  if (fastMinute == null || !Number.isFinite(fastMinute)) return false
++  return fastMinute - alertMin >= minLeadExclusive
++}
++
++export function goalAlreadyHitReason(args: {
++  ssGoals: number
++  fast: FastScore | null
++  alertMin: number
++  minLeadExclusive?: number
++}): AlreadyHitReason | null {
++  const fast = args.fast
++  if (!fast) return null
++  if (fast.home + fast.away > args.ssGoals) return 'already-hit-fast-score'
++  if (!isRecentGoalFlag(fast.isGoal)) return null
++  const minLead = args.minLeadExclusive ?? MIN_NOTIFY_LEAD_MIN
++  if (!provenLeadOnFastGoal(args.alertMin, fast.minute, minLead)) {
++    return 'already-hit-is-goal'
++  }
++  return null
++}
++
++export function cornerAlreadyHitReason(args: {
++  alertCorners: number
++  latestCorners: number
++}): AlreadyHitReason | null {
++  if (args.latestCorners > args.alertCorners) return 'already-hit-corner-tally'
++  return null
++}
++
++/**
++ * After min-lead / coincident suppress. SokkerPro unavailable → `null`
++ * (fall through; do not block the alert).
++ */
++export function alreadyHitSuppressReason(args: {
++  market: Market
++  alert: Pick<
++    FeedAlert,
++    'min' | 'period' | 'goalsTally' | 'cornersTally' | 'market'
++  >
++  events?: Array<Pick<GoalEvent, 'min' | 'period'>>
++  fast: FastScore | null
++  latestCorners?: number | null
++  minLeadExclusive?: number
++}): AlreadyHitReason | null {
++  const market = args.alert.market ?? args.market
++  if (market === 'corners') {
++    if (args.latestCorners == null) return null
++    return cornerAlreadyHitReason({
++      alertCorners: superscoreCornerTotal(args.alert),
++      latestCorners: args.latestCorners,
++    })
++  }
++  return goalAlreadyHitReason({
++    ssGoals: superscoreGoalTotal(args.alert, args.events),
++    fast: args.fast,
++    alertMin: args.alert.min,
++    minLeadExclusive: args.minLeadExclusive,
++  })
++}
+diff --git a/src/lib/learnApi.ts b/src/lib/learnApi.ts
+index 47fc573..a6c99b3 100644
+--- a/src/lib/learnApi.ts
++++ b/src/lib/learnApi.ts
+@@ -231,6 +231,8 @@ export async function fetchPollerStatus(): Promise<{
+   liveProcessed?: number
+   pushSubscribers?: number
+   webPushEnabled?: boolean
++  suppressedAlreadyHit?: number
++  lastAlreadyHitReason?: string | null
+   telegram?: {
+     configured: boolean
+     enabled: boolean
+@@ -270,6 +272,8 @@ export async function fetchPollerStatus(): Promise<{
+       liveProcessed?: number
+       pushSubscribers?: number
+       webPushEnabled?: boolean
++      suppressedAlreadyHit?: number
++      lastAlreadyHitReason?: string | null
+       telegram?: {
+         configured: boolean
+         enabled: boolean
+diff --git a/src/lib/sokkerpro.ts b/src/lib/sokkerpro.ts
+index 1849f8a..f6486e8 100644
+--- a/src/lib/sokkerpro.ts
++++ b/src/lib/sokkerpro.ts
+@@ -1,4 +1,4 @@
+-import { fixtureMatchesQuote, TEAM_MATCH_MIN } from './tips'
++import { fixtureMatchesQuote, teamNameScore, TEAM_MATCH_MIN } from './tips'
+ import type { CornerHalf, Market } from './types'
+ 
+ /**
+@@ -46,6 +46,8 @@ export type SokkerProPick = {
+   underKey: string | null
+ }
+ 
++export type SokkerProGoalTeam = 'home' | 'away'
++
+ export type SokkerProFixture = {
+   fixtureId: string
+   localTeamName: string
+@@ -53,8 +55,23 @@ export type SokkerProFixture = {
+   status: string
+   minute: number | null
+   odds: Record<string, string>
++  scoresLocalTeam: number | null
++  scoresVisitorTeam: number | null
++  /** Non-empty unix-timestamp string when SokkerPro just flagged a goal. */
++  isGoal: string | null
++  isGoalTeam: SokkerProGoalTeam | null
++  startingAtTimestamp: number | null
++}
++
++export type SokkerProNameMatch = {
++  fixture: SokkerProFixture
++  swapped: boolean
++  nameScore: number
+ }
+ 
++/** Prefer kickoff within this window when two name matches exist. */
++export const SOKKERPRO_KICKOFF_WINDOW_S = 6 * 3600
++
+ const KEY_RE =
+   /^([A-Z0-9]+)_((?:GOLS)|(?:CANTOS?))(?:_(HT|1T|1ST|FT|2T))?_(OVER|UNDER)_(\d+(?:[._]\d+)?)(_LIVE)?$/i
+ 
+@@ -197,6 +214,33 @@ function readFixtureId(row: Record<string, unknown>): string | null {
+   return id || null
+ }
+ 
++function parseClockNumber(value: unknown): number | null {
++  if (value == null || value === '') return null
++  const raw = typeof value === 'string' ? value.replace(/"/g, '').trim() : value
++  if (raw === '') return null
++  const n = Number(raw)
++  return Number.isFinite(n) ? n : null
++}
++
++/** Mini board uses "" / "0" / "4". Missing or blank is 0; unparsable stays null. */
++export function parseSokkerProScore(value: unknown): number | null {
++  if (value == null || value === '') return 0
++  const n = Number(value)
++  return Number.isFinite(n) ? n : null
++}
++
++export function parseSokkerProIsGoal(value: unknown): string | null {
++  const s = str(value).trim()
++  return s ? s : null
++}
++
++export function parseSokkerProIsGoalTeam(value: unknown): SokkerProGoalTeam | null {
++  const s = str(value).trim().toLowerCase()
++  if (s === 'home' || s === 'local' || s === '1') return 'home'
++  if (s === 'away' || s === 'visitor' || s === '2') return 'away'
++  return null
++}
++
+ export function normalizeSokkerProFixture(raw: unknown): SokkerProFixture | null {
+   const row = asRecord(raw)
+   if (!row) return null
+@@ -211,11 +255,17 @@ export function normalizeSokkerProFixture(raw: unknown): SokkerProFixture | null
+     localTeamName,
+     visitorTeamName,
+     status: str(row.status ?? row.state),
+-    minute: (() => {
+-      const n = Number(row.minute ?? row.min)
+-      return Number.isFinite(n) ? n : null
+-    })(),
++    minute: parseClockNumber(row.minute ?? row.min),
+     odds: collectOddsMap(row),
++    scoresLocalTeam: parseSokkerProScore(row.scoresLocalTeam ?? row.localScore ?? row.homeScore),
++    scoresVisitorTeam: parseSokkerProScore(
++      row.scoresVisitorTeam ?? row.visitorScore ?? row.awayScore,
++    ),
++    isGoal: parseSokkerProIsGoal(row.is_goal ?? row.isGoal),
++    isGoalTeam: parseSokkerProIsGoalTeam(row.is_goal_team ?? row.isGoalTeam),
++    startingAtTimestamp: parseClockNumber(
++      row.startingAtTimestamp ?? row.starting_at_timestamp ?? row.startingAt,
++    ),
+   }
+ }
+ 
+@@ -250,30 +300,108 @@ function statusLiveScore(status: string): number {
+   return 1
+ }
+ 
+-export function matchSokkerProFixture(
++function kickoffDeltaS(
++  fixture: SokkerProFixture,
++  kickoffSeconds?: number | null,
++): number {
++  if (
++    kickoffSeconds == null ||
++    !Number.isFinite(kickoffSeconds) ||
++    fixture.startingAtTimestamp == null
++  ) {
++    return Number.POSITIVE_INFINITY
++  }
++  return Math.abs(fixture.startingAtTimestamp - kickoffSeconds)
++}
++
++/**
++ * SuperScore team1/team2 → SokkerPro row. Name Jaccard first; kickoff
++ * (`dateSeconds` vs `startingAtTimestamp`) breaks ties / same-name doubles.
++ */
++export function matchSokkerProFixtureOriented(
+   fixtures: SokkerProFixture[],
+   home: string,
+   away: string,
+-): SokkerProFixture | null {
+-  let best: { fixture: SokkerProFixture; score: number; live: number } | null = null
++  kickoffSeconds?: number | null,
++): SokkerProNameMatch | null {
++  let best: {
++    match: SokkerProNameMatch
++    live: number
++    kickoff: number
++  } | null = null
+   for (const fixture of fixtures) {
+-    const score = fixtureMatchesQuote(
+-      home,
+-      away,
+-      fixture.localTeamName,
+-      fixture.visitorTeamName,
+-    )
+-    if (score < TEAM_MATCH_MIN) continue
++    const direct =
++      (teamNameScore(home, fixture.localTeamName) +
++        teamNameScore(away, fixture.visitorTeamName)) /
++      2
++    const swappedScore =
++      (teamNameScore(home, fixture.visitorTeamName) +
++        teamNameScore(away, fixture.localTeamName)) /
++      2
++    const nameScore = Math.max(direct, swappedScore)
++    if (nameScore < TEAM_MATCH_MIN) continue
+     const live = statusLiveScore(fixture.status)
+-    if (
+-      !best ||
+-      score > best.score ||
+-      (score === best.score && live > best.live)
+-    ) {
+-      best = { fixture, score, live }
++    const kickoff = kickoffDeltaS(fixture, kickoffSeconds)
++    const candidate = {
++      match: {
++        fixture,
++        swapped: swappedScore > direct,
++        nameScore,
++      },
++      live,
++      kickoff,
++    }
++    if (!best) {
++      best = candidate
++      continue
++    }
++    if (nameScore > best.match.nameScore + 1e-6) {
++      best = candidate
++      continue
++    }
++    if (nameScore + 1e-6 < best.match.nameScore) continue
++    const kickoffKnown =
++      Number.isFinite(kickoff) && Number.isFinite(best.kickoff)
++    if (kickoffKnown && kickoff + 30 < best.kickoff) {
++      best = candidate
++      continue
++    }
++    if (kickoffKnown && best.kickoff + 30 < kickoff) continue
++    if (live > best.live) best = candidate
++  }
++  return best?.match ?? null
++}
++
++export function matchSokkerProFixture(
++  fixtures: SokkerProFixture[],
++  home: string,
++  away: string,
++  kickoffSeconds?: number | null,
++): SokkerProFixture | null {
++  if (kickoffSeconds == null) {
++    let best: { fixture: SokkerProFixture; score: number; live: number } | null =
++      null
++    for (const fixture of fixtures) {
++      const score = fixtureMatchesQuote(
++        home,
++        away,
++        fixture.localTeamName,
++        fixture.visitorTeamName,
++      )
++      if (score < TEAM_MATCH_MIN) continue
++      const live = statusLiveScore(fixture.status)
++      if (
++        !best ||
++        score > best.score ||
++        (score === best.score && live > best.live)
++      ) {
++        best = { fixture, score, live }
++      }
+     }
++    return best?.fixture ?? null
+   }
+-  return best?.fixture ?? null
++  return matchSokkerProFixtureOriented(fixtures, home, away, kickoffSeconds)
++    ?.fixture ?? null
+ }
+ 
+ type RankedQuote = SokkerProParsedKey & { odd: number }
+diff --git a/src/pages/MonitorPage.tsx b/src/pages/MonitorPage.tsx
+index 90ac51e..b019919 100644
+--- a/src/pages/MonitorPage.tsx
++++ b/src/pages/MonitorPage.tsx
+@@ -122,7 +122,11 @@ export function MonitorPage({
+         : '—'
+       setPollerLine(
+         status.enabled
+-          ? `Servidor: ${status.liveWatched} ao vivo · ${status.inWindowThisTick ?? 0} em janela · tick ${last} · ${status.alertsSent} avisos`
++          ? `Servidor: ${status.liveWatched} ao vivo · ${status.inWindowThisTick ?? 0} em janela · tick ${last} · ${status.alertsSent} avisos${
++              status.suppressedAlreadyHit
++                ? ` · ${status.suppressedAlreadyHit} já bateram`
++                : ''
++            }`
+           : 'Poller do servidor desligado',
+       )
+     }
