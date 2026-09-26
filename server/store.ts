@@ -458,12 +458,13 @@ export function markAlertPushed(
   half?: CornerHalf | null,
 ): boolean {
   const m = parseMarket(market)
-  if (m === 'corners' && !parseCornerHalfOpt(half)) {
+  if (!parseCornerHalfOpt(half)) {
     const ht = markAlertPushed(alertId, m, 'ht')
     const ft = markAlertPushed(alertId, m, 'ft')
     return ht || ft
   }
-  const h = m === 'corners' ? parseCornerHalf(half) : undefined
+  // Both markets keep one store per half (goals FT = alerts_goals_ft.json).
+  const h = parseCornerHalf(half)
   const alerts = loadAlerts(m, h)
   const loggedId = parseAlertKey(alertId).loggedId
   const idx = alerts.findIndex((a) => a.id === loggedId)

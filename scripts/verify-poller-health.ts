@@ -294,6 +294,22 @@ try {
   )
 }
 
+// Goals FT alerts live in alerts_goals_ft.json: markAlertPushed must find them
+// (production had 22 delivered goals FT alerts with sentPush=false).
+const previousFt = loadAlerts('goals', 'ft')
+try {
+  const ftSample = { ...sample, id: `${sample.id}-ft`, minute: 80, period: 2, cornerHalf: 'ft' as const }
+  saveAlerts(previousFt.filter((a) => a.id !== ftSample.id), 'goals', 'ft')
+  upsertAlerts([{ ...ftSample, sentPush: false }], 'goals', 'ft')
+  check(markAlertPushed(ftSample.id, 'goals', 'ft'), 'markAlertPushed finds a goals FT row')
+  check(
+    loadAlerts('goals', 'ft').find((a) => a.id === ftSample.id)?.sentPush === true,
+    'markAlertPushed sets sentPush on goals FT',
+  )
+} finally {
+  saveAlerts(previousFt.filter((a) => a.id !== `${sample.id}-ft`), 'goals', 'ft')
+}
+
 const previousSubs = loadSubscriptions()
 try {
   saveSubscriptions([])
