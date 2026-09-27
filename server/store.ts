@@ -19,12 +19,17 @@ import {
   type TipOverlayProposal,
 } from '../src/lib/tipOverlay.ts'
 import type { OddsObservation } from '../src/lib/oddsObserve.ts'
+import {
+  normalizeLeagueTelegramFile,
+  type LeagueTelegramFile,
+} from '../src/lib/leagueTelegram.ts'
 import { oddsLogKey } from '../src/lib/oddsObserve.ts'
 import type { GoalRecord, LoggedAlert, ParamVersion, PushSub, StoredMatch } from './types.ts'
 import { marketFromTelegramText, parseAlertKey } from './alertKeys.ts'
 import { noteFixtureLeague, observeAlerts } from './leagueStats.ts'
 import { observeBetPending } from './betIndex.ts'
 
+const LEAGUE_TELEGRAM_FILE = 'league_telegram.json'
 const TIP_OVERLAY_FILE = 'tip_overlay.json'
 const TIP_OVERLAY_PROPOSAL_FILE = 'tip_overlay_proposal.json'
 const ODDS_LOG_FILE = 'odds_observations.json'
@@ -156,6 +161,14 @@ export function loadTipOverlayProposal(): TipOverlayProposal | null {
 
 export function saveTipOverlayProposal(item: TipOverlayProposal | null): void {
   writeJson(TIP_OVERLAY_PROPOSAL_FILE, item)
+}
+
+export function loadLeagueTelegram(): LeagueTelegramFile {
+  return normalizeLeagueTelegramFile(readJson<unknown>(LEAGUE_TELEGRAM_FILE, null))
+}
+
+export function saveLeagueTelegram(file: LeagueTelegramFile): void {
+  writeJson(LEAGUE_TELEGRAM_FILE, normalizeLeagueTelegramFile(file))
 }
 
 export type OddsLogFile = {

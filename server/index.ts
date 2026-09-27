@@ -53,6 +53,10 @@ import {
   proposeTipOverlay,
   tipsPayload,
 } from './tips.ts'
+import {
+  getLeagueTelegramFile,
+  patchLeagueTelegramGate,
+} from './leagueTelegram.ts'
 import { overlayConfig, overlayStats, overlayStatsFor } from './qualityOverlay.ts'
 import type { PushSub } from './types.ts'
 
@@ -209,6 +213,36 @@ app.post('/api/robobet/ingest', (req, res) => {
 
 app.get('/api/tips', (_req, res) => {
   res.json(tipsPayload())
+})
+
+app.get('/api/tips/telegram-leagues', (_req, res) => {
+  res.json(getLeagueTelegramFile())
+})
+
+app.put('/api/tips/telegram-leagues', (req, res) => {
+  const body = (req.body ?? {}) as {
+    key?: string
+    market?: string
+    tg?: boolean
+    auto?: boolean
+    minRoi?: number
+  }
+  if (!body.key || (body.market !== 'goals' && body.market !== 'corners')) {
+    res.status(400).json({ error: 'key e market (goals|corners) obrigatórios' })
+    return
+  }
+  try {
+    const file = patchLeagueTelegramGate({
+      key: body.key,
+      market: body.market,
+      tg: body.tg,
+      auto: body.auto,
+      minRoi: body.minRoi,
+    })
+    res.json(file)
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'erro' })
+  }
 })
 
 app.get('/api/tips/observations', (_req, res) => {

@@ -1,8 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { pct } from '../lib/format'
-import { ENTRY_LABELS, ENTRY_ORDER, formatOddPt, type EntryType, type LeagueRow, type RoiRow, type Tip } from '../lib/tips'
+import {
+  computeLeagueFollowup,
+  ENTRY_LABELS,
+  ENTRY_ORDER,
+  formatOddPt,
+  type EntryType,
+  type LeagueRow,
+  type RoiRow,
+  type Tip,
+} from '../lib/tips'
 import { DEFAULT_TIP_OVERLAY, type TipOverlay } from '../lib/tipOverlay'
-import { applyTipOverlay, fetchTips, type OverlayPayload, type TipsPayload } from '../lib/tipsApi'
+import {
+  applyTipOverlay,
+  fetchTips,
+  patchTelegramLeague,
+  type OverlayPayload,
+  type TipsPayload,
+} from '../lib/tipsApi'
+import {
+  DEFAULT_LEAGUE_TG_GATE,
+  type LeagueTelegramFile,
+  type LeagueTgMarket,
+} from '../lib/leagueTelegram'
 import { CORNER_WINDOWS, GOAL_WINDOWS } from '../lib/windows'
 
 function statusLabel(status: Tip['status']): string {
@@ -83,7 +103,17 @@ function RoiTable({ rows }: { rows: RoiRow[] }) {
   )
 }
 
-function LeagueTable({ rows }: { rows: LeagueRow[] }) {
+function LeagueTable({
+  rows,
+  market,
+  file,
+  onPatch,
+}: {
+  rows: LeagueRow[]
+  market: LeagueTgMarket
+  file: LeagueTelegramFile | undefined
+  onPatch: (key: string, patch: { tg?: boolean; auto?: boolean; minRoi?: number }) => void
+}) {
   if (!rows.length) {
     return (
       <p className="text-sm text-emerald-100/50">
@@ -100,11 +130,16 @@ function LeagueTable({ rows }: { rows: LeagueRow[] }) {
             <th className="py-2 pr-3 font-medium">Tips</th>
             <th className="py-2 pr-3 font-medium">W–L</th>
             <th className="py-2 pr-3 font-medium">PnL</th>
-            <th className="py-2 font-medium">ROI</th>
+            <th className="py-2 pr-3 font-medium">ROI</th>
+            <th className="py-2 pr-3 font-medium">TG</th>
+            <th className="py-2 pr-3 font-medium">AUTO</th>
+            <th className="py-2 font-medium">min ROI</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const gate = file?.leagues[row.key]?.[market] ?? DEFAULT_LEAGUE_TG_GATE
+            return (
             <tr key={row.key} className="border-t border-line/80">
               <td className="py-2 pr-3">{row.league}</td>
               <td className="py-2 pr-3 font-mono">{row.tips}</td>
@@ -114,11 +149,47 @@ function LeagueTable({ rows }: { rows: LeagueRow[] }) {
               <td className="py-2 pr-3 font-mono">
                 {row.pnl.toFixed(2).replace('.', ',')} u
               </td>
-              <td className="py-2 font-mono">
+              <td className="py-2 pr-3 font-mono">
                 {row.roi === null ? '—' : pct(row.roi)}
               </td>
+              <td className="py-2 pr-3">
+                <input
+                  type="checkbox"
+                  className="accent-lime"
+                  checked={gate.tg}
+                  disabled={gate.auto}
+                  title="Telegram desta liga. Não pára as tips."
+                  onChange={(e) => onPatch(row.key, { tg: e.target.checked })}
+                />
+              </td>
+              <td className="py-2 pr-3">
+                <input
+                  type="checkbox"
+                  className="accent-lime"
+                  checked={gate.auto}
+                  title="Liga/desliga TG se ROI ≥ min e n≥8"
+                  onChange={(e) => onPatch(row.key, { auto: e.target.checked })}
+                />
+              </td>
+              <td className="py-2">
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.5}
+                  className="w-16 rounded border border-line bg-pitch px-1 py-0.5 font-mono text-xs"
+                  value={Math.round(gate.minRoi * 1000) / 10}
+                  title="Mínimo ROI % (AUTO)"
+                  onChange={(e) => {
+                    const n = Number(e.target.value.replace(',', '.'))
+                    if (!Number.isFinite(n) || n <= 0) return
+                    onPatch(row.key, { minRoi: n / 100 })
+                  }}
+                />
+                <span className="ml-0.5 text-[10px] text-emerald-100/40">%</span>
+              </td>
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -128,6 +199,8 @@ function LeagueTable({ rows }: { rows: LeagueRow[] }) {
 export function TipsPage() {
   const [data, setData] = useState<TipsPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [tgMarket, setTgMarket] = useState<LeagueTgMarket>('corners')
+  const [tgFile, setTgFile] = useState<LeagueTelegramFile | undefined>(undefined)
 
   async function load() {
     const payload = await fetchTips()
@@ -137,6 +210,7 @@ export function TipsPage() {
     }
     setError(null)
     setData(payload)
+    setTgFile(payload.telegramLeagues)
   }
 
   useEffect(() => {
@@ -150,6 +224,7 @@ export function TipsPage() {
       }
       setError(null)
       setData(payload)
+      setTgFile(payload.telegramLeagues)
     }
     void tick()
     const id = window.setInterval(() => void tick(), 15000)
@@ -240,8 +315,36 @@ export function TipsPage() {
         <h3 className="text-sm font-semibold tracking-wide uppercase">
           Acompanhamento por liga
         </h3>
+        <p className="mt-1 text-xs text-emerald-100/45">
+          Ordenado por ROI. TG/AUTO só cortam o Telegram — as tips continuam a
+          gravar. AUTO exige n≥8 e ROI ≥ mínimo (default 5%).
+        </p>
+        <div className="mt-2 flex gap-2">
+          {(['corners', 'goals'] as LeagueTgMarket[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setTgMarket(m)}
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                tgMarket === m ? 'bg-lime text-pitch' : 'border border-line text-emerald-100/70'
+              }`}
+            >
+              {m === 'corners' ? 'Cantos' : 'Golos'}
+            </button>
+          ))}
+        </div>
         <div className="mt-3">
-          <LeagueTable rows={data?.leagues ?? []} />
+          <LeagueTable
+            market={tgMarket}
+            file={tgFile}
+            rows={computeLeagueFollowup(
+              [...(data?.open ?? []), ...(data?.settled ?? [])],
+              tgMarket,
+            )}
+            onPatch={(key, patch) => {
+              void patchTelegramLeague({ key, market: tgMarket, ...patch }).then(setTgFile)
+            }}
+          />
         </div>
       </section>
     </div>

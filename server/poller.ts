@@ -96,6 +96,7 @@ import {
   settleTipsForMatch,
   tipAlreadyOpen,
 } from './tips.ts'
+import { shouldSendTelegramForAlert } from './leagueTelegram.ts'
 import { warmupSokkerProBoard } from './sokkerpro.ts'
 import { alertKeyFor, loggedAlertId } from './alertKeys.ts'
 import {
@@ -595,7 +596,14 @@ async function dispatchClaimedAlerts(
         }) ?? undefined,
     }
     const firstAttemptAt = telegramRetryNow()
-    const telegramResult: TelegramSendResult = await sendTelegram(telegramPayload)
+    const leagueGate = shouldSendTelegramForAlert({
+      fixtureId: fixture.id,
+      market,
+      competitionId: fixture.competitionId,
+    })
+    const telegramResult: TelegramSendResult = leagueGate.send
+      ? await sendTelegram(telegramPayload)
+      : { sent: 0, skipped: true, reason: `liga ${leagueGate.key || '?'} TG off` }
     if (telegramResult.sent > 0) {
       notifiedOk = true
       await noteTelegramDelivered(fixture, market, alert, alertKey, telegramResult, ctx)
@@ -814,7 +822,7 @@ export async function processEvaluatedAlerts(
         market,
         settings,
         alerts: fresh,
-        tipAlerts: notified,
+        tipAlerts: claimed,
         ingest: true,
       }),
     )

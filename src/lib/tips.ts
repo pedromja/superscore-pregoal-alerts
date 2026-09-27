@@ -166,9 +166,10 @@ export function leagueKeyOf(league: string | null | undefined): string {
   return (league ?? '').trim() || 'Sem liga'
 }
 
-export function computeLeagueFollowup(tips: Tip[]): LeagueRow[] {
+export function computeLeagueFollowup(tips: Tip[], market?: Tip['market']): LeagueRow[] {
   const by = new Map<string, LeagueRow>()
   for (const tip of tips) {
+    if (market && tip.market !== market) continue
     if (tip.void) continue
     // Names repeat across countries ("Premier League", "Cup"): only tips with a
     // unique league key are grouped; the rest stay out of the follow-up.
@@ -201,7 +202,11 @@ export function computeLeagueFollowup(tips: Tip[]): LeagueRow[] {
       const settled = row.won + row.lost
       return { ...row, roi: settled ? row.pnl / settled : null }
     })
-    .sort((a, b) => b.tips - a.tips || a.league.localeCompare(b.league, 'pt'))
+    .sort((a, b) => {
+      const ra = a.roi ?? -Infinity
+      const rb = b.roi ?? -Infinity
+      return rb - ra || b.tips - a.tips || a.league.localeCompare(b.league, 'pt')
+    })
 }
 
 export function stripAccents(value: string): string {

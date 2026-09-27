@@ -67,6 +67,7 @@ import {
   saveTipOverlay,
   saveTipOverlayProposal,
   saveTips,
+  loadLeagueTelegram,
 } from './store.ts'
 
 export type ResolvedOdd = {
@@ -518,5 +519,6 @@ export function tipsPayload() {
     overlay: overlayPayload(),
     observations: loadOddsObservations().slice(-40).reverse(),
     horizonLongCap: HORIZON_LONG_CAP,
+    telegramLeagues: loadLeagueTelegram(),
   }
 }
