@@ -10,6 +10,7 @@ import {
   type LeagueTgGate,
   type LeagueTgMarket,
 } from '../src/lib/leagueTelegram.ts'
+import { addToFlatAgg, emptyFlatAgg, finishFlatAgg } from '../src/lib/tipPnl.ts'
 import { resolveFixtureLeague } from './competitions.ts'
 import { loadLeagueTelegram, loadTips, saveLeagueTelegram } from './store.ts'
 
@@ -41,27 +42,22 @@ export function patchLeagueTelegramGate(args: {
   return file
 }
 
+/**
+ * Flat 1u stake, pnl derived from odd + status (tipPnl.ts); tips without a
+ * valid odd are left out, so `settled` = settled tips with a valid odd.
+ */
 function marketRoi(tips: Tip[], key: string, market: LeagueTgMarket): {
   settled: number
   roi: number | null
 } {
-  let won = 0
-  let lost = 0
-  let pnl = 0
+  const agg = emptyFlatAgg()
   for (const tip of tips) {
-    if (tip.void) continue
     if (tip.leagueKey !== key) continue
     if (marketToTg(tip.market) !== market) continue
-    if (tip.status === 'won') {
-      won += 1
-      pnl += tip.pnl ?? tip.odd - 1
-    } else if (tip.status === 'lost') {
-      lost += 1
-      pnl += tip.pnl ?? -1
-    }
+    addToFlatAgg(agg, tip)
   }
-  const settled = won + lost
-  return { settled, roi: settled ? pnl / settled : null }
+  finishFlatAgg(agg)
+  return { settled: agg.priced, roi: agg.roi }
 }
 
 export function shouldSendTelegramForAlert(args: {

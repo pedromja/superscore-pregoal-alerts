@@ -1,5 +1,12 @@
 import type { CornerHalf, Market, MatchTally, RuleId } from './types'
 import { cornerHalfOf } from './windows'
+import {
+  addToFlatAgg,
+  emptyFlatAgg,
+  finishFlatAgg,
+  flatStakePnl,
+  type TipOddIssue,
+} from './tipPnl'
 
 export type TipSource = 'superscore' | 'sokkerpro' | 'robobet'
 export type TipStatus = 'open' | 'won' | 'lost'
@@ -45,6 +52,8 @@ export type Tip = {
   betOutcome?: import('./betOutcome').BetOutcome
   /** Status before the half-end re-settle, when it changed (audit). */
   legacyStatus?: TipStatus
+  /** API only (derived, not stored): why the odd is not this bet's price. */
+  oddIssue?: TipOddIssue | null
 }
 
 export type RoiRow = {
@@ -54,7 +63,12 @@ export type RoiRow = {
   open: number
   won: number
   lost: number
+  /** Units staked = settled tips with a valid odd (1u each). */
   staked: number
+  /** Settled tips with a valid odd (= staked). */
+  priced: number
+  /** Settled tips without a valid odd: in W–L, out of PnL/ROI. */
+  noOdd: number
   pnl: number
   roi: number | null
 }
@@ -68,6 +82,8 @@ export type LeagueRow = {
   open: number
   won: number
   lost: number
+  priced: number
+  noOdd: number
   pnl: number
   roi: number | null
 }
@@ -112,10 +128,9 @@ export function formatOddPt(odd: number): string {
   return odd.toFixed(2).replace('.', ',')
 }
 
+/** Flat 1u stake: won = odd - 1, lost = -1 (see tipPnl.ts). */
 export function tipPnl(odd: number, status: TipStatus): number | null {
-  if (status === 'won') return odd - 1
-  if (status === 'lost') return -1
-  return null
+  return flatStakePnl(odd, status)
 }
 
 function emptyRow(key: EntryType): RoiRow {
@@ -127,6 +142,8 @@ function emptyRow(key: EntryType): RoiRow {
     won: 0,
     lost: 0,
     staked: 0,
+    priced: 0,
+    noOdd: 0,
     pnl: 0,
     roi: null,
   }
@@ -140,23 +157,12 @@ export function computeRoi(tips: Tip[]): RoiRow[] {
     if (tip.void) continue
     const key = entryTypeOf(tip.market, tip.half)
     const row = byKey.get(key) ?? emptyRow(key)
-    row.tips += 1
-    row.staked += tip.stake
-    if (tip.status === 'open') row.open += 1
-    if (tip.status === 'won') {
-      row.won += 1
-      row.pnl += tip.pnl ?? tip.odd - 1
-    }
-    if (tip.status === 'lost') {
-      row.lost += 1
-      row.pnl += tip.pnl ?? -1
-    }
+    addToFlatAgg(row, tip)
     byKey.set(key, row)
   }
   return ENTRY_ORDER.map((key) => {
-    const row = byKey.get(key) ?? emptyRow(key)
-    const settled = row.won + row.lost
-    row.roi = settled ? row.pnl / settled : null
+    const row = finishFlatAgg(byKey.get(key) ?? emptyRow(key))
+    row.staked = row.priced
     return row
   })
 }
@@ -178,30 +184,13 @@ export function computeLeagueFollowup(tips: Tip[], market?: Tip['market']): Leag
     const row = by.get(key) ?? {
       key,
       league: tip.leagueLabel || leagueKeyOf(tip.league),
-      tips: 0,
-      open: 0,
-      won: 0,
-      lost: 0,
-      pnl: 0,
-      roi: null,
+      ...emptyFlatAgg(),
     }
-    row.tips += 1
-    if (tip.status === 'open') row.open += 1
-    if (tip.status === 'won') {
-      row.won += 1
-      row.pnl += tip.pnl ?? tip.odd - 1
-    }
-    if (tip.status === 'lost') {
-      row.lost += 1
-      row.pnl += tip.pnl ?? -1
-    }
+    addToFlatAgg(row, tip)
     by.set(key, row)
   }
   return [...by.values()]
-    .map((row) => {
-      const settled = row.won + row.lost
-      return { ...row, roi: settled ? row.pnl / settled : null }
-    })
+    .map((row) => finishFlatAgg(row))
     .sort((a, b) => {
       const ra = a.roi ?? -Infinity
       const rb = b.roi ?? -Infinity

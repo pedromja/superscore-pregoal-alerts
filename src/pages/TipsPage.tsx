@@ -24,6 +24,7 @@ import {
   type LeagueTgMarket,
 } from '../lib/leagueTelegram'
 import { CORNER_WINDOWS, GOAL_WINDOWS } from '../lib/windows'
+import { TIP_ODD_ISSUE_LABELS, tipFlatPnl, tipOddIssue } from '../lib/tipPnl'
 
 function statusLabel(status: Tip['status']): string {
   if (status === 'won') return 'Ganha'
@@ -32,9 +33,17 @@ function statusLabel(status: Tip['status']): string {
 }
 
 function pnlText(tip: Tip): string {
-  if (tip.status === 'open' || tip.pnl === null) return '—'
-  const sign = tip.pnl >= 0 ? '+' : ''
-  return `${sign}${tip.pnl.toFixed(2).replace('.', ',')} u`
+  if (tip.status === 'open') return '—'
+  const issue = tip.oddIssue !== undefined ? tip.oddIssue : tipOddIssue(tip)
+  if (issue) return `— (${TIP_ODD_ISSUE_LABELS[issue]}, fora do ROI)`
+  const pnl = tipFlatPnl(tip)
+  if (pnl === null) return '—'
+  const sign = pnl >= 0 ? '+' : ''
+  return `${sign}${pnl.toFixed(2).replace('.', ',')} u`
+}
+
+function noOddText(n: number): string {
+  return n ? ` · ${n} s/ odd` : ''
 }
 
 function TipRow({ tip }: { tip: Tip }) {
@@ -88,6 +97,7 @@ function RoiTable({ rows }: { rows: RoiRow[] }) {
               <td className="py-2 pr-3 font-mono">
                 {row.won}–{row.lost}
                 {row.open ? ` · ${row.open} ab.` : ''}
+                {noOddText(row.noOdd)}
               </td>
               <td className="py-2 pr-3 font-mono">
                 {row.pnl.toFixed(2).replace('.', ',')} u
@@ -145,6 +155,7 @@ function LeagueTable({
               <td className="py-2 pr-3 font-mono">{row.tips}</td>
               <td className="py-2 pr-3 font-mono">
                 {row.won}–{row.lost}
+                {noOddText(row.noOdd)}
               </td>
               <td className="py-2 pr-3 font-mono">
                 {row.pnl.toFixed(2).replace('.', ',')} u
@@ -279,6 +290,12 @@ export function TipsPage() {
         <h3 className="text-sm font-semibold tracking-wide uppercase">
           ROI por tipo × parte
         </h3>
+        <p className="mt-1 text-xs text-emerald-100/45">
+          Stake fixa 1u por tip: ganha = odd − 1, perdida = −1, VOID/push = 0 (fora).
+          ROI = PnL ÷ tips liquidadas com odd válida. «s/ odd» = odd em falta ou de
+          outro mercado (total de equipa, outra parte, outra linha): conta no W–L,
+          fica fora do PnL/ROI. Odds nunca são inventadas.
+        </p>
         <div className="mt-3">
           <RoiTable rows={data?.roi ?? []} />
         </div>
@@ -316,8 +333,9 @@ export function TipsPage() {
           Acompanhamento por liga
         </h3>
         <p className="mt-1 text-xs text-emerald-100/45">
-          Ordenado por ROI. TG/AUTO só cortam o Telegram — as tips continuam a
-          gravar. AUTO exige n≥8 e ROI ≥ mínimo (default 5%).
+          Ordenado por ROI (stake fixa 1u). TG/AUTO só cortam o Telegram — as tips
+          continuam a gravar. AUTO exige n≥8 tips liquidadas com odd válida e ROI ≥
+          mínimo (default 5%).
         </p>
         <div className="mt-2 flex gap-2">
           {(['corners', 'goals'] as LeagueTgMarket[]).map((m) => (

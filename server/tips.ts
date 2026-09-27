@@ -20,6 +20,7 @@ import {
   TEAM_MATCH_MIN,
   type Tip,
 } from '../src/lib/tips.ts'
+import { tipFlatPnl, tipOddIssue } from '../src/lib/tipPnl.ts'
 import {
   composeOddsObservation,
   maisUmPriceOf,
@@ -503,8 +504,13 @@ export function settleTipsForMatch(args: {
   return updated
 }
 
+/** API view of a tip: pnl restated at a flat 1u stake from odd + status. */
+function tipView(tip: Tip): Tip {
+  return { ...tip, pnl: tipFlatPnl(tip), oddIssue: tipOddIssue(tip) }
+}
+
 export function tipsPayload() {
-  const tips = loadTips()
+  const tips = loadTips().map(tipView)
   const open = tips.filter((t) => t.status === 'open').slice().reverse()
   const settled = tips
     .filter((t) => t.status !== 'open')
